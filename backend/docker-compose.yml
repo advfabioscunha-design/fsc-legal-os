@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    ports: ["8000:8000"]
+    restart: unless-stopped
+    depends_on: [redis]
+
+  worker:
+    build: .
+    env_file: .env
+    command: rq worker protocolos --url redis://redis:6379/0
+    restart: unless-stopped
+    depends_on: [redis]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: ["redis_data:/data"]
+
+volumes:
+  redis_data:

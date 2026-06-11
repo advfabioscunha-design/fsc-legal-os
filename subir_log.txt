@@ -1,0 +1,2 @@
+INICIO 11/06/2026  0:00:17,96 
+Initialized empty Git repository in C:/Users/User/Desktop/PROJETO TRIADV/PROJETO JURIDICO/files/fsc-legal-os/.git/
