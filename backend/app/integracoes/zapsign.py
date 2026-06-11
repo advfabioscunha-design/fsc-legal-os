@@ -5,7 +5,8 @@ from ..core.db import get_db, registrar_evento
 
 MODELO_CONTRATO = """CONTRATO DE PRESTAÇÃO DE SERVIÇOS ADVOCATÍCIOS
 
-CONTRATADO: {advogado}, {oab}, FSC ADVOCACIA.
+CONTRATADO: {advogado}, {oab}, FSC ADVOCACIA
+            (e-mail: {email_escritorio}).
 CONTRATANTE: {nome}, CPF {cpf}, e-mail {email}.
 
 1. DO OBJETO: prestação de serviços advocatícios na demanda de natureza
@@ -31,6 +32,7 @@ def enviar_contrato(caso_id: str) -> dict:
 
     corpo = MODELO_CONTRATO.format(
         advogado=s.advogado, oab=s.oab,
+        email_escritorio=s.email_escritorio,
         nome=cli["nome"], cpf=cli.get("cpf_cnpj") or "[A PREENCHER]",
         email=cli.get("email") or "", grupo=caso.get("grupo") or "",
         tese_id=caso.get("tese_id") or "", tese_titulo=tese.get("titulo", ""),

@@ -17,6 +17,12 @@ export default function Home() {
           Área do escritório
         </Link>
       </div>
+      <footer className="mt-10 text-sm text-slate-500">
+        <a href="mailto:contato@fscadvocaciadigital.com.br"
+           className="hover:text-blue-600">
+          contato@fscadvocaciadigital.com.br
+        </a>
+      </footer>
     </main>
   );
 }

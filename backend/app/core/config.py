@@ -8,6 +8,8 @@ class Settings(BaseModel):
     # Identidade
     advogado: str = os.getenv("ADVOGADO_NOME", "Fábio Silva Cunha")
     oab: str = os.getenv("OAB", "OAB/RO 10.849")
+    email_escritorio: str = os.getenv("EMAIL_ESCRITORIO",
+                                      "contato@fscadvocaciadigital.com.br")
     ambiente: str = os.getenv("AMBIENTE", "dev")  # dev | staging | prod
 
     # Supabase

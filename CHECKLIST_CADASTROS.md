@@ -1,6 +1,12 @@
 # Checklist de Cadastros — FSC Legal OS v4 (na ordem)
 
-Tenha em mãos: e-mail adv.fabios.cunha@gmail.com, celular (verificações por SMS), cartão de crédito, CNPJ/CPF do escritório.
+Tenha em mãos: celular (verificações por SMS), cartão de crédito, CNPJ/CPF do escritório.
+
+**E-MAIL OFICIAL DOS CADASTROS: `contato@fscadvocaciadigital.com.br`** (Titan/HostGator).
+Use este e-mail profissional em TODOS os cadastros abaixo (Asaas, ZapSign,
+WhatsApp/Meta, ElevenLabs, BirdID). Exceções já criadas com o Gmail
+(adv.fabios.cunha@gmail.com): Google Cloud, GitHub, Supabase, Vercel,
+DigitalOcean — podem ser migradas depois, sem urgência.
 
 ## 1. Supabase — banco de dados, login e documentos (GRÁTIS)
 - Site: https://supabase.com
