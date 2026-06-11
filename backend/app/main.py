@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from .core.config import get_settings
 from .core.db import get_db
-from .agentes import triagem, especialista
+from .agentes import triagem, especialista, jurisprudencial
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
 from .integracoes import asaas, zapsign, whatsapp
 
@@ -90,6 +90,13 @@ def aprovar_e_protocolar(caso_id: str, tribunal: str = "EPROC_TJSC"):
 @app.post("/api/v1/casos/{caso_id}/escalar")
 def escalar_manual(caso_id: str, motivo: str = "PEDIDO_CLIENTE", detalhe: str = ""):
     return escalar_para_humano(caso_id, motivo, detalhe)
+
+
+@app.post("/api/v1/cerebro/processar")
+def cerebro_processar():
+    """Processa os acórdãos do bucket jurisprudencia/<GRUPO>[/<SUBNICHO>]/,
+    cria/reforça teses e move os PDFs para _processados (automático)."""
+    return jurisprudencial.processar_bucket()
 
 
 @app.get("/api/v1/teses")
