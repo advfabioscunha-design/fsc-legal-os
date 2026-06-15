@@ -6,7 +6,7 @@
 
 const NUMERO = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "";
 const MENSAGEM =
-  "Olá! Vim pelo site da FSC Advocacia e gostaria de atendimento.";
+  "Olá! Vim pelo site da FC Advocacia e gostaria de atendimento.";
 
 export default function BotaoWhatsapp() {
   if (!NUMERO) return null; // sem número configurado, não mostra

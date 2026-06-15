@@ -78,7 +78,7 @@ export default function CRM() {
             </Link>
             <div className="flex flex-col leading-none">
               <span className="text-lg font-bold text-white" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                FSC <span className="text-[#2D7DD2]">Legal OS</span>
+                FC <span className="text-[#C5A880]">Legal OS</span>
               </span>
               <span className="text-[10px] text-[#8899AA] tracking-widest uppercase">Esteira de Casos</span>
             </div>

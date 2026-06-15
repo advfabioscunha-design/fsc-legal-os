@@ -55,7 +55,7 @@ export default function CadastroEquipe() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-md rounded-2xl border border-[#C9A84C]/30 bg-white/5 p-8 shadow-xl">
-        <Link href="/" className="mb-6 block text-center text-sm text-[#C9A84C]">← FSC Advocacia</Link>
+        <Link href="/" className="mb-6 block text-center text-sm text-[#C9A84C]">← FC Advocacia</Link>
         <div className="mb-1 text-center text-xs font-semibold uppercase tracking-wider text-[#C9A84C]">
           Acesso da Equipe
         </div>

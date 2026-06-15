@@ -82,7 +82,7 @@ export default function Portal() {
           </Link>
           <div className="flex flex-col items-center leading-none gap-1">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="FSC Advocacia" className="h-9 w-auto" />
+            <img src="/logo.svg" alt="FC Advocacia" className="h-9 w-auto" />
             <span className="text-[10px] text-[#8899AA] tracking-widest uppercase">Portal de Atendimento</span>
           </div>
           <span className="text-xs text-[#8899AA] hidden md:block">OAB/RO 10.849</span>

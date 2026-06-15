@@ -5,29 +5,16 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Plus Jakarta Sans"', "sans-serif"],
-        body: ["Inter", "sans-serif"],
-        mono: ['"Space Grotesk"', "monospace"],
-        brand: ["Barlow", "sans-serif"],
+        // Serifada elegante para títulos (Playfair) e sans moderna para o corpo (Inter)
+        serif: ["var(--font-playfair)", "Georgia", "serif"],
+        sans: ["var(--font-inter)", "system-ui", "sans-serif"],
       },
       colors: {
-        fsc: {
-          navy:     "#0A1628",
-          blue:     "#1A3A6B",
-          electric: "#2D7DD2",
-          indigo:   "#4361EE",
-          slate:    "#8899AA",
-          mist:     "#EBF0F7",
-          white:    "#FFFFFF",
-          gold:     "#C9A84C",
-          emerald:  "#1DB954",
-          crimson:  "#C0392B",
-          amber:    "#F39C12",
-        },
-      },
-      backgroundImage: {
-        "fsc-hero": "linear-gradient(135deg, #0A1628 0%, #1A3A6B 100%)",
-        "fsc-card": "linear-gradient(135deg, #1A3A6B 0%, #0A1628 100%)",
+        // Paleta Legal Premium
+        navy: "#0A192F",      // Azul Marinho Profundo (confiança)
+        gold: "#C5A880",      // Dourado Champanhe / Cobre (ação/destaque)
+        charcoal: "#1A1A1A",  // Cinza Chumbo (texto)
+        ice: "#F8F9FA",       // Cinza Gelo (alternância de seções)
       },
     },
   },

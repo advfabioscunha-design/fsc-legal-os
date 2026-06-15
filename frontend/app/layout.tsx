@@ -1,31 +1,28 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import BotaoWhatsapp from "./components/BotaoWhatsapp";
+import { Playfair_Display, Inter } from "next/font/google";
+import AtendimentoWhats from "./components/AtendimentoWhats";
+
+const playfair = Playfair_Display({
+  subsets: ["latin"], weight: ["500", "600", "700", "800"], variable: "--font-playfair", display: "swap",
+});
+const inter = Inter({
+  subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-inter", display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "FSC Advocacia | Fábio Cunha — OAB/RO 10.849",
+  title: "FC Advocacia | Dr. Fábio Cunha — Recuperação Patrimonial",
   description:
-    "Advocacia digital especializada em Direito Bancário, Distrato Imobiliário, Execução Fiscal e Busca e Apreensão. Atendimento nacional — Dr. Fábio Silva Cunha (OAB/RO 10.849).",
+    "FC Advocacia — Especialistas em Recuperação Patrimonial. Distrato Imobiliário, Execução Fiscal, Recuperação de Consumo e Direito Bancário. Dr. Fábio Cunha.",
   icons: { icon: "/icon.svg" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&family=Space+Grotesk:wght@500&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body
-        className="bg-[#0A1628] text-white antialiased"
-        style={{ fontFamily: "Inter, sans-serif" }}
-      >
+    <html lang="pt-BR" className={`${playfair.variable} ${inter.variable}`}>
+      <body className="bg-white text-charcoal antialiased">
         {children}
-        <BotaoWhatsapp />
+        <AtendimentoWhats variant="floating" />
       </body>
     </html>
   );

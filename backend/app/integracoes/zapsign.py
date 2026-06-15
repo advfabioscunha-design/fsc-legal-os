@@ -5,7 +5,7 @@ from ..core.db import get_db, registrar_evento
 
 MODELO_CONTRATO = """CONTRATO DE PRESTAÇÃO DE SERVIÇOS ADVOCATÍCIOS
 
-CONTRATADO: {advogado}, {oab}, FSC ADVOCACIA
+CONTRATADO: {advogado}, {oab}, FC ADVOCACIA
             (e-mail: {email_escritorio}).
 CONTRATANTE: {nome}, CPF {cpf}, e-mail {email}.
 
@@ -83,7 +83,7 @@ def processar_webhook(payload: dict) -> dict:
         link = None
         if valor:
             link = criar_cobranca(caso_id, valor,
-                                  "Honorários advocatícios - FSC ADVOCACIA")["link_pagamento"]
+                                  "Honorários advocatícios - FC ADVOCACIA")["link_pagamento"]
         from .whatsapp import enviar_para_cliente
         try:
             msg = "Contrato assinado com sucesso! ✅"

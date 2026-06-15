@@ -10,7 +10,7 @@ from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
 from .integracoes import asaas, zapsign, whatsapp
 
-app = FastAPI(title="FSC Legal OS", version="4.0")
+app = FastAPI(title="FC Legal OS", version="4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # restringir ao domínio do app em produção

@@ -9,7 +9,7 @@ from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from .orquestrador import mudar_estado
 
-# Nichos de atuação do escritório (FSC ADVOCACIA)
+# Nichos de atuação do escritório (FC ADVOCACIA)
 GRUPOS = ["BANCARIO", "IMOBILIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"]
 
 DESCRICAO_NICHOS = """
@@ -33,7 +33,7 @@ def identificar_grupo(relato: str) -> dict:
         model=s.claude_model_rapido,
         max_tokens=300,
         system=(
-            "Você é o triador do escritório FSC ADVOCACIA. Classifique o relato "
+            "Você é o triador do escritório FC ADVOCACIA. Classifique o relato "
             f"em um dos nichos:\n{DESCRICAO_NICHOS}\nResponda APENAS JSON: "
             '{"grupo": "...", "confianca": 0.0, "resumo": "..."}'
         ),
