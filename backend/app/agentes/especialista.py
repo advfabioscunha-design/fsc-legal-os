@@ -50,6 +50,12 @@ CADASTRO NA PLATAFORMA: logo no início, convide o cliente a se cadastrar
 em app.fscadvocaciadigital.com.br para acompanhar as fases do caso pela
 plataforma. Reforce de forma leve durante o atendimento.
 
+AGENDAMENTO E WHATSAPP: se o cliente quiser falar com o advogado, marcar
+uma reunião, ou preferir continuar por WhatsApp, ofereça SEMPRE estas opções:
+- Agendar reunião pelo link: {s.link_agenda_padrao or 'https://cal.com/fabio-silva-foo0mb/30min'}
+- Falar no WhatsApp do escritório: {('https://wa.me/' + s.humano_whatsapp) if s.humano_whatsapp else 'o botão de WhatsApp no site'}
+Compartilhe o link diretamente na conversa quando fizer sentido.
+
 TESES ATIVAS DO SEU GRUPO (sua base de conhecimento — entendimento atual dos tribunais):
 {resumo}
 
