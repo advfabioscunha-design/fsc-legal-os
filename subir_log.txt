@@ -1,2 +1,2 @@
-INICIO 15/06/2026  2:06:56,13 
+INICIO 15/06/2026  3:19:12,83 
 Reinitialized existing Git repository in C:/Users/User/Desktop/PROJETO TRIADV/PROJETO JURIDICO/files/fsc-legal-os/.git/

@@ -26,8 +26,12 @@ type Caso = { id: string; estado: string; grupo: string | null; numero_processo?
 export default function AreaCliente() {
   const router = useRouter();
   const [nome, setNome] = useState("");
+  const [email, setEmail] = useState("");
   const [casos, setCasos] = useState<Caso[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [relato, setRelato] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -35,6 +39,7 @@ export default function AreaCliente() {
       if (!sess.session) { router.push("/entrar"); return; }
       const token = sess.session.access_token;
       setNome(sess.session.user.user_metadata?.nome || sess.session.user.email || "");
+      setEmail(sess.session.user.email || "");
       try {
         const r = await fetch(`${API}/api/v1/cliente/meus-casos`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -48,6 +53,25 @@ export default function AreaCliente() {
   async function sair() {
     await supabase.auth.signOut();
     router.push("/entrar");
+  }
+
+  async function enviarTriagem(e: React.FormEvent) {
+    e.preventDefault();
+    if (!relato.trim()) return;
+    setEnviando(true);
+    try {
+      await fetch(`${API}/api/v1/leads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome, contato: email, relato, canal: "PORTAL" }),
+      });
+      setEnviado(true);
+      setRelato("");
+    } catch {
+      /* mantém na tela; o cliente pode tentar de novo */
+    } finally {
+      setEnviando(false);
+    }
   }
 
   function idxFase(estado: string) {
@@ -67,20 +91,35 @@ export default function AreaCliente() {
       </h1>
       <p className="mb-8 text-sm text-white/60">Acompanhe aqui o andamento da sua causa.</p>
 
-      <Link
-        href="/portal"
-        className="mb-10 inline-block rounded-lg bg-[#C9A84C] px-5 py-3 text-sm font-semibold text-[#0A1628] hover:bg-[#d8b95e]"
-      >
-        + Iniciar nova contratação
-      </Link>
-
       {carregando ? (
         <p className="text-white/50">Carregando seus processos...</p>
       ) : casos.length === 0 ? (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-sm text-white/70">
-          Você ainda não tem um processo em andamento. Clique em
-          <b> “Iniciar nova contratação”</b> para começar — ou fale com a gente no WhatsApp.
-        </div>
+        enviado ? (
+          <div className="rounded-xl border border-[#1DB954]/40 bg-[#1DB954]/10 p-6 text-sm text-white/80">
+            ✅ <b>Recebemos o seu caso!</b> Nossa equipe (e o assistente digital) vai analisar a
+            viabilidade e dar o próximo passo. Em breve sua causa aparecerá aqui com as fases do
+            andamento. Você também pode falar com a gente pelo WhatsApp a qualquer momento.
+          </div>
+        ) : (
+          <form onSubmit={enviarTriagem} className="rounded-xl border border-white/10 bg-white/5 p-6">
+            <h2 className="mb-1 text-lg font-semibold">Conte o seu caso</h2>
+            <p className="mb-4 text-sm text-white/60">
+              Descreva com suas palavras o que aconteceu. A partir daqui fazemos a triagem,
+              a análise de viabilidade e, se você contratar, você acompanha cada fase aqui mesmo.
+            </p>
+            <textarea
+              value={relato}
+              onChange={(e) => setRelato(e.target.value)}
+              rows={6} required
+              placeholder="Ex.: Recebi cobranças que não reconheço no meu cartão / Quero rever um contrato de financiamento / Fui cobrado indevidamente..."
+              className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-4 py-3 text-sm outline-none focus:border-[#C9A84C]"
+            />
+            <button type="submit" disabled={enviando}
+              className="mt-4 rounded-lg bg-[#C9A84C] px-5 py-3 text-sm font-semibold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-60">
+              {enviando ? "Enviando..." : "Enviar para análise"}
+            </button>
+          </form>
+        )
       ) : (
         <div className="space-y-6">
           {casos.map((c) => {

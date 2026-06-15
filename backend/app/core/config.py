@@ -50,6 +50,9 @@ class Settings(BaseModel):
     radar_dia_semana: str = os.getenv("RADAR_DIA_SEMANA", "mon")  # mon..sun
     radar_hora: int = int(os.getenv("RADAR_HORA", "6"))           # 0-23 (UTC)
 
+    # Código de acesso para cadastro de OPERADORES (equipe)
+    equipe_codigo: str = os.getenv("EQUIPE_CODIGO", "")
+
     # Escalonamento humano
     humano_whatsapp: str = os.getenv("HUMANO_WHATSAPP", "")
     link_agenda_padrao: str = os.getenv("LINK_AGENDA", "")

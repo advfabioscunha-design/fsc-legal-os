@@ -159,6 +159,24 @@ def _usuario_do_token(authorization: str | None) -> dict:
     return r.json()
 
 
+class RegistroEquipe(BaseModel):
+    codigo: str
+
+
+@app.post("/api/v1/equipe/registrar")
+def equipe_registrar(body: RegistroEquipe, authorization: str | None = Header(default=None)):
+    """Promove o usuário logado a OPERADOR se o código de acesso da equipe
+    conferir. Permite cadastrar vários funcionários com segurança."""
+    user = _usuario_do_token(authorization)
+    s = get_settings()
+    if not s.equipe_codigo or body.codigo.strip() != s.equipe_codigo:
+        raise HTTPException(403, "Código de acesso inválido")
+    get_db().table("perfis").upsert({
+        "id": user["id"], "papel": "OPERADOR", "email": user.get("email"),
+    }, on_conflict="id").execute()
+    return {"ok": True, "papel": "OPERADOR"}
+
+
 @app.get("/api/v1/cliente/meus-casos")
 def cliente_meus_casos(authorization: str | None = Header(default=None)):
     """Casos do cliente logado — vinculados pelo e-mail do cadastro."""
