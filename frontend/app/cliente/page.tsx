@@ -5,7 +5,6 @@ import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
-const AGENDA = process.env.NEXT_PUBLIC_AGENDA_URL ?? "";
 
 // Fases visíveis ao cliente (do início ao protocolo)
 const FASES = [
@@ -113,16 +112,6 @@ export default function AreaCliente() {
       </h1>
       <p className="mb-4 text-sm text-white/60">Acompanhe aqui o andamento da sua causa.</p>
 
-      {AGENDA && (
-        <a href={AGENDA} target="_blank" rel="noopener noreferrer"
-          className="mb-8 flex items-center justify-between rounded-xl border border-[#C9A84C]/40 bg-[#C9A84C]/10 px-5 py-4 transition hover:bg-[#C9A84C]/20">
-          <span>
-            <span className="block text-sm font-semibold text-[#C9A84C]">📅 Falar com o Dr. Fábio</span>
-            <span className="block text-xs text-white/60">Escolha o melhor horário para uma reunião</span>
-          </span>
-          <span className="text-sm font-semibold text-[#C9A84C]">Agendar →</span>
-        </a>
-      )}
 
       {carregando ? (
         <p className="text-white/50">Carregando seus processos...</p>
