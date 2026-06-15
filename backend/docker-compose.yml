@@ -18,5 +18,16 @@ services:
     restart: unless-stopped
     volumes: ["redis_data:/data"]
 
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.fscadvocaciadigital.com.br}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://midywtybplbdqmkxfoyj.supabase.co}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+        NEXT_PUBLIC_WHATSAPP_NUMBER: ${NEXT_PUBLIC_WHATSAPP_NUMBER:-}
+    ports: ["3000:3000"]
+    restart: unless-stopped
+
 volumes:
   redis_data:

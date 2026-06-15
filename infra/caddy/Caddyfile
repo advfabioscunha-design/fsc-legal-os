@@ -1,5 +1,11 @@
-# api.fscadvocaciadigital.com.br → FastAPI (SSL automático via Let's Encrypt)
+# API (FastAPI) — HTTPS automático via Let's Encrypt
 api.fscadvocaciadigital.com.br {
     reverse_proxy localhost:8000
+    encode gzip
+}
+
+# Frontend (Next.js) — site, portal, área do cliente e CRM
+app.fscadvocaciadigital.com.br {
+    reverse_proxy localhost:3000
     encode gzip
 }
