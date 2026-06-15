@@ -108,12 +108,20 @@ export default function Home() {
             <a href="#sobre" className="hover:text-white transition-colors">Sobre</a>
             <a href="#contato" className="hover:text-white transition-colors">Contato</a>
           </div>
-          <Link
-            href="/portal"
-            className="rounded-md bg-[#2D7DD2] px-5 py-2 text-sm font-semibold text-white hover:bg-[#4361EE] transition-colors"
-          >
-            Falar com o Atendimento
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/entrar"
+              className="rounded-md border border-white/15 px-4 py-2 text-sm font-semibold text-white hover:border-[#C9A84C] hover:text-[#C9A84C] transition-colors"
+            >
+              Área do Cliente
+            </Link>
+            <Link
+              href="/portal"
+              className="rounded-md bg-[#2D7DD2] px-5 py-2 text-sm font-semibold text-white hover:bg-[#4361EE] transition-colors"
+            >
+              Falar com o Atendimento
+            </Link>
+          </div>
         </div>
       </nav>
 

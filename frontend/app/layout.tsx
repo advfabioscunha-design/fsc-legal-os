@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import BotaoWhatsapp from "./components/BotaoWhatsapp";
 
 export const metadata: Metadata = {
   title: "FSC Advocacia | Fábio Cunha — OAB/RO 10.849",
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         style={{ fontFamily: "Inter, sans-serif" }}
       >
         {children}
+        <BotaoWhatsapp />
       </body>
     </html>
   );

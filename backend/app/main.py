@@ -1,5 +1,6 @@
 """FSC LEGAL OS v4.0 — Backend FastAPI (api.seudominio.com.br)."""
-from fastapi import FastAPI, Request, HTTPException
+import httpx
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -135,6 +136,42 @@ def listar_radar(grupo: str | None = None, limite: int = 12):
     if grupo:
         q = q.eq("grupo", grupo)
     return q.order("semana_ref", desc=True).limit(limite).execute().data
+
+
+# ── Área do cliente (autenticada via Supabase) ──────────────────
+def _usuario_do_token(authorization: str | None) -> dict:
+    """Valida o access_token do Supabase chamando /auth/v1/user
+    (não precisa do JWT secret) e retorna o usuário {id, email}."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Token ausente")
+    token = authorization.split(" ", 1)[1]
+    s = get_settings()
+    try:
+        r = httpx.get(
+            f"{s.supabase_url}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": s.supabase_service_key},
+            timeout=15,
+        )
+    except httpx.HTTPError:
+        raise HTTPException(503, "Auth indisponível")
+    if r.status_code != 200:
+        raise HTTPException(401, "Token inválido")
+    return r.json()
+
+
+@app.get("/api/v1/cliente/meus-casos")
+def cliente_meus_casos(authorization: str | None = Header(default=None)):
+    """Casos do cliente logado — vinculados pelo e-mail do cadastro."""
+    user = _usuario_do_token(authorization)
+    email = user.get("email")
+    if not email:
+        return []
+    db = get_db()
+    cli = db.table("clientes").select("id").eq("email", email).maybe_single().execute().data
+    if not cli:
+        return []
+    return db.table("casos").select("id,estado,grupo,subtipo") \
+             .eq("cliente_id", cli["id"]).order("criado_em", desc=True).execute().data
 
 
 @app.get("/api/v1/teses")

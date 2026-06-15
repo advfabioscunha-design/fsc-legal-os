@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { supabase } from "../../lib/supabaseClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.seudominio.com.br";
 
@@ -25,8 +27,22 @@ type Caso = {
 };
 
 export default function CRM() {
+  const router = useRouter();
+  const [autorizado, setAutorizado] = useState(false);
   const [casos, setCasos] = useState<Caso[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Guard: só OPERADOR acessa o CRM
+  useEffect(() => {
+    (async () => {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess.session) { router.replace("/entrar"); return; }
+      const { data: perfil } = await supabase
+        .from("perfis").select("papel").eq("id", sess.session.user.id).maybeSingle();
+      if (perfil?.papel !== "OPERADOR") { router.replace("/cliente"); return; }
+      setAutorizado(true);
+    })();
+  }, [router]);
 
   function load() {
     setLoading(true);
@@ -37,11 +53,19 @@ export default function CRM() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (autorizado) load(); }, [autorizado]);
 
   async function aprovar(id: string) {
     await fetch(`${API}/api/v1/casos/${id}/aprovar-protocolar`, { method: "POST" });
     load();
+  }
+
+  if (!autorizado) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-white/60" style={{ background: "#0A1628", fontFamily: "Inter, sans-serif" }}>
+        Verificando acesso...
+      </div>
+    );
   }
 
   return (
