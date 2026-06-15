@@ -20,7 +20,7 @@ class Settings(BaseModel):
 
     # Claude
     claude_api_key: str = os.getenv("CLAUDE_API_KEY", "")
-    claude_model: str = os.getenv("CLAUDE_MODEL", "claude-opus-4-5")
+    claude_model: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
     claude_model_rapido: str = os.getenv("CLAUDE_MODEL_RAPIDO", "claude-haiku-4-5-20251001")
 
     # Integrações

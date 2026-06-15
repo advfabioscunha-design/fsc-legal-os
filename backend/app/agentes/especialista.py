@@ -40,7 +40,15 @@ def gerar_system_prompt(grupo: str) -> str:
 Você é o Agente Especialista em {grupo} do escritório FSC ADVOCACIA
 (Dr. {s.advogado}, {s.oab}). Você assume o cliente do primeiro contato
 até a petição, de forma HUMANIZADA: trate pelo nome, linguagem simples,
-empatia real, sem juridiquês desnecessário, mensagens curtas.
+empatia real, sem juridiquês desnecessário.
+
+TAMANHO DAS RESPOSTAS (REGRA FORTE): responda SEMPRE curto — no máximo
+3 frases por mensagem, como uma conversa de WhatsApp. Nada de textão,
+listas ou parágrafos longos. Uma pergunta de cada vez.
+
+CADASTRO NA PLATAFORMA: logo no início, convide o cliente a se cadastrar
+em app.fscadvocaciadigital.com.br para acompanhar as fases do caso pela
+plataforma. Reforce de forma leve durante o atendimento.
 
 TESES ATIVAS DO SEU GRUPO (sua base de conhecimento — entendimento atual dos tribunais):
 {resumo}
@@ -160,27 +168,52 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
         return {"resposta": None, "estado": caso["estado"],
                 "aviso": "Caso sob condução humana."}
 
+    # dados já conhecidos do cliente — para NÃO repetir perguntas e usar o nome
+    cli = db.table("clientes").select("nome,email,cpf_cnpj,whatsapp") \
+            .eq("id", caso["cliente_id"]).maybe_single().execute().data or {}
+    conhecidos = ", ".join(
+        f"{k}={v}" for k, v in {
+            "nome": cli.get("nome"), "email": cli.get("email"),
+            "cpf": cli.get("cpf_cnpj"), "whatsapp": cli.get("whatsapp"),
+        }.items() if v
+    )
+    primeiro_nome = (cli.get("nome") or "").split(" ")[0] if cli.get("nome") else ""
+
     system = gerar_system_prompt(grupo) + \
         f"\n\nESTADO ATUAL DO CASO: {caso['estado']}. " \
-        f"Tese já identificada: {caso.get('tese_id') or 'ainda não'}."
+        f"Tese já identificada: {caso.get('tese_id') or 'ainda não'}." + \
+        f"\n\nDADOS JÁ CONHECIDOS DO CLIENTE — é PROIBIDO perguntar de novo " \
+        f"qualquer um destes; use-os diretamente: {conhecidos or 'nenhum'}. " \
+        f"Dirija-se ao cliente pelo primeiro nome ('{primeiro_nome}') em TODA " \
+        f"mensagem. Antes de perguntar algo, confira o histórico: se o cliente " \
+        f"já respondeu, NÃO repita a pergunta."
 
     historico = _historico(caso_id)
     historico.append({"role": "user", "content": mensagem_cliente})
 
-    resposta = _claude().messages.create(
-        model=s.claude_model,
-        max_tokens=1200,
-        system=system,
-        tools=TOOLS,
-        messages=historico,
-    )
-
     texto_resposta, acoes = "", []
-    for bloco in resposta.content:
-        if bloco.type == "text":
-            texto_resposta += bloco.text
-        elif bloco.type == "tool_use":
-            acoes.append(_executar_ferramenta(caso_id, caso, bloco.name, bloco.input))
+    try:
+        resposta = _claude().messages.create(
+            model=s.claude_model,
+            max_tokens=600,
+            system=system,
+            tools=TOOLS,
+            messages=historico,
+        )
+        for bloco in resposta.content:
+            if bloco.type == "text":
+                texto_resposta += bloco.text
+            elif bloco.type == "tool_use":
+                try:
+                    acoes.append(_executar_ferramenta(caso_id, caso, bloco.name, bloco.input))
+                except Exception as e:
+                    registrar_evento(caso_id, "ERRO_FERRAMENTA",
+                                     {"ferramenta": bloco.name, "erro": str(e)})
+    except Exception as e:
+        registrar_evento(caso_id, "ERRO_AGENTE", {"erro": str(e)})
+        texto_resposta = (f"{primeiro_nome + ', ' if primeiro_nome else ''}"
+                          "tive uma instabilidade rápida aqui. Pode repetir a "
+                          "última mensagem? Já retomo seu atendimento.")
 
     if texto_resposta:
         db.table("mensagens").insert({
