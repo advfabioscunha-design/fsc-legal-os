@@ -6,10 +6,6 @@ import { supabase } from "../../lib/supabaseClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 const AGENDA = process.env.NEXT_PUBLIC_AGENDA_URL ?? "";
-const WHATS = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "";
-const WHATS_LINK = WHATS
-  ? `https://wa.me/${WHATS}?text=${encodeURIComponent("Olá! Sou cliente da FSC Advocacia e gostaria de atendimento.")}`
-  : "";
 
 // Fases visíveis ao cliente (do início ao protocolo)
 const FASES = [
@@ -117,20 +113,16 @@ export default function AreaCliente() {
       </h1>
       <p className="mb-4 text-sm text-white/60">Acompanhe aqui o andamento da sua causa.</p>
 
-      <div className="mb-8 flex flex-wrap gap-3">
-        {AGENDA && (
-          <a href={AGENDA} target="_blank" rel="noopener noreferrer"
-            className="rounded-lg bg-[#C9A84C] px-4 py-2 text-sm font-semibold text-[#0A1628] hover:bg-[#d8b95e]">
-            📅 Agendar reunião com o advogado
-          </a>
-        )}
-        {WHATS_LINK && (
-          <a href={WHATS_LINK} target="_blank" rel="noopener noreferrer"
-            className="rounded-lg bg-[#25D366] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1ebe5d]">
-            💬 Falar no WhatsApp
-          </a>
-        )}
-      </div>
+      {AGENDA && (
+        <a href={AGENDA} target="_blank" rel="noopener noreferrer"
+          className="mb-8 flex items-center justify-between rounded-xl border border-[#C9A84C]/40 bg-[#C9A84C]/10 px-5 py-4 transition hover:bg-[#C9A84C]/20">
+          <span>
+            <span className="block text-sm font-semibold text-[#C9A84C]">📅 Falar com o Dr. Fábio</span>
+            <span className="block text-xs text-white/60">Escolha o melhor horário para uma reunião</span>
+          </span>
+          <span className="text-sm font-semibold text-[#C9A84C]">Agendar →</span>
+        </a>
+      )}
 
       {carregando ? (
         <p className="text-white/50">Carregando seus processos...</p>
