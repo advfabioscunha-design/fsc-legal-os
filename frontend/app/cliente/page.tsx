@@ -23,6 +23,20 @@ const FASES = [
 
 type Caso = { id: string; estado: string; grupo: string | null; numero_processo?: string | null };
 
+// Validação de CPF (dígitos verificadores) — gratuita, no próprio navegador
+function cpfValido(valor: string): boolean {
+  const c = (valor || "").replace(/\D/g, "");
+  if (c.length !== 11 || /^(\d)\1{10}$/.test(c)) return false;
+  for (const i of [9, 10]) {
+    let soma = 0;
+    for (let n = 0; n < i; n++) soma += parseInt(c[n]) * (i + 1 - n);
+    let dig = (soma * 10) % 11;
+    if (dig === 10) dig = 0;
+    if (dig !== parseInt(c[i])) return false;
+  }
+  return true;
+}
+
 export default function AreaCliente() {
   const router = useRouter();
   const [nome, setNome] = useState("");
@@ -30,6 +44,8 @@ export default function AreaCliente() {
   const [casos, setCasos] = useState<Caso[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [relato, setRelato] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [erroCpf, setErroCpf] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [enviado, setEnviado] = useState(false);
 
@@ -58,12 +74,17 @@ export default function AreaCliente() {
   async function enviarTriagem(e: React.FormEvent) {
     e.preventDefault();
     if (!relato.trim()) return;
+    if (!cpfValido(cpf)) {
+      setErroCpf("CPF inválido — confira os números.");
+      return;
+    }
+    setErroCpf(null);
     setEnviando(true);
     try {
       await fetch(`${API}/api/v1/leads`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nome, contato: email, relato, canal: "PORTAL" }),
+        body: JSON.stringify({ nome, contato: email, relato, cpf, canal: "PORTAL" }),
       });
       setEnviado(true);
       setRelato("");
@@ -107,6 +128,15 @@ export default function AreaCliente() {
               Descreva com suas palavras o que aconteceu. A partir daqui fazemos a triagem,
               a análise de viabilidade e, se você contratar, você acompanha cada fase aqui mesmo.
             </p>
+            <input
+              value={cpf}
+              onChange={(e) => { setCpf(e.target.value); setErroCpf(null); }}
+              inputMode="numeric" required
+              placeholder="Seu CPF"
+              className="mb-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-4 py-3 text-sm outline-none focus:border-[#C9A84C]"
+            />
+            {erroCpf && <p className="mb-3 text-xs text-[#C0392B]">{erroCpf}</p>}
+            {!erroCpf && <div className="mb-3" />}
             <textarea
               value={relato}
               onChange={(e) => setRelato(e.target.value)}

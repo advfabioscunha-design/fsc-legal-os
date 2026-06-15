@@ -51,12 +51,22 @@ class NovoLead(BaseModel):
     nome: str
     contato: str
     relato: str
+    cpf: str | None = None
     canal: str = "PORTAL"
 
 
 @app.post("/api/v1/leads")
 def novo_lead(body: NovoLead):
-    return triagem.criar_caso(body.nome, body.contato, body.relato, body.canal)
+    from .core.cpf import cpf_valido
+    if body.cpf and not cpf_valido(body.cpf):
+        raise HTTPException(400, "CPF inválido — confira os números.")
+    return triagem.criar_caso(body.nome, body.contato, body.relato, body.canal, cpf=body.cpf)
+
+
+@app.get("/api/v1/validar-cpf")
+def validar_cpf_endpoint(cpf: str):
+    from .core.cpf import cpf_valido
+    return {"cpf": cpf, "valido": cpf_valido(cpf)}
 
 
 class Mensagem(BaseModel):

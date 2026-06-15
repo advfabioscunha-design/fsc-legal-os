@@ -49,16 +49,19 @@ def identificar_grupo(relato: str) -> dict:
 
 
 def criar_caso(nome: str, contato: str, relato: str,
-               canal: str = "PORTAL") -> dict:
+               canal: str = "PORTAL", cpf: str | None = None) -> dict:
     """Entrada de um novo lead: cria cliente + caso, classifica o grupo
     e passa o controle ao Agente Especialista do grupo."""
     db = get_db()
 
-    cliente = db.table("clientes").insert({
+    dados_cliente = {
         "nome": nome,
         "whatsapp" if canal == "WHATSAPP" else "email": contato,
         "origem": canal,
-    }).execute().data[0]
+    }
+    if cpf:
+        dados_cliente["cpf_cnpj"] = cpf
+    cliente = db.table("clientes").insert(dados_cliente).execute().data[0]
 
     caso = db.table("casos").insert({
         "cliente_id": cliente["id"],
