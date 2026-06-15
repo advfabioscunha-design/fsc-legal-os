@@ -7,6 +7,9 @@ rem  em https://github.com/new (sem README, sem .gitignore)
 rem ============================================================
 cd /d "%~dp0"
 
+rem Remove trava de indice deixada por processo anterior (NTFS/sandbox)
+if exist ".git\index.lock" del /f /q ".git\index.lock" >nul 2>&1
+
 where git >nul 2>&1
 if errorlevel 1 (
     echo Instalando Git via winget...

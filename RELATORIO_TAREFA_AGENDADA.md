@@ -1,127 +1,123 @@
 # Relatório — Tarefa Agendada FSC Legal OS v4.1
-**Data:** 11/06/2026 — Execução autônoma
+**Última execução:** 11/06/2026 — Autônoma (sem usuário presente)
 
 ---
 
-## ✅ O QUE FOI FEITO
+## ✅ CONCLUÍDO NESTA EXECUÇÃO
 
-### 1. Identidade Visual FSC Aplicada
-Paleta completa do skill `cdo-fsc-advocacia` implementada em todo o frontend:
+### 1. Endpoint `/api/v1/cerebro/processar` — VERIFICADO E VÁLIDO
 
-| Token | Hex | Uso |
-|---|---|---|
-| `fsc-navy` | `#0A1628` | Fundo principal |
-| `fsc-blue` | `#1A3A6B` | Headers, cards |
-| `fsc-electric` | `#2D7DD2` | Accent primário, CTAs |
-| `fsc-indigo` | `#4361EE` | Hover states |
-| `fsc-gold` | `#C9A84C` | Destrato Imobiliário (badge premium) |
-| `fsc-slate` | `#8899AA` | Textos secundários |
+O `backend/app/main.py` já estava corretamente configurado:
 
-**Fontes:** Plus Jakarta Sans (display/títulos) + Inter (corpo) via Google Fonts.
+- **Linha 8:** `from .agentes import triagem, especialista, jurisprudencial`
+- **Linhas 95–99:**
+  ```python
+  @app.post("/api/v1/cerebro/processar")
+  def cerebro_processar():
+      """Processa os acórdãos do bucket jurisprudencia/<GRUPO>[/<SUBNICHO>]/,
+      cria/reforça teses e move os PDFs para _processados (automático)."""
+      return jurisprudencial.processar_bucket()
+  ```
+- **Sintaxe Python validada** pelo `ast.parse()` — zero erros.
+- O módulo `jurisprudencial.py` está completo com `processar_bucket()` implementado.
 
----
+### 2. Identidade Visual FSC — Status Anterior Mantido
 
-### 2. Arquivos Modificados
-
-#### `frontend/tailwind.config.ts`
-- Paleta FSC e A3 completa como tokens Tailwind
-- Famílias tipográficas: `font-display`, `font-body`, `font-mono`, `font-brand`
-
-#### `frontend/app/globals.css`
-- Variáveis CSS `--fsc-*` para uso global
-- Utilitários `.btn-primary` e `.btn-ghost`
-- Scrollbar customizada com cores FSC
-
-#### `frontend/app/layout.tsx`
-- Google Fonts (Plus Jakarta Sans, Inter, Barlow, Space Grotesk) carregadas no `<head>`
-- Metadados SEO aprimorados com OAB e áreas de atuação
-- Background `#0A1628` no body
-
-#### `frontend/app/page.tsx` — **Home completamente redesenhada**
-- **Navbar** fixo: logo FSC com "FSC Advocacia" + badge OAB, links de seção, CTA
-- **Hero**: headline "Você tem direitos. Nós provamos." com gradiente de texto elétrico, trust signals
-- **Seção Áreas**: 4 nichos com cards coloridos por área (azul bancário, dourado imobiliário, índigo fiscal, vermelho busca e apreensão) + badges de subnichos
-- **Como Funciona**: 3 etapas numeradas
-- **Sobre**: credenciais Dr. Fábio + depoimento genérico OAB-compliant
-- **CTA Final**: botão "Acessar Portal de Atendimento"
-- **Footer**: email contato@fscadvocaciadigital.com.br + OAB + nota de conformidade 205/2021
-
-#### `frontend/app/portal/page.tsx` — **Portal redesenhado**
-- Header com logo FSC e "Portal de Atendimento"
-- Card de identificação com avatar do assistente
-- Balões de chat estilizados (cliente = azul, agente = navy com borda)
-- Indicador de loading animado (três pontos)
-- Textarea com envio por Enter
-- Footer informativo (não constitui contratação)
-
-#### `frontend/app/crm/page.tsx` — **CRM redesenhado**
-- Header com logo FSC Legal OS + contador de casos + botão Atualizar
-- 12 colunas Kanban com bordas e headers coloridos por fase:
-  - Cinza = Qualificação | Azul = Proposta/Análise | Elétrico = Contrato/Petição
-  - Dourado = Pagamento/Revisão | Âmbar = Coleta | Verde = Protocolado | Vermelho = Escalado
-- Cards com hover, badge de tese_id, botão "Aprovar e Protocolar" verde na coluna REVISAO
-- Tratamento de erro (catch → array vazio)
+O frontend já estava com a paleta FSC aplicada (commit `bdac1f5` de 11/06 às 11:53):
+- `tailwind.config.ts`, `globals.css`, `layout.tsx`, `page.tsx`, `portal/page.tsx`, `crm/page.tsx` — todos redesenhados conforme relatório anterior.
 
 ---
 
-### 3. Conformidade OAB 205/2021
-- ❌ Sem promessas de resultado
-- ❌ Sem "especialista" sem registro
-- ✅ CTAs: "Falar com o Atendimento", "Entenda seus direitos", "Conheça seus direitos"
-- ✅ Nota de conformidade no footer e portal
-- ✅ OAB/RO 10.849 visível em navbar, hero e footer
+## ⚠️ PENDENTE — REQUER AÇÃO MANUAL DO USUÁRIO
+
+### 3. Bucket `jurisprudencia` no Supabase
+
+O Chrome não estava conectado durante a execução autônoma. Execute manualmente:
+
+1. Acesse **https://supabase.com/dashboard/project/midywtybplbdqmkxfoyj/editor**
+2. Cole e execute o SQL abaixo:
+
+```sql
+insert into storage.buckets (id, name, public)
+values ('jurisprudencia', 'jurisprudencia', false)
+on conflict do nothing;
+```
+
+3. Confirme que aparecem dois buckets privados: `documentos` e `jurisprudencia`.
 
 ---
 
-## ⚠️ AÇÃO NECESSÁRIA — PUBLICAR NO GITHUB/VERCEL
+### 4. Push para o GitHub — NOVAS ALTERAÇÕES PENDENTES
 
-Os arquivos estão prontos em disco, mas o push não foi executado automaticamente (o arquivo `.git/index.lock` ficou travado do processo anterior e não pode ser removido pelo sandbox).
+O último push foi às **11:53 de hoje** (commit `bdac1f5`). Desde então há novos arquivos alterados:
 
-**Para publicar, faça duplo clique em:**
+**Staged (prontos para commit):**
+- `.gitignore`
+- `frontend/app/crm/page.tsx`
+- `frontend/app/layout.tsx`
+- `frontend/app/page.tsx`
+- `frontend/app/portal/page.tsx`
+- `frontend/tailwind.config.ts`
+- `subir_log.txt`
+
+**Not staged:**
+- `frontend/app/crm/page.tsx`
+- `frontend/app/globals.css`
+- `frontend/app/layout.tsx`
+- `frontend/app/page.tsx`
+- `frontend/app/portal/page.tsx`
+
+**Untracked:**
+- `RELATORIO_TAREFA_AGENDADA.md`
+- `frontend/public/`
+
+> ⚠️ O sandbox Linux não consegue remover o `.git/index.lock` (permissão NTFS). O push precisa vir do Windows.
+
+**Ação:** Dê duplo clique em:
 ```
 C:\Users\User\Desktop\PROJETO TRIADV\PROJETO JURIDICO\files\fsc-legal-os\SUBIR_GITHUB.bat
 ```
 
-O script vai: reinicializar o git → commit → push para `advfabioscunha-design/fsc-legal-os` → Vercel fará o deploy automático.
+---
 
-Após o deploy, confirme em: **https://app.fscadvocaciadigital.com.br**
+### 5. DigitalOcean / Vercel — Verificação Pendente
+
+Chrome não conectado — não foi possível verificar automaticamente.
+
+**A) Se o DigitalOcean foi desbloqueado:**
+1. Acesse **https://cloud.digitalocean.com**
+2. Crie Droplet: Ubuntu 24.04 LTS · Basic 4 GB / 2 vCPU · NYC1 · US$ 24/mês
+3. Autenticação por **senha root** (você define, não eu)
+4. Me informe o **IP** após criação — configuro DNS, `.env` e rodo `infra/deploy.sh`
+
+**B) Se o DigitalOcean ainda estiver bloqueado — Vercel:**
+1. Acesse **https://vercel.com** e confirme login
+2. "Add New Project" → Importar `advfabioscunha-design/fsc-legal-os`
+3. Root Directory: `frontend/`
+4. Adicione variável de ambiente:
+   ```
+   NEXT_PUBLIC_API_URL = https://api.fscadvocaciadigital.com.br
+   ```
+5. Clique **Deploy**
+
+**C) Alternativa econômica — Hetzner CX32:**
+- RAM 4 GB · vCPU 4 · 80 GB NVMe · ~€ 7,52/mês
+- Link: **https://www.hetzner.com/cloud**
+- Ubuntu 24.04 · Região Nuremberg ou Helsinki
 
 ---
 
-## ⚠️ SERVIDOR VPS — AGUARDANDO CONTRATAÇÃO
+## 📋 STATUS GERAL DO PROJETO
 
-**Chrome não estava conectado** — não foi possível verificar se o DigitalOcean foi desbloqueado.
-
-**Recomendação:** Hetzner CX32
-- RAM: 4 GB | vCPU: 4 | Disco: 80 GB NVMe
-- Preço: ~€ 7,52/mês (≈ US$ 8)
-- x86 ✓ (compatível com Playwright/RPA)
-- Reputação: excelente uptime, rede europeia rápida
-
-**Para contratar:**
-1. Acesse **https://www.hetzner.com/cloud**
-2. Crie conta (ou faça login)
-3. Novo projeto → Adicionar servidor → CX32 → Ubuntu 24.04 → Localização: Nuremberg ou Helsinki
-4. Adicione sua chave SSH
-5. Após criação, me informe o **IP** para configurar:
-   - DNS `api.fscadvocaciadigital.com.br` na HostGator
-   - `NEXT_PUBLIC_API_URL` na Vercel
-   - Rodar `infra/deploy.sh`
-
-**Se DigitalOcean foi desbloqueada:** acesse cloud.digitalocean.com, crie Droplet Ubuntu 24.04 4GB/2vCPU e me informe o IP.
-
----
-
-## 📋 PENDÊNCIAS
-
-| Item | Status | Próxima ação |
+| Componente | Status | Próxima ação |
 |---|---|---|
-| Layout Home | ✅ Feito | Rodar SUBIR_GITHUB.bat |
-| Layout Portal | ✅ Feito | Rodar SUBIR_GITHUB.bat |
-| Layout CRM | ✅ Feito | Rodar SUBIR_GITHUB.bat |
-| Tailwind + Fontes | ✅ Feito | Rodar SUBIR_GITHUB.bat |
-| Push GitHub | ⚠️ Pendente | Duplo clique no SUBIR_GITHUB.bat |
-| Logomarca Canva | ⚠️ Pendente | Abrir Canva com diretrizes do SKILL CDO |
-| Servidor VPS | ⚠️ Pendente | Contratar Hetzner CX32 |
-| DNS api.fscadvocaciadigital.com.br | ⏳ Aguarda VPS | Configurar após IP |
-| Caixa Titan contato@ | ⏳ Aguarda senha | Usuário precisa informar senha |
+| `main.py` — endpoint cérebro | ✅ Correto e validado | — |
+| `jurisprudencial.py` — módulo completo | ✅ OK | — |
+| Layout frontend (Home/Portal/CRM) | ✅ Feito (commit bdac1f5) | SUBIR_GITHUB.bat |
+| Bucket `documentos` Supabase | ✅ Existe | — |
+| Bucket `jurisprudencia` Supabase | ⚠️ Pendente | SQL manual acima |
+| Push novas alterações GitHub | ⚠️ Pendente | SUBIR_GITHUB.bat |
+| Servidor VPS (DigitalOcean/Hetzner) | ⚠️ Pendente | Verificar DO ou contratar Hetzner |
+| Deploy Vercel frontend | ⏳ Aguarda push | Após SUBIR_GITHUB.bat |
+| DNS `api.fscadvocaciadigital.com.br` | ⏳ Aguarda VPS | Configurar após IP |
+| Backend `.env` na VPS | ⏳ Aguarda VPS | Preencher com chaves reais |

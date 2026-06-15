@@ -9,3 +9,5 @@ rq>=1.16
 playwright>=1.48
 python-dotenv>=1.0
 faster-whisper>=1.0  # STT local opcional (fallback do Whisper API)
+PyMuPDF>=1.24       # leitura de PDFs de acórdãos (import fitz)
+apscheduler>=3.10   # agendamento semanal do Radar Jurimétrico (DataJud)

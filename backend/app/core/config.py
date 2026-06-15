@@ -35,6 +35,21 @@ class Settings(BaseModel):
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     rpa_headless: bool = os.getenv("RPA_HEADLESS", "true").lower() == "true"
 
+    # DataJud CNJ — Radar Jurimétrico (chave pública oficial; troca rara)
+    datajud_api_key: str = os.getenv(
+        "DATAJUD_API_KEY",
+        "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==",
+    )
+    datajud_tribunais: list[str] = [
+        a.strip()
+        for a in os.getenv("DATAJUD_TRIBUNAIS", "tjro,trt14").split(",")
+        if a.strip()
+    ]
+    # Agendamento semanal do radar (scheduler embutido no container da API)
+    radar_auto: bool = os.getenv("RADAR_AUTO", "true").lower() == "true"
+    radar_dia_semana: str = os.getenv("RADAR_DIA_SEMANA", "mon")  # mon..sun
+    radar_hora: int = int(os.getenv("RADAR_HORA", "6"))           # 0-23 (UTC)
+
     # Escalonamento humano
     humano_whatsapp: str = os.getenv("HUMANO_WHATSAPP", "")
     link_agenda_padrao: str = os.getenv("LINK_AGENDA", "")

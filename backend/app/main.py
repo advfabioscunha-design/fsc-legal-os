@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from .core.config import get_settings
 from .core.db import get_db
-from .agentes import triagem, especialista, jurisprudencial
+from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
 from .integracoes import asaas, zapsign, whatsapp
 
@@ -15,6 +15,28 @@ app.add_middleware(
     allow_origins=["*"],  # restringir ao domínio do app em produção
     allow_methods=["*"], allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _agendar_radar():
+    """Liga o Radar Jurimétrico semanal (DataJud) dentro do container da API.
+    Desligar com RADAR_AUTO=false. Roda 1x/semana (padrão: segunda 06:00 UTC)."""
+    s = get_settings()
+    if not s.radar_auto:
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        sched = BackgroundScheduler(timezone="UTC")
+        sched.add_job(
+            radar.radar_semanal,
+            CronTrigger(day_of_week=s.radar_dia_semana, hour=s.radar_hora, minute=0),
+            id="radar_semanal", replace_existing=True, max_instances=1,
+        )
+        sched.start()
+        app.state.scheduler = sched
+    except Exception as e:  # API sobe mesmo sem o scheduler
+        print(f"[radar] scheduler não iniciado: {e}")
 
 
 @app.get("/health")
@@ -97,6 +119,22 @@ def cerebro_processar():
     """Processa os acórdãos do bucket jurisprudencia/<GRUPO>[/<SUBNICHO>]/,
     cria/reforça teses e move os PDFs para _processados (automático)."""
     return jurisprudencial.processar_bucket()
+
+
+@app.post("/api/v1/cerebro/radar-semanal")
+def cerebro_radar_semanal(processar_pdfs: bool = True):
+    """Radar Jurimétrico DataJud/CNJ: varre TJRO/TRT14 por grupo, agrega a
+    jurimetria da semana, atualiza teses pelas íntegras e notifica o advogado.
+    Disparado pelo scheduler semanal ou manualmente pelo CRM."""
+    return radar.radar_semanal(processar_pdfs=processar_pdfs)
+
+
+@app.get("/api/v1/radar")
+def listar_radar(grupo: str | None = None, limite: int = 12):
+    q = get_db().table("radar_jurimetrico").select("*")
+    if grupo:
+        q = q.eq("grupo", grupo)
+    return q.order("semana_ref", desc=True).limit(limite).execute().data
 
 
 @app.get("/api/v1/teses")
