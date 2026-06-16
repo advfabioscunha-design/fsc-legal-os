@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
+import ContratoChat from "../components/ContratoChat";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -23,7 +24,7 @@ type Caso = {
   numero_processo?: string | null; movimentacoes?: any[];
 };
 type Msg = { autor: "CLIENTE" | "AGENTE"; conteudo: string };
-type Vista = "home" | "acompanhar" | "atendimento";
+type Vista = "home" | "acompanhar" | "atendimento" | "contrato";
 
 const WHATS = "5569993225383";
 const WHATS_LINK = `https://wa.me/${WHATS}?text=${encodeURIComponent(
@@ -160,7 +161,7 @@ export default function AreaCliente() {
           <p className="text-charcoal/50">Carregando...</p>
         ) : vista === "home" ? (
           /* ── HOME: 2 botões ── */
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             <button onClick={() => setVista("acompanhar")}
               className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
               <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy text-2xl">📁</span>
@@ -174,6 +175,14 @@ export default function AreaCliente() {
               <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-gold text-2xl">💬</span>
               <h2 className="mt-4 font-serif text-xl font-bold text-navy">Atendimento / Tirar Dúvidas</h2>
               <p className="mt-2 text-sm text-charcoal/60">Converse com o nosso atendimento e tire qualquer dúvida sobre o seu processo, em linguagem simples.</p>
+              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
+            </button>
+
+            <button onClick={() => setVista("contrato")}
+              className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-forest text-2xl">📝</span>
+              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Solicitar Elaboração de Contrato</h2>
+              <p className="mt-2 text-sm text-charcoal/60">Um especialista elabora seu contrato com segurança jurídica — preço por complexidade e documento em revisão.</p>
               <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
             </button>
           </div>
@@ -232,7 +241,7 @@ export default function AreaCliente() {
               </>
             )}
           </section>
-        ) : (
+        ) : vista === "atendimento" ? (
           /* ── ATENDIMENTO / DÚVIDAS ── */
           <section className="flex flex-col rounded-2xl border border-black/5 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-black/5 px-5 py-3">
@@ -268,6 +277,9 @@ export default function AreaCliente() {
                 className="rounded-xl bg-gold px-5 py-2.5 text-sm font-semibold text-navy transition hover:bg-amber disabled:opacity-50">Enviar</button>
             </form>
           </section>
+        ) : (
+          /* ── ELABORAÇÃO DE CONTRATO ── */
+          <ContratoChat nome={nome} email={email} onVoltar={() => setVista("home")} />
         )}
       </div>
     </main>

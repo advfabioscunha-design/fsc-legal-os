@@ -79,6 +79,26 @@ def conversar(caso_id: str, body: Mensagem):
     return especialista.atender(caso_id, body.conteudo, body.canal)
 
 
+# ── Serviço de Elaboração de Contrato ────────────────────────────
+class ContratoInit(BaseModel):
+    nome: str
+    contato: str
+    cpf: str | None = None
+    canal: str = "PORTAL"
+
+
+@app.post("/api/v1/contrato/iniciar")
+def contrato_iniciar(body: ContratoInit):
+    from .agentes import contrato
+    return contrato.iniciar(body.nome, body.contato, body.canal, cpf=body.cpf)
+
+
+@app.post("/api/v1/contrato/{caso_id}/mensagens")
+def contrato_conversar(caso_id: str, body: Mensagem):
+    from .agentes import contrato
+    return contrato.atender(caso_id, body.conteudo, body.canal)
+
+
 # ── CRM ──────────────────────────────────────────────────────────
 @app.get("/api/v1/casos")
 def listar_casos(estado: str | None = None, grupo: str | None = None):
