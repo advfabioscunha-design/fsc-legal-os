@@ -10,11 +10,16 @@ export default {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
       },
       colors: {
-        // Paleta Legal Premium
-        navy: "#0A192F",      // Azul Marinho Profundo (confiança)
-        gold: "#C5A880",      // Dourado Champanhe / Cobre (ação/destaque)
-        charcoal: "#1A1A1A",  // Cinza Chumbo (texto)
-        ice: "#F8F9FA",       // Cinza Gelo (alternância de seções)
+        // Paleta Instagram Jurídico (autoridade & confiança)
+        navy: "#0B1F3B",      // Azul Marinho
+        petrol: "#0F2A44",    // Azul Petróleo
+        forest: "#1E4D3B",    // Verde Escuro (Tributário/Bancário)
+        moss: "#2F5D50",      // Verde Musgo
+        gold: "#C9A24D",      // Dourado Fosco (conversão & CTA)
+        amber: "#D4AF37",     // Âmbar (destaque)
+        charcoal: "#2B2B2B",  // Cinza Grafite (texto)
+        mist: "#E5E7EB",      // Cinza Claro
+        ice: "#F8F9FA",       // Cinza Gelo (seções claras)
       },
     },
   },

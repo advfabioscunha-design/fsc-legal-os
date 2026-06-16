@@ -18,6 +18,15 @@ export default function Entrar() {
     if (!data.user) return;
     const { data: perfil } = await supabase
       .from("perfis").select("papel").eq("id", data.user.id).maybeSingle();
+    // destino solicitado na URL (?next=/cliente | /crm)
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next === "/crm") {
+      // só operador acessa o CRM; cliente vai para a própria área
+      router.push(perfil?.papel === "OPERADOR" ? "/crm" : "/cliente");
+      return;
+    }
+    if (next === "/cliente") { router.push("/cliente"); return; }
+    // sem destino: vai pela função do papel
     router.push(perfil?.papel === "OPERADOR" ? "/crm" : "/cliente");
   }
 
