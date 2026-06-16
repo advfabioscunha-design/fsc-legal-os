@@ -6,48 +6,34 @@ import { supabase } from "../../lib/supabaseClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-// Fases visíveis ao cliente (do contato inicial ao protocolo)
-const FASES = [
-  { id: "LEAD", label: "Contato inicial" },
-  { id: "QUALIFICACAO", label: "Análise de viabilidade" },
-  { id: "PROPOSTA", label: "Proposta" },
-  { id: "CONTRATO", label: "Contrato" },
-  { id: "PAGAMENTO", label: "Pagamento" },
-  { id: "COLETA_DOCS", label: "Coleta de documentos" },
-  { id: "COLETA_PROVAS", label: "Coleta de provas" },
-  { id: "ANALISE", label: "Análise técnica" },
-  { id: "PETICAO", label: "Elaboração da petição" },
-  { id: "REVISAO", label: "Revisão do advogado" },
-  { id: "PROTOCOLADO", label: "Protocolado" },
+// Esteira de trabalho visível ao cliente (mapeada para os estados do caso)
+const ESTEIRA = [
+  { id: "ASSINATURA", label: "Assinatura de documentos iniciais", estados: ["CONTRATO", "PAGAMENTO"] },
+  { id: "COLETA", label: "Coleta de informações e provas", estados: ["COLETA_DOCS", "COLETA_PROVAS"] },
+  { id: "CONFERENCIA", label: "Conferência de documentos", estados: ["ANALISE", "CONFERENCIA"] },
+  { id: "PETICAO", label: "Elaboração da petição", estados: ["PETICAO"] },
+  { id: "REVISAO", label: "Revisão", estados: ["REVISAO"] },
+  { id: "PROTOCOLO", label: "Protocolo", estados: ["APROVADO", "PROTOCOLO_RPA", "PROTOCOLADO"] },
+  { id: "RECEBIMENTO", label: "Recebimento da petição", estados: ["RECEBIDO", "DISTRIBUIDO"] },
 ];
+const PRE_CONTRATO = ["LEAD", "QUALIFICACAO", "PROPOSTA"];
 
-type Caso = { id: string; estado: string; grupo: string | null; numero_processo?: string | null };
+type Caso = {
+  id: string; estado: string; grupo: string | null;
+  numero_processo?: string | null; movimentacoes?: any[];
+};
 type Msg = { autor: "CLIENTE" | "AGENTE"; conteudo: string };
+type Vista = "home" | "acompanhar" | "atendimento";
 
-// WhatsApp de apoio (fallback humano)
 const WHATS = "5569993225383";
 const WHATS_LINK = `https://wa.me/${WHATS}?text=${encodeURIComponent(
   "Olá! Estou na minha área de cliente da FC Advocacia e gostaria de continuar meu atendimento."
 )}`;
 
-// Validação de CPF (dígitos verificadores) — gratuita, no próprio navegador
-function cpfValido(valor: string): boolean {
-  const c = (valor || "").replace(/\D/g, "");
-  if (c.length !== 11 || /^(\d)\1{10}$/.test(c)) return false;
-  for (const i of [9, 10]) {
-    let soma = 0;
-    for (let n = 0; n < i; n++) soma += parseInt(c[n]) * (i + 1 - n);
-    let dig = (soma * 10) % 11;
-    if (dig === 10) dig = 0;
-    if (dig !== parseInt(c[i])) return false;
-  }
-  return true;
-}
-
 const FALLBACK =
   "Recebi sua mensagem e já estou cuidando do seu caso. Me dê só mais um detalhe " +
-  "enquanto preparo o próximo passo — e, se preferir falar agora com nossa equipe, " +
-  "é só tocar em \"Falar no WhatsApp\" aqui ao lado. Não vou te deixar sem resposta.";
+  "enquanto preparo o próximo passo. Se preferir, fale agora com nossa equipe pelo WhatsApp — " +
+  "não vou te deixar sem resposta.";
 
 export default function AreaCliente() {
   const router = useRouter();
@@ -55,131 +41,99 @@ export default function AreaCliente() {
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [carregando, setCarregando] = useState(true);
+  const [vista, setVista] = useState<Vista>("home");
 
   const [caso, setCaso] = useState<Caso | null>(null);
-  const [mensagens, setMensagens] = useState<Msg[]>([]);
+  const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
-  const [cpf, setCpf] = useState("");
-  const [erroCpf, setErroCpf] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
   const fimRef = useRef<HTMLDivElement | null>(null);
   const primeiroNome = (nome || "").trim().split(" ")[0] || "tudo bem";
-
-  // ── Carrega sessão + caso ativo + histórico ──
-  useEffect(() => {
-    (async () => {
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess.session) { router.push("/entrar"); return; }
-      const tk = sess.session.access_token;
-      const nm = sess.session.user.user_metadata?.nome || sess.session.user.email || "";
-      setToken(tk);
-      setNome(nm);
-      setEmail(sess.session.user.email || "");
-      try {
-        const r = await fetch(`${API}/api/v1/cliente/meus-casos`, {
-          headers: { Authorization: `Bearer ${tk}` },
-        });
-        const casos: Caso[] = r.ok ? await r.json() : [];
-        if (casos.length > 0) {
-          const c = casos[0];
-          setCaso(c);
-          // carrega histórico de mensagens do caso
-          try {
-            const d = await fetch(`${API}/api/v1/casos/${c.id}`);
-            if (d.ok) {
-              const det = await d.json();
-              const hist: Msg[] = (det.mensagens || [])
-                .filter((m: any) => m.autor === "CLIENTE" || m.autor === "AGENTE")
-                .map((m: any) => ({ autor: m.autor, conteudo: m.conteudo }));
-              setMensagens(hist.length ? hist : [boasVindas(nm)]);
-            } else {
-              setMensagens([boasVindas(nm)]);
-            }
-          } catch { setMensagens([boasVindas(nm)]); }
-        } else {
-          setMensagens([boasVindas(nm)]);
-        }
-      } catch {
-        setMensagens([boasVindas(nm)]);
-      } finally {
-        setCarregando(false);
-      }
-    })();
-  }, [router]);
-
-  useEffect(() => {
-    fimRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [mensagens, enviando]);
 
   function boasVindas(nm: string): Msg {
     const pn = (nm || "").trim().split(" ")[0] || "";
     return {
       autor: "AGENTE",
       conteudo:
-        `Olá${pn ? ", " + pn : ""}! Seja muito bem-vindo(a). Sinto muito que você esteja ` +
-        `passando por isso, mas fique tranquilo(a): você está no lugar certo. ` +
-        `Me conte com detalhes o que aconteceu — estou aqui para te ajudar a resolver.`,
+        `Olá${pn ? ", " + pn : ""}! Estou aqui para te ajudar. Pode me contar o que precisa ou ` +
+        `tirar qualquer dúvida sobre o seu processo, um documento ou algo que não entendeu — ` +
+        `explico tudo de forma simples e tranquila.`,
     };
   }
 
-  async function sair() {
-    await supabase.auth.signOut();
-    router.push("/entrar");
+  useEffect(() => {
+    (async () => {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess.session) { router.push("/entrar"); return; }
+      const tk = sess.session.access_token;
+      const nm = sess.session.user.user_metadata?.nome || sess.session.user.email || "";
+      setToken(tk); setNome(nm); setEmail(sess.session.user.email || "");
+      try {
+        const r = await fetch(`${API}/api/v1/cliente/meus-casos`, { headers: { Authorization: `Bearer ${tk}` } });
+        const casos: Caso[] = r.ok ? await r.json() : [];
+        if (casos.length > 0) {
+          const c = casos[0];
+          try {
+            const d = await fetch(`${API}/api/v1/casos/${c.id}`);
+            if (d.ok) {
+              const det = await d.json();
+              setCaso({ ...c, estado: det.estado ?? c.estado, numero_processo: det.numero_processo ?? c.numero_processo, movimentacoes: det.movimentacoes || det.eventos || [] });
+              const hist: Msg[] = (det.mensagens || [])
+                .filter((m: any) => m.autor === "CLIENTE" || m.autor === "AGENTE")
+                .map((m: any) => ({ autor: m.autor, conteudo: m.conteudo }));
+              setMsgs(hist.length ? hist : [boasVindas(nm)]);
+            } else { setCaso(c); setMsgs([boasVindas(nm)]); }
+          } catch { setCaso(c); setMsgs([boasVindas(nm)]); }
+        } else { setMsgs([boasVindas(nm)]); }
+      } catch { setMsgs([boasVindas(nm)]); }
+      finally { setCarregando(false); }
+    })();
+  }, [router]);
+
+  useEffect(() => { if (vista === "atendimento") fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, enviando, vista]);
+
+  async function sair() { await supabase.auth.signOut(); router.push("/entrar"); }
+
+  function addAgente(resposta?: string | null) {
+    setMsgs((m) => [...m, { autor: "AGENTE", conteudo: (resposta || "").trim() || FALLBACK }]);
   }
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     const texto = input.trim();
     if (!texto || enviando) return;
-
-    // Primeira mensagem cria o caso e exige CPF
-    if (!caso) {
-      if (!cpfValido(cpf)) {
-        setErroCpf("CPF inválido — confira os números.");
-        return;
-      }
-      setErroCpf(null);
-    }
-
-    setMensagens((m) => [...m, { autor: "CLIENTE", conteudo: texto }]);
-    setInput("");
-    setEnviando(true);
-
+    setMsgs((m) => [...m, { autor: "CLIENTE", conteudo: texto }]);
+    setInput(""); setEnviando(true);
     try {
       if (!caso) {
         const r = await fetch(`${API}/api/v1/leads`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ nome, contato: email, relato: texto, cpf, canal: "PORTAL" }),
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nome, contato: email, relato: texto, canal: "PORTAL" }),
         });
         const data = r.ok ? await r.json() : null;
-        if (data?.caso_id) {
-          setCaso({ id: data.caso_id, estado: "QUALIFICACAO", grupo: data.grupo ?? null });
-        }
-        adicionarAgente(data?.primeira_resposta);
+        if (data?.caso_id) setCaso({ id: data.caso_id, estado: "QUALIFICACAO", grupo: data.grupo ?? null });
+        addAgente(data?.primeira_resposta);
       } else {
         const r = await fetch(`${API}/api/v1/casos/${caso.id}/mensagens`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ conteudo: texto, canal: "PORTAL" }),
         });
         const data = r.ok ? await r.json() : null;
-        adicionarAgente(data?.resposta);
+        addAgente(data?.resposta);
       }
-    } catch {
-      adicionarAgente(null); // nunca deixa o cliente sem resposta
-    } finally {
-      setEnviando(false);
-    }
+    } catch { addAgente(null); }
+    finally { setEnviando(false); }
   }
 
-  function adicionarAgente(resposta?: string | null) {
-    const texto = (resposta || "").trim() || FALLBACK;
-    setMensagens((m) => [...m, { autor: "AGENTE", conteudo: texto }]);
-  }
-
-  const idxFase = caso ? Math.max(0, FASES.findIndex((f) => f.id === caso.estado)) : 0;
+  // índice atual na esteira
+  const idxEsteira = (() => {
+    if (!caso) return -1;
+    if (PRE_CONTRATO.includes(caso.estado)) return -1;
+    const i = ESTEIRA.findIndex((f) => f.estados.includes(caso.estado));
+    return i;
+  })();
+  const recebido = caso && ESTEIRA[ESTEIRA.length - 1].estados.includes(caso.estado);
 
   return (
     <main className="min-h-screen bg-ice text-charcoal">
@@ -192,9 +146,7 @@ export default function AreaCliente() {
           </Link>
           <div className="flex items-center gap-4">
             <a href={WHATS_LINK} target="_blank" rel="noreferrer"
-              className="rounded-full bg-[#25D366] px-4 py-1.5 text-xs font-semibold text-white">
-              Falar no WhatsApp
-            </a>
+              className="rounded-full bg-[#25D366] px-4 py-1.5 text-xs font-semibold text-white">WhatsApp</a>
             <button onClick={sair} className="text-sm text-charcoal/50 hover:text-charcoal">Sair</button>
           </div>
         </div>
@@ -202,115 +154,120 @@ export default function AreaCliente() {
 
       <div className="mx-auto max-w-5xl px-5 py-6">
         <h1 className="font-serif text-2xl font-bold text-navy">Olá, {primeiroNome}</h1>
-        <p className="mb-5 text-sm text-charcoal/60">
-          Converse com o nosso atendimento e acompanhe aqui cada fase da sua causa.
-        </p>
+        <p className="mb-6 text-sm text-charcoal/60">Bem-vindo(a) à sua área. Como podemos te ajudar hoje?</p>
 
         {carregando ? (
-          <p className="text-charcoal/50">Carregando seu atendimento...</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            {/* ── CHAT ── */}
-            <section className="flex flex-col rounded-2xl border border-black/5 bg-white shadow-sm lg:col-span-2">
-              <div className="border-b border-black/5 px-5 py-3">
-                <p className="text-sm font-semibold text-navy">Atendimento FC Advocacia</p>
-                <p className="text-xs text-charcoal/50">Estamos ao seu lado até a solução do seu caso.</p>
-              </div>
+          <p className="text-charcoal/50">Carregando...</p>
+        ) : vista === "home" ? (
+          /* ── HOME: 2 botões ── */
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <button onClick={() => setVista("acompanhar")}
+              className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy text-2xl">📁</span>
+              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Acompanhar Demanda</h2>
+              <p className="mt-2 text-sm text-charcoal/60">Veja a esteira do seu caso, do início ao protocolo, e as movimentações do processo.</p>
+              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
+            </button>
 
-              <div className="flex h-[55vh] flex-col gap-3 overflow-y-auto px-5 py-4">
-                {mensagens.map((m, i) => (
-                  <div key={i}
-                    className={`flex ${m.autor === "CLIENTE" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                      m.autor === "CLIENTE"
-                        ? "rounded-br-md bg-navy text-white"
-                        : "rounded-bl-md bg-ice text-charcoal"
-                    }`}>
-                      {m.conteudo}
-                    </div>
-                  </div>
-                ))}
-                {enviando && (
-                  <div className="flex justify-start">
-                    <div className="rounded-2xl rounded-bl-md bg-ice px-4 py-2.5 text-sm text-charcoal/50">
-                      digitando…
-                    </div>
-                  </div>
-                )}
-                <div ref={fimRef} />
-              </div>
-
-              {/* Composer */}
-              <form onSubmit={enviar} className="border-t border-black/5 p-4">
-                {!caso && (
-                  <div className="mb-3">
-                    <label className="mb-1 block text-xs font-medium text-charcoal/60">
-                      Para iniciar seu atendimento, confirme seu CPF
-                    </label>
-                    <input
-                      value={cpf}
-                      onChange={(e) => setCpf(e.target.value)}
-                      inputMode="numeric"
-                      placeholder="000.000.000-00"
-                      className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold"
-                    />
-                    {erroCpf && <p className="mt-1 text-xs text-red-600">{erroCpf}</p>}
-                  </div>
-                )}
-                <div className="flex items-end gap-2">
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); }
-                    }}
-                    rows={1}
-                    placeholder="Escreva sua mensagem…"
-                    className="max-h-32 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm outline-none focus:border-gold"
-                  />
-                  <button type="submit" disabled={enviando}
-                    className="rounded-xl bg-gold px-5 py-2.5 text-sm font-semibold text-navy transition hover:bg-[#b89971] disabled:opacity-50">
-                    Enviar
-                  </button>
-                </div>
-              </form>
-            </section>
-
-            {/* ── ANDAMENTO ── */}
-            <aside className="rounded-2xl border border-black/5 bg-white p-5 shadow-sm">
-              <p className="text-sm font-semibold text-navy">Andamento da sua causa</p>
-              {caso ? (
-                <>
-                  {caso.numero_processo && (
-                    <p className="mt-1 text-xs text-charcoal/50">Processo {caso.numero_processo}</p>
-                  )}
-                  <ol className="mt-4 space-y-2.5">
-                    {FASES.map((f, i) => {
-                      const feita = i < idxFase;
-                      const atual = i === idxFase;
-                      return (
-                        <li key={f.id} className="flex items-center gap-3 text-sm">
-                          <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${
-                            feita ? "bg-navy text-white" : atual ? "bg-gold text-navy" : "bg-black/10 text-charcoal/40"
-                          }`}>
-                            {feita ? "✓" : i + 1}
-                          </span>
-                          <span className={atual ? "font-semibold text-navy" : feita ? "text-charcoal/70" : "text-charcoal/40"}>
-                            {f.label}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </>
-              ) : (
-                <p className="mt-3 text-sm text-charcoal/55">
-                  Assim que você nos contar seu caso aqui no chat, abriremos seu atendimento e as
-                  fases aparecerão neste painel para você acompanhar tudo de perto.
-                </p>
-              )}
-            </aside>
+            <button onClick={() => setVista("atendimento")}
+              className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-gold text-2xl">💬</span>
+              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Atendimento / Tirar Dúvidas</h2>
+              <p className="mt-2 text-sm text-charcoal/60">Converse com o nosso atendimento e tire qualquer dúvida sobre o seu processo, em linguagem simples.</p>
+              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
+            </button>
           </div>
+        ) : vista === "acompanhar" ? (
+          /* ── ACOMPANHAR DEMANDA ── */
+          <section className="rounded-2xl border border-black/5 bg-white p-6 shadow-sm">
+            <button onClick={() => setVista("home")} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
+            <h2 className="font-serif text-xl font-bold text-navy">Andamento da sua causa</h2>
+            {!caso ? (
+              <p className="mt-3 text-sm text-charcoal/60">
+                Você ainda não tem um caso aberto. Use o <b>Atendimento</b> para iniciar — assim que contratar,
+                a esteira aparece aqui para você acompanhar cada etapa.
+              </p>
+            ) : (
+              <>
+                {caso.numero_processo && <p className="mt-1 text-xs text-charcoal/50">Processo nº {caso.numero_processo}</p>}
+                {idxEsteira < 0 && (
+                  <p className="mt-3 rounded-lg bg-gold/10 px-4 py-3 text-sm text-charcoal/70">
+                    Seu caso está em análise para contratação. A esteira começa após a assinatura dos documentos iniciais.
+                  </p>
+                )}
+                <ol className="mt-5 space-y-3">
+                  {ESTEIRA.map((f, i) => {
+                    const feita = idxEsteira > i;
+                    const atual = idxEsteira === i;
+                    return (
+                      <li key={f.id} className="flex items-center gap-3 text-sm">
+                        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] ${
+                          feita ? "bg-navy text-white" : atual ? "bg-gold text-navy" : "bg-black/10 text-charcoal/40"
+                        }`}>{feita ? "✓" : i + 1}</span>
+                        <span className={atual ? "font-semibold text-navy" : feita ? "text-charcoal/70" : "text-charcoal/40"}>{f.label}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
+
+                {/* Acompanhamento processual */}
+                <div className="mt-7 border-t border-black/5 pt-5">
+                  <h3 className="text-sm font-semibold text-navy">Movimentações do processo</h3>
+                  {recebido && caso.movimentacoes && caso.movimentacoes.length > 0 ? (
+                    <ul className="mt-3 space-y-3">
+                      {caso.movimentacoes.map((m: any, i: number) => (
+                        <li key={i} className="rounded-lg border border-black/5 bg-ice p-3 text-sm">
+                          <p className="text-xs text-charcoal/50">{m.data || m.criado_em || ""}</p>
+                          <p className="text-charcoal/80">{m.descricao || m.titulo || m.texto || "Movimentação"}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 text-sm text-charcoal/55">
+                      Após o protocolo, cada movimentação ou intimação do processo aparecerá aqui automaticamente —
+                      e o status acima é atualizado a cada novo passo. Você não precisa fazer nada: nós te avisamos.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        ) : (
+          /* ── ATENDIMENTO / DÚVIDAS ── */
+          <section className="flex flex-col rounded-2xl border border-black/5 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-black/5 px-5 py-3">
+              <div>
+                <p className="text-sm font-semibold text-navy">Atendimento FC Advocacia</p>
+                <p className="text-xs text-charcoal/50">Tire suas dúvidas — explicamos de forma simples.</p>
+              </div>
+              <button onClick={() => setVista("home")} className="text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
+            </div>
+
+            <div className="flex h-[55vh] flex-col gap-3 overflow-y-auto px-5 py-4">
+              {msgs.map((m, i) => (
+                <div key={i} className={`flex ${m.autor === "CLIENTE" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                    m.autor === "CLIENTE" ? "rounded-br-md bg-navy text-white" : "rounded-bl-md bg-ice text-charcoal"
+                  }`}>{m.conteudo}</div>
+                </div>
+              ))}
+              {enviando && (
+                <div className="flex justify-start">
+                  <div className="rounded-2xl rounded-bl-md bg-ice px-4 py-2.5 text-sm text-charcoal/50">digitando…</div>
+                </div>
+              )}
+              <div ref={fimRef} />
+            </div>
+
+            <form onSubmit={enviar} className="flex items-end gap-2 border-t border-black/5 p-4">
+              <textarea value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
+                rows={1} placeholder="Escreva sua mensagem…"
+                className="max-h-32 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm outline-none focus:border-gold" />
+              <button type="submit" disabled={enviando}
+                className="rounded-xl bg-gold px-5 py-2.5 text-sm font-semibold text-navy transition hover:bg-amber disabled:opacity-50">Enviar</button>
+            </form>
+          </section>
         )}
       </div>
     </main>

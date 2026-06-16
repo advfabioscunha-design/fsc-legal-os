@@ -30,11 +30,28 @@ export default function AtendimentoChat({
 }: { label?: string; className?: string; variant?: Variant }) {
   const pathname = usePathname();
   const [aberto, setAberto] = useState(false);
+  const [iniciado, setIniciado] = useState(false);
+  const [nome, setNome] = useState("");
+  const [telefone, setTelefone] = useState("");
   const [casoId, setCasoId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([SAUDACAO]);
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
   const fimRef = useRef<HTMLDivElement | null>(null);
+
+  function iniciarConversa(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nome.trim() || telefone.replace(/\D/g, "").length < 10) return;
+    const pn = nome.trim().split(" ")[0];
+    setMsgs([{
+      autor: "AGENTE",
+      conteudo:
+        `Olá, ${pn}! Seja muito bem-vindo(a) à FC Advocacia. Muito obrigado pela sua preferência! ` +
+        `Estou aqui para te ajudar a resolver o seu problema com toda atenção. ` +
+        `Me conte, com suas palavras, o que está acontecendo.`,
+    }]);
+    setIniciado(true);
+  }
 
   useEffect(() => {
     if (aberto) fimRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -56,7 +73,7 @@ export default function AtendimentoChat({
         const r = await fetch(`${API}/api/v1/leads`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ nome: "Visitante do site", contato: "site", relato: texto, canal: "SITE" }),
+          body: JSON.stringify({ nome: nome.trim() || "Visitante do site", contato: telefone.trim() || "site", relato: texto, canal: "SITE" }),
         });
         const data = r.ok ? await r.json() : null;
         if (data?.caso_id) setCasoId(data.caso_id);
@@ -120,47 +137,74 @@ export default function AtendimentoChat({
               </button>
             </div>
 
-            {/* Mensagens */}
-            <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-ice px-4 py-4">
-              {msgs.map((m, i) => (
-                <div key={i} className={`flex ${m.autor === "CLIENTE" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[82%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                    m.autor === "CLIENTE" ? "rounded-br-md bg-navy text-white" : "rounded-bl-md bg-white text-charcoal shadow-sm"
-                  }`}>
-                    {m.conteudo}
-                  </div>
+            {!iniciado ? (
+              /* Pré-atendimento: nome + telefone */
+              <form onSubmit={iniciarConversa} className="flex flex-1 flex-col justify-center gap-4 bg-ice px-6 py-8">
+                <div className="text-center">
+                  <p className="font-serif text-lg font-bold text-navy">Antes de começarmos</p>
+                  <p className="mt-1 text-sm text-charcoal/60">Como podemos te chamar e em qual número falar com você?</p>
                 </div>
-              ))}
-              {enviando && (
-                <div className="flex justify-start">
-                  <div className="rounded-2xl rounded-bl-md bg-white px-4 py-2.5 text-sm text-charcoal/50 shadow-sm">digitando…</div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-charcoal/60">Seu nome</label>
+                  <input value={nome} onChange={(e) => setNome(e.target.value)} required placeholder="Nome completo"
+                    className="w-full rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm text-charcoal outline-none focus:border-gold" />
                 </div>
-              )}
-              <div ref={fimRef} />
-            </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-charcoal/60">Seu telefone / WhatsApp</label>
+                  <input value={telefone} onChange={(e) => setTelefone(e.target.value)} required inputMode="tel" placeholder="(00) 00000-0000"
+                    className="w-full rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm text-charcoal outline-none focus:border-gold" />
+                </div>
+                <button type="submit"
+                  className="mt-2 w-full rounded-xl bg-gold px-5 py-3 text-sm font-bold text-navy transition hover:bg-amber">
+                  Iniciar atendimento
+                </button>
+                <p className="text-center text-[11px] text-charcoal/45">Seus dados estão protegidos e usados apenas para o seu atendimento.</p>
+              </form>
+            ) : (
+              <>
+                {/* Mensagens */}
+                <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-ice px-4 py-4">
+                  {msgs.map((m, i) => (
+                    <div key={i} className={`flex ${m.autor === "CLIENTE" ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[82%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                        m.autor === "CLIENTE" ? "rounded-br-md bg-navy text-white" : "rounded-bl-md bg-white text-charcoal shadow-sm"
+                      }`}>
+                        {m.conteudo}
+                      </div>
+                    </div>
+                  ))}
+                  {enviando && (
+                    <div className="flex justify-start">
+                      <div className="rounded-2xl rounded-bl-md bg-white px-4 py-2.5 text-sm text-charcoal/50 shadow-sm">digitando…</div>
+                    </div>
+                  )}
+                  <div ref={fimRef} />
+                </div>
 
-            {/* Oferta de cadastro */}
-            <div className="border-t border-black/5 bg-white px-4 py-2 text-center">
-              <Link href="/entrar?next=/cliente" className="text-xs font-medium text-gold hover:underline">
-                Quer acompanhar seu caso pela plataforma? Crie seu acesso →
-              </Link>
-            </div>
+                {/* Oferta de cadastro */}
+                <div className="border-t border-black/5 bg-white px-4 py-2 text-center">
+                  <Link href="/entrar?next=/cliente" className="text-xs font-medium text-gold hover:underline">
+                    Quer acompanhar seu caso pela plataforma? Crie seu acesso →
+                  </Link>
+                </div>
 
-            {/* Composer */}
-            <form onSubmit={enviar} className="flex items-end gap-2 border-t border-black/5 bg-white p-3">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
-                rows={1}
-                placeholder="Escreva sua mensagem…"
-                className="max-h-28 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm text-charcoal outline-none focus:border-gold"
-              />
-              <button type="submit" disabled={enviando}
-                className="rounded-xl bg-gold px-5 py-2.5 text-sm font-bold text-navy transition hover:bg-amber disabled:opacity-50">
-                Enviar
-              </button>
-            </form>
+                {/* Composer */}
+                <form onSubmit={enviar} className="flex items-end gap-2 border-t border-black/5 bg-white p-3">
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
+                    rows={1}
+                    placeholder="Escreva sua mensagem…"
+                    className="max-h-28 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm text-charcoal outline-none focus:border-gold"
+                  />
+                  <button type="submit" disabled={enviando}
+                    className="rounded-xl bg-gold px-5 py-2.5 text-sm font-bold text-navy transition hover:bg-amber disabled:opacity-50">
+                    Enviar
+                  </button>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}
