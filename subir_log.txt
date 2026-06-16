@@ -1,2 +1,11 @@
 INICIO 15/06/2026 21:59:38,45 
 Reinitialized existing Git repository in C:/Users/User/Desktop/PROJETO TRIADV/PROJETO JURIDICO/files/fsc-legal-os/.git/
+warning: in the working copy of 'backend/app/agentes/especialista.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/app/cliente/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/app/components/AtendimentoChat.tsx', LF will be replaced by CRLF the next time Git touches it
+[main 48c51e3] FSC Legal OS v4.1 - plataforma cloud completa
+ 4 files changed, 260 insertions(+), 250 deletions(-)
+To https://github.com/advfabioscunha-design/fsc-legal-os.git
+   1fd7bf4..48c51e3  main -> main
+branch 'main' set up to track 'origin/main'.
+FIM 15/06/2026 21:59:42,11 
