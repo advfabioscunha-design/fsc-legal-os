@@ -61,15 +61,27 @@ export default function AtendimentoWhats({
     );
   }
 
-  // inline (CTA)
+  // inline (CTA) — abre um modal central (nunca é cortado pela seção)
   return (
-    <div className="relative inline-block">
-      <button onClick={() => setOpen(!open)} className={className}>{label}</button>
+    <>
+      <button onClick={() => setOpen(true)} className={className}>{label}</button>
       {open && (
-        <div className="absolute left-0 z-50 mt-2 w-72 rounded-2xl bg-white p-3 text-left shadow-2xl ring-1 ring-black/10">
-          <Opcoes />
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+          onClick={() => setOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-t-2xl bg-white p-4 text-left shadow-2xl sm:rounded-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-bold text-navy">Falar no WhatsApp</p>
+              <button onClick={() => setOpen(false)} aria-label="Fechar" className="text-charcoal/50 hover:text-charcoal">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <Opcoes />
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
