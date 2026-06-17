@@ -11,3 +11,5 @@ python-dotenv>=1.0
 faster-whisper>=1.0  # STT local opcional (fallback do Whisper API)
 PyMuPDF>=1.24       # leitura de PDFs de acórdãos (import fitz)
 apscheduler>=3.10   # agendamento semanal do Radar Jurimétrico (DataJud)
+python-multipart>=0.0.9  # upload de documentos (UploadFile/Form)
+python-docx>=1.1    # geração do dossiê do processo em Word (.docx)

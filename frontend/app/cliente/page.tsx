@@ -22,6 +22,7 @@ const PRE_CONTRATO = ["LEAD", "QUALIFICACAO", "PROPOSTA"];
 type Caso = {
   id: string; estado: string; grupo: string | null;
   numero_processo?: string | null; movimentacoes?: any[];
+  aguardando_cliente?: boolean; aguardando_desc?: string | null;
 };
 type Msg = { autor: "CLIENTE" | "AGENTE"; conteudo: string };
 type Vista = "home" | "acompanhar" | "atendimento" | "contrato";
@@ -79,7 +80,7 @@ export default function AreaCliente() {
             const d = await fetch(`${API}/api/v1/casos/${c.id}`);
             if (d.ok) {
               const det = await d.json();
-              setCaso({ ...c, estado: det.estado ?? c.estado, numero_processo: det.numero_processo ?? c.numero_processo, movimentacoes: det.movimentacoes || det.eventos || [] });
+              setCaso({ ...c, estado: det.estado ?? c.estado, numero_processo: det.numero_processo ?? c.numero_processo, movimentacoes: det.movimentacoes || det.eventos || [], aguardando_cliente: det.aguardando_cliente, aguardando_desc: det.aguardando_desc });
               const hist: Msg[] = (det.mensagens || [])
                 .filter((m: any) => m.autor === "CLIENTE" || m.autor === "AGENTE")
                 .map((m: any) => ({ autor: m.autor, conteudo: m.conteudo }));
@@ -191,6 +192,11 @@ export default function AreaCliente() {
           <section className="rounded-2xl border border-black/5 bg-white p-6 shadow-sm">
             <button onClick={() => setVista("home")} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
             <h2 className="font-serif text-xl font-bold text-navy">Andamento da sua causa</h2>
+            {caso?.aguardando_cliente && (
+              <div className="mt-3 rounded-lg border border-amber/50 bg-amber/10 p-4 text-sm text-charcoal/80">
+                <b className="text-navy">Seu processo saiu temporariamente da produção</b> porque precisamos de um complemento: {caso.aguardando_desc}. Por favor, entre em contato ou responda nossa equipe o quanto antes para retornarmos seu caso à produção.
+              </div>
+            )}
             {!caso ? (
               <p className="mt-3 text-sm text-charcoal/60">
                 Você ainda não tem um caso aberto. Use o <b>Atendimento</b> para iniciar — assim que contratar,

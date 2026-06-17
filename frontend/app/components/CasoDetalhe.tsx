@@ -10,6 +10,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const [salvando, setSalvando] = useState(false);
   const [nota, setNota] = useState("");
   const [solicitacao, setSolicitacao] = useState("");
+  const [novaFase, setNovaFase] = useState("");
   const [linkNome, setLinkNome] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -107,6 +108,24 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     onMudou(); onFechar();
   }
 
+  async function retomar() {
+    await fetch(`${API}/api/v1/casos/${casoId}/retomar`, { method: "POST" });
+    onMudou(); carregar();
+  }
+
+  async function moverFase() {
+    if (!novaFase) return;
+    await fetch(`${API}/api/v1/casos/${casoId}/mover-fase`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fase: novaFase }),
+    });
+    setNovaFase(""); onMudou(); carregar();
+  }
+
+  function baixar() {
+    window.open(`${API}/api/v1/casos/${casoId}/download`, "_blank");
+  }
+
   async function excluir() {
     if (!window.confirm("Excluir DEFINITIVAMENTE este caso? Esta ação não pode ser desfeita.")) return;
     await fetch(`${API}/api/v1/casos/${casoId}`, { method: "DELETE" });
@@ -138,6 +157,16 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
           <p className="p-6 text-white/50">Não foi possível carregar o caso.</p>
         ) : (
           <div className="space-y-6 p-5">
+            {caso.aguardando_cliente && (
+              <div className="rounded-lg border border-[#F39C12]/40 bg-[#F39C12]/10 p-3">
+                <p className="text-sm font-semibold text-[#F39C12]">⏸ Fora da produção — aguardando o cliente</p>
+                <p className="mt-1 text-sm text-white/75">{caso.aguardando_desc}</p>
+                <button onClick={retomar} className="mt-2 rounded-lg bg-[#1DB954] px-4 py-1.5 text-sm font-bold text-white hover:bg-[#17a349]">
+                  Cliente respondeu — retomar produção
+                </button>
+              </div>
+            )}
+
             {/* Dados editáveis */}
             <section>
               <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Informações do caso</h3>
@@ -240,6 +269,15 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
 
             {/* Ações */}
             <section className="border-t border-white/10 pt-4">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <button onClick={baixar} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">⬇ Baixar processo (.zip / Word)</button>
+                <select value={novaFase} onChange={(e) => setNovaFase(e.target.value)}
+                  className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm">
+                  <option value="">Mover para fase…</option>
+                  {["QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO", "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "PETICAO", "REVISAO", "PROTOCOLADO"].map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+                <button onClick={moverFase} className="rounded-lg bg-[#2D7DD2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#256bb3]">Mover</button>
+              </div>
               <div className="flex flex-wrap gap-2">
                 {ehEscritorio && situacao === "ATIVO" && (
                   <button onClick={() => acao("iniciar")} className="rounded-lg bg-[#1DB954] px-4 py-2 text-sm font-bold text-white hover:bg-[#17a349]">

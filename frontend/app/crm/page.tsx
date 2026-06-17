@@ -50,8 +50,9 @@ export default function CRM() {
   const [pendencias, setPendencias] = useState<Caso[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
-  const [aba, setAba] = useState<"esteira" | "suspensos" | "arquivados">("esteira");
+  const [aba, setAba] = useState<"esteira" | "suspensos" | "arquivados" | "lixeira">("esteira");
   const [selecionado, setSelecionado] = useState<string | null>(null);
+  const [lixeira, setLixeira] = useState<any[]>([]);
   const [form, setForm] = useState({ ...formVazio });
   const [salvando, setSalvando] = useState(false);
 
@@ -68,6 +69,12 @@ export default function CRM() {
 
   function load() {
     setLoading(true);
+    if (aba === "lixeira") {
+      fetch(`${API}/api/v1/lixeira`).then((r) => r.json())
+        .then((d) => setLixeira(Array.isArray(d) ? d : []))
+        .catch(() => setLixeira([])).finally(() => setLoading(false));
+      return;
+    }
     const situ = aba === "esteira" ? "ATIVO" : aba === "suspensos" ? "SUSPENSO" : "ARQUIVADO";
     Promise.all([
       fetch(`${API}/api/v1/casos?situacao=${situ}`).then((r) => r.json()).catch(() => []),
@@ -87,21 +94,34 @@ export default function CRM() {
     load();
   }
 
+  async function restaurar(id: string) {
+    await fetch(`${API}/api/v1/lixeira/${id}/restaurar`, { method: "POST" });
+    load();
+  }
+
   async function criarEscritorio(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.nome.trim()) return;
+    if (!form.nome.trim()) { alert("Informe o nome do cliente."); return; }
+    if (!form.contato.trim()) { alert("Informe o contato do cliente (e-mail ou WhatsApp) para acionamento."); return; }
     setSalvando(true);
     try {
-      await fetch(`${API}/api/v1/casos/escritorio`, {
+      const r = await fetch(`${API}/api/v1/casos/escritorio`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          nome: form.nome, cpf: form.cpf || null, contato: form.contato || null,
+          nome: form.nome, cpf: form.cpf || null, contato: form.contato,
           grupo: form.grupo || null, fase: form.fase,
           numero_processo: form.numero_processo || null,
           honorarios: form.honorarios || null, descricao: form.descricao || null,
         }),
       });
-      setModal(false); setForm({ ...formVazio }); load();
+      if (!r.ok) {
+        const er = await r.json().catch(() => ({} as any));
+        alert("Não foi possível cadastrar: " + (er.detail || `erro ${r.status}`));
+        return;
+      }
+      setModal(false); setForm({ ...formVazio }); setAba("esteira"); load();
+    } catch {
+      alert("Falha de conexão com o servidor. Verifique a internet e tente de novo.");
     } finally { setSalvando(false); }
   }
 
@@ -128,9 +148,13 @@ export default function CRM() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-[#8899AA]">{loading ? "Carregando..." : `${casos.length} caso(s)`}</span>
-            <button onClick={() => setModal(true)}
+            <button onClick={() => { setForm({ ...formVazio }); setModal(true); }}
               className="rounded-md bg-[#C9A84C] px-3 py-1.5 text-sm font-bold text-[#0A1628] transition hover:bg-[#d8b95e]">
               + Montar Processo do Escritório
+            </button>
+            <button onClick={() => { setForm({ ...formVazio, fase: "PROTOCOLADO" }); setModal(true); }}
+              className="rounded-md border border-[#C9A84C]/50 px-3 py-1.5 text-sm font-semibold text-[#C9A84C] transition hover:bg-[#C9A84C]/10">
+              + Processo em Andamento
             </button>
             <button onClick={load}
               className="text-sm text-[#8899AA] hover:text-white border border-white/10 rounded-md px-3 py-1.5 transition-colors">
@@ -142,7 +166,7 @@ export default function CRM() {
 
       {/* Abas */}
       <div className="flex gap-2 px-4 pt-4">
-        {([["esteira", "Esteira"], ["suspensos", "Suspensos"], ["arquivados", "Arquivados"]] as const).map(([k, l]) => (
+        {([["esteira", "Esteira"], ["suspensos", "Suspensos"], ["arquivados", "Arquivados"], ["lixeira", "Lixeira"]] as const).map(([k, l]) => (
           <button key={k} onClick={() => setAba(k)}
             className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${aba === k ? "bg-[#C9A84C] text-[#0A1628]" : "bg-white/5 text-[#8899AA] hover:text-white"}`}>
             {l}
@@ -228,6 +252,25 @@ export default function CRM() {
           })}
         </div>
       </div>
+      ) : aba === "lixeira" ? (
+        <div className="p-4">
+          {loading ? (
+            <p className="text-[#8899AA]">Carregando...</p>
+          ) : lixeira.length === 0 ? (
+            <p className="text-[#8899AA]/50">Lixeira vazia.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {lixeira.map((it) => (
+                <div key={it.id} className="rounded-lg border border-white/10 bg-[#1A3A6B]/30 p-4">
+                  <p className="text-sm font-semibold text-white">{it.rotulo || "—"}</p>
+                  <p className="mt-1 text-xs text-[#8899AA]">Excluído: {new Date(it.excluido_em).toLocaleString("pt-BR")}</p>
+                  <p className="text-[10px] text-[#8899AA]/60">Guardado até: {new Date(it.expira_em).toLocaleDateString("pt-BR")}</p>
+                  <button onClick={() => restaurar(it.id)} className="mt-2 rounded-lg bg-[#1DB954] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#17a349]">Restaurar</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="p-4">
           {loading ? (

@@ -157,7 +157,8 @@ def escalar_manual(caso_id: str, motivo: str = "PEDIDO_CLIENTE", detalhe: str = 
 _GRUPOS_VALIDOS = {"BANCARIO", "IMOBILIARIO", "TRABALHISTA",
                    "PREVIDENCIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"}
 _FASES_VALIDAS = {"QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO",
-                  "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "PETICAO", "REVISAO"}
+                  "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "PETICAO", "REVISAO",
+                  "PROTOCOLO_RPA", "PROTOCOLADO"}
 
 
 class CasoEscritorio(BaseModel):
@@ -176,6 +177,8 @@ def criar_caso_escritorio(body: CasoEscritorio):
     """Cadastra um processo do escritório (cliente atendido por fora) já na
     fase em que ele se encontra, para entrar direto na esteira de produção."""
     from .core.db import registrar_evento
+    if not body.contato or not body.contato.strip():
+        raise HTTPException(400, "Informe o contato do cliente (e-mail ou WhatsApp) para acionamento.")
     db = get_db()
     fase = body.fase if body.fase in _FASES_VALIDAS else "PETICAO"
     grupo = body.grupo if body.grupo in _GRUPOS_VALIDOS else None
@@ -281,13 +284,56 @@ def ativar_caso(caso_id: str):
 @app.delete("/api/v1/casos/{caso_id}")
 def excluir_caso(caso_id: str):
     db = get_db()
+    # 1) BACKUP completo na lixeira ANTES de apagar (retenção 6 meses)
+    try:
+        caso = db.table("casos").select("*, clientes(*)").eq("id", caso_id).single().execute().data
+        snap = {
+            "caso": caso,
+            "mensagens": db.table("mensagens").select("*").eq("caso_id", caso_id).execute().data,
+            "documentos": db.table("documentos").select("*").eq("caso_id", caso_id).execute().data,
+            "eventos": db.table("eventos").select("*").eq("caso_id", caso_id).execute().data,
+        }
+        rotulo = (caso.get("clientes") or {}).get("nome") or caso_id[:8]
+        db.table("lixeira").insert({"caso_id": caso_id, "rotulo": rotulo, "dados": snap}).execute()
+    except Exception:
+        pass  # se a lixeira não existir ainda, não bloqueia a exclusão
+    # 2) Apaga das tabelas operacionais
     for t in ("mensagens", "documentos", "eventos", "protocolos"):
         try:
             db.table(t).delete().eq("caso_id", caso_id).execute()
         except Exception:
             pass
     db.table("casos").delete().eq("id", caso_id).execute()
-    return {"ok": True, "excluido": caso_id}
+    return {"ok": True, "excluido": caso_id, "backup": "lixeira (6 meses)"}
+
+
+@app.get("/api/v1/lixeira")
+def listar_lixeira():
+    return get_db().table("lixeira").select("id,caso_id,rotulo,excluido_em,expira_em") \
+        .order("excluido_em", desc=True).limit(200).execute().data
+
+
+@app.post("/api/v1/lixeira/{item_id}/restaurar")
+def restaurar_lixeira(item_id: str):
+    """Restaura um caso excluído a partir do backup da lixeira."""
+    db = get_db()
+    item = db.table("lixeira").select("*").eq("id", item_id).single().execute().data
+    snap = item.get("dados") or {}
+    caso = dict(snap.get("caso") or {})
+    caso.pop("clientes", None)  # campo aninhado da query, não é coluna
+    if not caso.get("id"):
+        raise HTTPException(400, "Backup inválido.")
+    db.table("casos").upsert(caso).execute()
+    for m in snap.get("mensagens", []):
+        m2 = {k: v for k, v in m.items() if k != "id"}
+        try: db.table("mensagens").insert(m2).execute()
+        except Exception: pass
+    for d in snap.get("documentos", []):
+        d2 = {k: v for k, v in d.items() if k != "id"}
+        try: db.table("documentos").insert(d2).execute()
+        except Exception: pass
+    db.table("lixeira").delete().eq("id", item_id).execute()
+    return {"ok": True, "restaurado": caso.get("id")}
 
 
 @app.patch("/api/v1/casos/{caso_id}")
@@ -372,6 +418,14 @@ def acionar_cliente(caso_id: str, body: AcionarBody):
         "caso_id": caso_id, "canal": "WHATSAPP", "autor": "HUMANO", "conteudo": texto,
     }).execute()
     registrar_evento(caso_id, "SOLICITACAO_CLIENTE", {"texto": body.solicitacao})
+    # processo sai da produção até o cliente complementar (visível na área do cliente)
+    try:
+        db.table("casos").update({
+            "aguardando_cliente": True, "aguardando_desc": body.solicitacao,
+            "atualizado_em": datetime.now(_tz.utc).isoformat(),
+        }).eq("id", caso_id).execute()
+    except Exception:
+        pass
     # tenta enviar já pelo WhatsApp (quando o agente/Cloud API estiver ligado)
     enviado = False
     try:
@@ -400,6 +454,104 @@ def aprovar_etapa(caso_id: str):
     except TransicaoInvalida as e:
         raise HTTPException(409, str(e))
     return {"ok": True, "novo_estado": prox}
+
+
+class MoverFase(BaseModel):
+    fase: str
+
+
+class AjusteBody(BaseModel):
+    descricao: str
+
+
+@app.post("/api/v1/casos/{caso_id}/retomar")
+def retomar_producao(caso_id: str):
+    """Cliente complementou o que faltava → volta para a produção."""
+    from .core.db import registrar_evento
+    try:
+        get_db().table("casos").update({
+            "aguardando_cliente": False, "aguardando_desc": None,
+            "atualizado_em": datetime.now(_tz.utc).isoformat(),
+        }).eq("id", caso_id).execute()
+    except Exception:
+        pass
+    registrar_evento(caso_id, "CLIENTE_RETORNOU", {})
+    return {"ok": True}
+
+
+@app.post("/api/v1/casos/{caso_id}/mover-fase")
+def mover_fase(caso_id: str, body: MoverFase):
+    """Override manual da fase (ex.: reinserir após ação humana no ponto certo)."""
+    from .core.db import registrar_evento
+    if body.fase not in ORDEM_ESTEIRA and body.fase not in ("CONCLUIDO", "AGENDADO"):
+        raise HTTPException(400, f"Fase '{body.fase}' inválida.")
+    get_db().table("casos").update({
+        "estado": body.fase, "atualizado_em": datetime.now(_tz.utc).isoformat(),
+    }).eq("id", caso_id).execute()
+    registrar_evento(caso_id, "FASE_MOVIDA_MANUAL", {"fase": body.fase})
+    return {"ok": True, "novo_estado": body.fase}
+
+
+@app.post("/api/v1/casos/{caso_id}/solicitar-ajuste")
+def solicitar_ajuste(caso_id: str, body: AjusteBody):
+    """Fase/opção inexistente → registra para a pasta de ajuste e implementação."""
+    from .core.db import registrar_evento
+    registrar_evento(caso_id, "SOLICITACAO_AJUSTE", {"descricao": body.descricao})
+    return {"ok": True}
+
+
+@app.get("/api/v1/casos/{caso_id}/download")
+def baixar_dossie(caso_id: str):
+    """Baixa o processo zipado: dossiê em Word (.docx) + documentos do storage
+    + links de nuvem, para ação humana urgente."""
+    import io, zipfile
+    from fastapi.responses import Response
+    from docx import Document
+    s = get_settings()
+    db = get_db()
+    caso = db.table("casos").select("*, clientes(*)").eq("id", caso_id).single().execute().data
+    msgs = db.table("mensagens").select("autor,conteudo,criado_em").eq("caso_id", caso_id).order("criado_em").execute().data
+    docs = db.table("documentos").select("*").eq("caso_id", caso_id).execute().data
+    cli = caso.get("clientes") or {}
+
+    # Dossiê em Word
+    doc = Document()
+    doc.add_heading(f"Dossiê do Processo — {cli.get('nome', '')}", 0)
+    doc.add_paragraph(f"Estado: {caso.get('estado')}  |  Grupo: {caso.get('grupo')}  |  Situação: {caso.get('situacao', 'ATIVO')}")
+    doc.add_paragraph(f"Nº do processo: {caso.get('numero_processo') or '—'}")
+    doc.add_paragraph(f"Contato: {cli.get('email') or cli.get('whatsapp') or '—'}  |  CPF/CNPJ: {cli.get('cpf_cnpj') or '—'}")
+    doc.add_paragraph(f"Honorários: {caso.get('honorarios_valor') or '—'}")
+    doc.add_heading("Relato / Informações coletadas", level=1)
+    doc.add_paragraph(caso.get("relato_inicial") or "—")
+    doc.add_heading("Histórico do atendimento", level=1)
+    for m in msgs:
+        doc.add_paragraph(f"[{m.get('autor')}] {m.get('conteudo')}")
+    buf = io.BytesIO()
+    doc.save(buf)
+    docx_bytes = buf.getvalue()
+
+    # Zip com dossiê + documentos + links
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("dossie.docx", docx_bytes)
+        links = []
+        for d in docs:
+            sp = d.get("storage_path") or ""
+            if sp.startswith("http"):
+                links.append(f"{d.get('observacao') or d.get('tipo')}: {sp}")
+            else:
+                try:
+                    data = db.storage.from_(s.bucket_documentos).download(sp)
+                    z.writestr(f"documentos/{sp.split('/')[-1]}", data)
+                except Exception:
+                    pass
+        if links:
+            z.writestr("links_nuvem.txt", "\n".join(links))
+    nome = (cli.get("nome") or "processo").replace(" ", "_")[:40]
+    return Response(
+        content=zbuf.getvalue(), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="processo_{nome}.zip"'},
+    )
 
 
 @app.post("/api/v1/cerebro/processar")

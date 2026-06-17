@@ -19,11 +19,11 @@ TRANSICOES = {
     "COLETA_DOCS":     ["COLETA_PROVAS", "ESCALADO_HUMANO"],
     "COLETA_PROVAS":   ["ANALISE", "ESCALADO_HUMANO"],
     "ANALISE":         ["PETICAO", "INVIAVEL", "ESCALADO_HUMANO"],
-    "PETICAO":         ["REVISAO"],
-    "REVISAO":         ["APROVADO", "PETICAO"],          # advogado pode devolver p/ reescrita
-    "APROVADO":        ["PROTOCOLO_RPA"],
+    "PETICAO":         ["REVISAO", "ESCALADO_HUMANO"],
+    "REVISAO":         ["APROVADO", "PETICAO", "ESCALADO_HUMANO"],   # advogado pode devolver p/ reescrita
+    "APROVADO":        ["PROTOCOLO_RPA", "ESCALADO_HUMANO"],
     "PROTOCOLO_RPA":   ["PROTOCOLADO", "ESCALADO_HUMANO"],
-    "PROTOCOLADO":     ["CONCLUIDO"],
+    "PROTOCOLADO":     ["CONCLUIDO", "ESCALADO_HUMANO"],
     "ESCALADO_HUMANO": ["QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO",
                         "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "AGENDADO", "CANCELADO"],
     "AGENDADO":        ["QUALIFICACAO", "COLETA_DOCS", "CANCELADO"],
