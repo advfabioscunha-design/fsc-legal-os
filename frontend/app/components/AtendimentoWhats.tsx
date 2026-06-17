@@ -10,8 +10,8 @@ const CONTATOS = [
 const MSG = "Olá! Vim pelo site da FC Advocacia e gostaria de atendimento.";
 const waLink = (n: string) => `https://wa.me/${n}?text=${encodeURIComponent(MSG)}`;
 
-// Telas de cadastro/login: sem botão (foco total, sem fuga)
-const OCULTAR_EM = ["/entrar", "/equipe"];
+// Telas internas/equipe/cliente: sem botão flutuante
+const OCULTAR_EM = ["/entrar", "/equipe", "/crm", "/cliente", "/portal"];
 
 function Opcoes() {
   return (

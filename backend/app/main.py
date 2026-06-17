@@ -1,6 +1,6 @@
 """FSC LEGAL OS v4.0 — Backend FastAPI (api.seudominio.com.br)."""
 import httpx
-from fastapi import FastAPI, Request, HTTPException, Header
+from fastapi import FastAPI, Request, HTTPException, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -101,13 +101,21 @@ def contrato_conversar(caso_id: str, body: Mensagem):
 
 # ── CRM ──────────────────────────────────────────────────────────
 @app.get("/api/v1/casos")
-def listar_casos(estado: str | None = None, grupo: str | None = None):
-    q = get_db().table("casos").select("*, clientes(nome,whatsapp,email,origem)")
-    if estado:
-        q = q.eq("estado", estado)
-    if grupo:
-        q = q.eq("grupo", grupo)
-    return q.order("atualizado_em", desc=True).limit(200).execute().data
+def listar_casos(estado: str | None = None, grupo: str | None = None, situacao: str = "ATIVO"):
+    db = get_db()
+    def montar(com_situacao: bool):
+        q = db.table("casos").select("*, clientes(nome,whatsapp,email,origem)")
+        if com_situacao and situacao and situacao != "TODOS":
+            q = q.eq("situacao", situacao)
+        if estado:
+            q = q.eq("estado", estado)
+        if grupo:
+            q = q.eq("grupo", grupo)
+        return q.order("atualizado_em", desc=True).limit(300).execute().data
+    try:
+        return montar(True)
+    except Exception:
+        return montar(False)  # coluna 'situacao' ainda não criada (migração pendente)
 
 
 @app.get("/api/v1/casos/{caso_id}")
@@ -218,6 +226,180 @@ def pendencias():
                 break
         c["mensagens_nao_respondidas"] = nao_resp
     return casos
+
+
+# ── Gestão do caso (detalhe, edição, anexos, situação) ───────────
+from datetime import datetime, timezone as _tz
+
+
+class MotivoBody(BaseModel):
+    motivo: str | None = None
+
+
+class NotaBody(BaseModel):
+    texto: str
+
+
+class DocLink(BaseModel):
+    nome: str | None = None
+    url: str
+    tipo: str | None = "LINK"
+
+
+class EditarCaso(BaseModel):
+    relato_inicial: str | None = None
+    grupo: str | None = None
+    honorarios: str | None = None
+    numero_processo: str | None = None
+
+
+def _set_situacao(caso_id: str, situacao: str, motivo: str | None, evento: str):
+    from .core.db import registrar_evento
+    get_db().table("casos").update({
+        "situacao": situacao, "situacao_motivo": motivo,
+        "atualizado_em": datetime.now(_tz.utc).isoformat(),
+    }).eq("id", caso_id).execute()
+    registrar_evento(caso_id, evento, {"motivo": motivo})
+    return {"ok": True, "situacao": situacao}
+
+
+@app.post("/api/v1/casos/{caso_id}/suspender")
+def suspender_caso(caso_id: str, body: MotivoBody):
+    return _set_situacao(caso_id, "SUSPENSO", body.motivo, "CASO_SUSPENSO")
+
+
+@app.post("/api/v1/casos/{caso_id}/arquivar")
+def arquivar_caso(caso_id: str, body: MotivoBody):
+    return _set_situacao(caso_id, "ARQUIVADO", body.motivo, "CASO_ARQUIVADO")
+
+
+@app.post("/api/v1/casos/{caso_id}/ativar")
+def ativar_caso(caso_id: str):
+    return _set_situacao(caso_id, "ATIVO", None, "CASO_ATIVADO")
+
+
+@app.delete("/api/v1/casos/{caso_id}")
+def excluir_caso(caso_id: str):
+    db = get_db()
+    for t in ("mensagens", "documentos", "eventos", "protocolos"):
+        try:
+            db.table(t).delete().eq("caso_id", caso_id).execute()
+        except Exception:
+            pass
+    db.table("casos").delete().eq("id", caso_id).execute()
+    return {"ok": True, "excluido": caso_id}
+
+
+@app.patch("/api/v1/casos/{caso_id}")
+def editar_caso(caso_id: str, body: EditarCaso):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "honorarios" in campos:
+        campos["honorarios_valor"] = campos.pop("honorarios")
+    if campos:
+        campos["atualizado_em"] = datetime.now(_tz.utc).isoformat()
+        get_db().table("casos").update(campos).eq("id", caso_id).execute()
+    return {"ok": True}
+
+
+@app.post("/api/v1/casos/{caso_id}/nota")
+def add_nota(caso_id: str, body: NotaBody):
+    get_db().table("mensagens").insert({
+        "caso_id": caso_id, "canal": "CRM", "autor": "HUMANO", "conteudo": body.texto,
+    }).execute()
+    return {"ok": True}
+
+
+@app.post("/api/v1/casos/{caso_id}/documentos")
+def add_documento_link(caso_id: str, body: DocLink):
+    get_db().table("documentos").insert({
+        "caso_id": caso_id, "tipo": body.tipo or "LINK",
+        "storage_path": body.url, "observacao": body.nome, "status": "RECEBIDO",
+    }).execute()
+    return {"ok": True}
+
+
+@app.post("/api/v1/casos/{caso_id}/documentos/upload")
+async def upload_documento(caso_id: str, arquivo: UploadFile = File(...)):
+    import time
+    s = get_settings()
+    db = get_db()
+    conteudo = await arquivo.read()
+    path = f"{caso_id}/{int(time.time())}_{arquivo.filename}"
+    try:
+        db.storage.from_(s.bucket_documentos).upload(
+            path, conteudo,
+            {"content-type": arquivo.content_type or "application/octet-stream"},
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Falha no upload: {e}")
+    db.table("documentos").insert({
+        "caso_id": caso_id, "tipo": "UPLOAD", "storage_path": path,
+        "observacao": arquivo.filename, "status": "RECEBIDO",
+    }).execute()
+    return {"ok": True, "path": path}
+
+
+@app.post("/api/v1/casos/{caso_id}/iniciar")
+def iniciar_caso_escritorio(caso_id: str):
+    """Botão do CRM: inicia o processo do escritório na esteira (situação ATIVA)
+    e registra o disparo para os agentes da esteira darem sequência."""
+    from .core.db import registrar_evento
+    get_db().table("casos").update({
+        "situacao": "ATIVO", "atualizado_em": datetime.now(_tz.utc).isoformat(),
+    }).eq("id", caso_id).execute()
+    registrar_evento(caso_id, "PROCESSO_INICIADO_ESTEIRA", {"por": "ESCRITORIO"})
+    return {"ok": True}
+
+
+# ── Acionamento do cliente + aprovação humana da etapa ───────────
+ORDEM_ESTEIRA = ["LEAD", "QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO",
+                 "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "PETICAO", "REVISAO",
+                 "APROVADO", "PROTOCOLO_RPA", "PROTOCOLADO"]
+
+
+class AcionarBody(BaseModel):
+    solicitacao: str
+
+
+@app.post("/api/v1/casos/{caso_id}/acionar-cliente")
+def acionar_cliente(caso_id: str, body: AcionarBody):
+    """Operador digita o que precisa do cliente; vai para o agente de triagem
+    do WhatsApp coletar (mensagem/documento/assinatura/pagamento)."""
+    from .core.db import registrar_evento
+    db = get_db()
+    texto = f"[SOLICITAÇÃO AO CLIENTE] {body.solicitacao}"
+    db.table("mensagens").insert({
+        "caso_id": caso_id, "canal": "WHATSAPP", "autor": "HUMANO", "conteudo": texto,
+    }).execute()
+    registrar_evento(caso_id, "SOLICITACAO_CLIENTE", {"texto": body.solicitacao})
+    # tenta enviar já pelo WhatsApp (quando o agente/Cloud API estiver ligado)
+    enviado = False
+    try:
+        from .integracoes.whatsapp import enviar_para_cliente
+        enviar_para_cliente(caso_id, body.solicitacao)
+        enviado = True
+    except Exception:
+        pass
+    return {"ok": True, "enviado_whatsapp": enviado}
+
+
+@app.post("/api/v1/casos/{caso_id}/aprovar-etapa")
+def aprovar_etapa(caso_id: str):
+    """Aprovação humana após a conferência: avança o caso para a próxima etapa."""
+    db = get_db()
+    caso = db.table("casos").select("estado").eq("id", caso_id).single().execute().data
+    atual = caso["estado"]
+    if atual not in ORDEM_ESTEIRA:
+        raise HTTPException(400, f"Estado '{atual}' não permite avanço manual.")
+    i = ORDEM_ESTEIRA.index(atual)
+    if i + 1 >= len(ORDEM_ESTEIRA):
+        return {"ok": True, "info": "Caso já está na última etapa."}
+    prox = ORDEM_ESTEIRA[i + 1]
+    try:
+        mudar_estado(caso_id, prox, motivo="Aprovação humana — avançar etapa")
+    except TransicaoInvalida as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "novo_estado": prox}
 
 
 @app.post("/api/v1/cerebro/processar")

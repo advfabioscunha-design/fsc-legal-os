@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
+import CasoDetalhe from "../components/CasoDetalhe";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -49,6 +50,8 @@ export default function CRM() {
   const [pendencias, setPendencias] = useState<Caso[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
+  const [aba, setAba] = useState<"esteira" | "suspensos" | "arquivados">("esteira");
+  const [selecionado, setSelecionado] = useState<string | null>(null);
   const [form, setForm] = useState({ ...formVazio });
   const [salvando, setSalvando] = useState(false);
 
@@ -65,16 +68,19 @@ export default function CRM() {
 
   function load() {
     setLoading(true);
+    const situ = aba === "esteira" ? "ATIVO" : aba === "suspensos" ? "SUSPENSO" : "ARQUIVADO";
     Promise.all([
-      fetch(`${API}/api/v1/casos`).then((r) => r.json()).catch(() => []),
-      fetch(`${API}/api/v1/pendencias`).then((r) => r.json()).catch(() => []),
+      fetch(`${API}/api/v1/casos?situacao=${situ}`).then((r) => r.json()).catch(() => []),
+      aba === "esteira"
+        ? fetch(`${API}/api/v1/pendencias`).then((r) => r.json()).catch(() => [])
+        : Promise.resolve([]),
     ]).then(([cs, ps]) => {
       setCasos(Array.isArray(cs) ? cs : []);
       setPendencias(Array.isArray(ps) ? ps : []);
     }).finally(() => setLoading(false));
   }
 
-  useEffect(() => { if (autorizado) load(); }, [autorizado]);
+  useEffect(() => { if (autorizado) load(); /* eslint-disable-next-line */ }, [autorizado, aba]);
 
   async function aprovar(id: string) {
     await fetch(`${API}/api/v1/casos/${id}/aprovar-protocolar`, { method: "POST" });
@@ -134,6 +140,16 @@ export default function CRM() {
         </div>
       </header>
 
+      {/* Abas */}
+      <div className="flex gap-2 px-4 pt-4">
+        {([["esteira", "Esteira"], ["suspensos", "Suspensos"], ["arquivados", "Arquivados"]] as const).map(([k, l]) => (
+          <button key={k} onClick={() => setAba(k)}
+            className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${aba === k ? "bg-[#C9A84C] text-[#0A1628]" : "bg-white/5 text-[#8899AA] hover:text-white"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
       {/* Caixa de Intervenção Urgente */}
       {pendencias.length > 0 && (
         <div className="mx-4 mt-4 rounded-lg border border-[#C0392B]/50 bg-[#C0392B]/10 p-4">
@@ -162,7 +178,8 @@ export default function CRM() {
         </div>
       )}
 
-      {/* Esteira */}
+      {/* Esteira (aba ativa) ou listas de Suspensos/Arquivados */}
+      {aba === "esteira" ? (
       <div className="p-4 overflow-x-auto">
         <div className="flex gap-3 min-w-max pb-4">
           {COLUNAS.map((col) => {
@@ -175,7 +192,8 @@ export default function CRM() {
                 </div>
                 <div className="space-y-2 min-h-[3rem]">
                   {cards.map((c) => (
-                    <div key={c.id} className={`rounded-lg bg-[#1A3A6B]/30 border p-3 transition-colors ${ehEscritorio(c) ? "border-[#C9A84C]/40" : "border-white/5 hover:border-[#2D7DD2]/30"}`}>
+                    <div key={c.id} onClick={() => setSelecionado(c.id)}
+                      className={`cursor-pointer rounded-lg bg-[#1A3A6B]/30 border p-3 transition-colors ${ehEscritorio(c) ? "border-[#C9A84C]/40" : "border-white/5 hover:border-[#2D7DD2]/30"}`}>
                       <div className="flex items-start justify-between gap-1">
                         <p className="font-semibold text-white text-sm truncate">{c.clientes?.nome ?? "—"}</p>
                       </div>
@@ -192,7 +210,7 @@ export default function CRM() {
                         <span className="inline-block mt-1 text-[10px] bg-[#2D7DD2]/15 text-[#2D7DD2] rounded px-2 py-0.5">{c.tese_id}</span>
                       )}
                       {col.id === "REVISAO" && (
-                        <button onClick={() => aprovar(c.id)}
+                        <button onClick={(e) => { e.stopPropagation(); aprovar(c.id); }}
                           className="mt-2 w-full rounded-md bg-[#1DB954] hover:bg-[#17a349] py-1.5 text-xs font-bold text-white transition-colors">
                           Aprovar e Protocolar
                         </button>
@@ -210,6 +228,27 @@ export default function CRM() {
           })}
         </div>
       </div>
+      ) : (
+        <div className="p-4">
+          {loading ? (
+            <p className="text-[#8899AA]">Carregando...</p>
+          ) : casos.length === 0 ? (
+            <p className="text-[#8899AA]/50">Nenhum caso {aba === "suspensos" ? "suspenso" : "arquivado"}.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {casos.map((c) => (
+                <button key={c.id} onClick={() => setSelecionado(c.id)}
+                  className="rounded-lg border border-white/10 bg-[#1A3A6B]/30 p-4 text-left transition hover:border-[#C9A84C]/40">
+                  <p className="text-sm font-semibold text-white">{c.clientes?.nome ?? "—"}</p>
+                  <p className="mt-1 text-xs text-[#8899AA]">{c.grupo ?? "—"} · {c.estado}</p>
+                  {ehEscritorio(c) && <span className="mt-1 inline-block text-[10px] text-[#C9A84C]">★ Escritório</span>}
+                  <p className="mt-2 text-xs text-[#C9A84C]">Abrir para ativar →</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modal: Montar Processo do Escritório */}
       {modal && (
@@ -255,6 +294,10 @@ export default function CRM() {
             </div>
           </form>
         </div>
+      )}
+
+      {selecionado && (
+        <CasoDetalhe casoId={selecionado} onFechar={() => setSelecionado(null)} onMudou={load} />
       )}
     </div>
   );
