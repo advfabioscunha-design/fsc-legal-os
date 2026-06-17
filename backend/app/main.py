@@ -102,7 +102,7 @@ def contrato_conversar(caso_id: str, body: Mensagem):
 # ── CRM ──────────────────────────────────────────────────────────
 @app.get("/api/v1/casos")
 def listar_casos(estado: str | None = None, grupo: str | None = None):
-    q = get_db().table("casos").select("*, clientes(nome,whatsapp,email)")
+    q = get_db().table("casos").select("*, clientes(nome,whatsapp,email,origem)")
     if estado:
         q = q.eq("estado", estado)
     if grupo:
@@ -143,6 +143,81 @@ def aprovar_e_protocolar(caso_id: str, tribunal: str = "EPROC_TJSC"):
 @app.post("/api/v1/casos/{caso_id}/escalar")
 def escalar_manual(caso_id: str, motivo: str = "PEDIDO_CLIENTE", detalhe: str = ""):
     return escalar_para_humano(caso_id, motivo, detalhe)
+
+
+# ── Montagem de Processo do Escritório (operação interna) ─────────
+_GRUPOS_VALIDOS = {"BANCARIO", "IMOBILIARIO", "TRABALHISTA",
+                   "PREVIDENCIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"}
+_FASES_VALIDAS = {"QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO",
+                  "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "PETICAO", "REVISAO"}
+
+
+class CasoEscritorio(BaseModel):
+    nome: str
+    contato: str | None = None      # email ou whatsapp
+    cpf: str | None = None
+    grupo: str | None = None        # grupo_tese
+    fase: str = "PETICAO"           # estado em que o processo entra
+    descricao: str | None = None
+    honorarios: str | None = None
+    numero_processo: str | None = None
+
+
+@app.post("/api/v1/casos/escritorio")
+def criar_caso_escritorio(body: CasoEscritorio):
+    """Cadastra um processo do escritório (cliente atendido por fora) já na
+    fase em que ele se encontra, para entrar direto na esteira de produção."""
+    from .core.db import registrar_evento
+    db = get_db()
+    fase = body.fase if body.fase in _FASES_VALIDAS else "PETICAO"
+    grupo = body.grupo if body.grupo in _GRUPOS_VALIDOS else None
+
+    cli: dict = {"nome": body.nome, "origem": "ESCRITORIO"}
+    if body.contato:
+        if "@" in body.contato:
+            cli["email"] = body.contato
+        else:
+            cli["whatsapp"] = "".join(ch for ch in body.contato if ch.isdigit())
+    if body.cpf:
+        cli["cpf_cnpj"] = body.cpf
+    cliente = db.table("clientes").insert(cli).execute().data[0]
+
+    caso_row: dict = {
+        "cliente_id": cliente["id"],
+        "estado": fase,
+        "relato_inicial": body.descricao or "Processo cadastrado pelo escritório",
+    }
+    if grupo:
+        caso_row["grupo"] = grupo
+    if body.honorarios:
+        caso_row["honorarios_valor"] = body.honorarios
+    if body.numero_processo:
+        caso_row["numero_processo"] = body.numero_processo
+    caso = db.table("casos").insert(caso_row).execute().data[0]
+    registrar_evento(caso["id"], "CASO_ESCRITORIO_CRIADO",
+                     {"fase": fase, "origem": "ESCRITORIO"})
+    return {"ok": True, "caso_id": caso["id"], "estado": fase}
+
+
+@app.get("/api/v1/pendencias")
+def pendencias():
+    """Casos escalados para humano (caixa de Intervenção Urgente), com a
+    contagem de mensagens do cliente ainda não respondidas."""
+    db = get_db()
+    casos = db.table("casos").select("*, clientes(nome,whatsapp,email,origem)") \
+        .eq("estado", "ESCALADO_HUMANO").order("atualizado_em", desc=True) \
+        .limit(100).execute().data
+    for c in casos:
+        msgs = db.table("mensagens").select("autor").eq("caso_id", c["id"]) \
+            .order("criado_em").execute().data
+        nao_resp = 0
+        for m in reversed(msgs):
+            if m["autor"] == "CLIENTE":
+                nao_resp += 1
+            else:
+                break
+        c["mensagens_nao_respondidas"] = nao_resp
+    return casos
 
 
 @app.post("/api/v1/cerebro/processar")
