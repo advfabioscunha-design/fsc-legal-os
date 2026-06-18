@@ -366,12 +366,15 @@ def add_documento_link(caso_id: str, body: DocLink):
 
 @app.post("/api/v1/casos/{caso_id}/documentos/upload")
 async def upload_documento(caso_id: str, arquivo: UploadFile = File(...)):
-    import uuid
+    import re, uuid
     s = get_settings()
     db = get_db()
     conteudo = await arquivo.read()
-    safe = (arquivo.filename or "arquivo").replace("/", "_").replace("\\", "_")
-    path = f"{caso_id}/{uuid.uuid4().hex}_{safe}"   # nome único: nunca colide
+    nome_orig = arquivo.filename or "arquivo"
+    base = nome_orig.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    # storage não aceita espaços/acentos na chave -> troca por "_"
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", base) or "arquivo"
+    path = f"{caso_id}/{uuid.uuid4().hex}_{safe}"   # chave única e válida
     try:
         db.storage.from_(s.bucket_documentos).upload(
             path, conteudo,
