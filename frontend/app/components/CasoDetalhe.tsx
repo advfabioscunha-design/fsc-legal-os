@@ -11,6 +11,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const [nota, setNota] = useState("");
   const [solicitacao, setSolicitacao] = useState("");
   const [novaFase, setNovaFase] = useState("");
+  const [subindo, setSubindo] = useState(false);
   const [linkNome, setLinkNome] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -62,14 +63,35 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     setLinkNome(""); setLinkUrl(""); carregar();
   }
 
-  async function enviarArquivo(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const fd = new FormData();
-    fd.append("arquivo", f);
-    await fetch(`${API}/api/v1/casos/${casoId}/documentos/upload`, { method: "POST", body: fd });
-    if (fileRef.current) fileRef.current.value = "";
-    carregar();
+  async function enviarArquivos(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setSubindo(true);
+    let falhas = 0;
+    try {
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("arquivo", f);
+        const r = await fetch(`${API}/api/v1/casos/${casoId}/documentos/upload`, { method: "POST", body: fd });
+        if (!r.ok) falhas++;
+      }
+      if (falhas) alert(`${falhas} arquivo(s) não enviaram. A API precisa estar atualizada (com python-multipart).`);
+    } catch {
+      alert("Falha de conexão ao enviar arquivos.");
+    } finally {
+      setSubindo(false);
+      if (fileRef.current) fileRef.current.value = "";
+      carregar();
+    }
+  }
+
+  async function abrirDoc(id: string) {
+    try {
+      const r = await fetch(`${API}/api/v1/documentos/${id}/url`);
+      const d = await r.json();
+      if (d.url) window.open(d.url, "_blank");
+      else alert("Não foi possível abrir o documento.");
+    } catch { alert("Não foi possível abrir o documento."); }
   }
 
   async function acao(tipo: "suspender" | "arquivar" | "ativar" | "iniciar") {
@@ -214,8 +236,9 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                   return (
                     <li key={d.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
                       <span className="truncate">{d.observacao || d.tipo}</span>
-                      {url ? <a href={url} target="_blank" rel="noreferrer" className="text-[#C9A84C] hover:underline">abrir</a>
-                           : <span className="text-xs text-white/40">{d.tipo}</span>}
+                      {url
+                        ? <a href={url} target="_blank" rel="noreferrer" className="text-[#C9A84C] hover:underline">abrir</a>
+                        : <button onClick={() => abrirDoc(d.id)} className="text-[#C9A84C] hover:underline">abrir</button>}
                     </li>
                   );
                 })}
@@ -223,8 +246,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               </ul>
               <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div className="rounded-lg border border-dashed border-white/15 p-3">
-                  <p className="mb-1 text-xs text-white/60">Anexar do computador</p>
-                  <input ref={fileRef} type="file" onChange={enviarArquivo} className="text-xs text-white/70 file:mr-2 file:rounded file:border-0 file:bg-[#C9A84C] file:px-2 file:py-1 file:text-[#0A1628]" />
+                  <p className="mb-2 text-xs text-white/60">Anexar do computador (vários de uma vez)</p>
+                  <input ref={fileRef} type="file" multiple onChange={enviarArquivos} className="hidden" id="upload-arq" />
+                  <label htmlFor="upload-arq" className="inline-block cursor-pointer rounded bg-[#C9A84C] px-3 py-1.5 text-xs font-bold text-[#0A1628] hover:bg-[#d8b95e]">
+                    + Adicionar arquivo(s)
+                  </label>
+                  {subindo && <span className="ml-2 text-xs text-white/60">enviando…</span>}
                 </div>
                 <div className="rounded-lg border border-dashed border-white/15 p-3">
                   <p className="mb-1 text-xs text-white/60">Anexar link (Drive/nuvem)</p>

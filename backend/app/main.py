@@ -385,6 +385,23 @@ async def upload_documento(caso_id: str, arquivo: UploadFile = File(...)):
     return {"ok": True, "path": path}
 
 
+@app.get("/api/v1/documentos/{doc_id}/url")
+def url_documento(doc_id: str):
+    """Gera link temporário para abrir um documento salvo no storage privado."""
+    s = get_settings()
+    db = get_db()
+    d = db.table("documentos").select("storage_path").eq("id", doc_id).single().execute().data
+    sp = d.get("storage_path") or ""
+    if sp.startswith("http"):
+        return {"url": sp}
+    try:
+        res = db.storage.from_(s.bucket_documentos).create_signed_url(sp, 3600)
+        url = res.get("signedURL") or res.get("signedUrl") or res.get("signed_url")
+        return {"url": url}
+    except Exception as e:
+        raise HTTPException(500, f"Falha ao gerar link: {e}")
+
+
 @app.post("/api/v1/casos/{caso_id}/iniciar")
 def iniciar_caso_escritorio(caso_id: str):
     """Botão do CRM: inicia o processo do escritório na esteira (situação ATIVA)
