@@ -67,22 +67,33 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     setSubindo(true);
-    let falhas = 0;
+    const erros: string[] = [];
     try {
       for (const f of files) {
-        const fd = new FormData();
-        fd.append("arquivo", f);
-        const r = await fetch(`${API}/api/v1/casos/${casoId}/documentos/upload`, { method: "POST", body: fd });
-        if (!r.ok) falhas++;
+        try {
+          const fd = new FormData();
+          fd.append("arquivo", f);
+          const r = await fetch(`${API}/api/v1/casos/${casoId}/documentos/upload`, { method: "POST", body: fd });
+          if (!r.ok) {
+            const er = await r.json().catch(() => ({} as any));
+            erros.push(`${f.name}: ${er.detail || `erro ${r.status}`}`);
+          }
+        } catch {
+          erros.push(`${f.name}: falha de conexão`);
+        }
       }
-      if (falhas) alert(`${falhas} arquivo(s) não enviaram. A API precisa estar atualizada (com python-multipart).`);
-    } catch {
-      alert("Falha de conexão ao enviar arquivos.");
+      if (erros.length) alert("Não foi possível enviar:\n\n" + erros.join("\n"));
     } finally {
       setSubindo(false);
       if (fileRef.current) fileRef.current.value = "";
       carregar();
     }
+  }
+
+  async function excluirDoc(id: string) {
+    if (!window.confirm("Remover este documento? Esta ação não pode ser desfeita.")) return;
+    await fetch(`${API}/api/v1/documentos/${id}`, { method: "DELETE" });
+    carregar();
   }
 
   async function abrirDoc(id: string) {
@@ -234,11 +245,14 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                 {(caso.documentos || []).map((d: any) => {
                   const url = (d.storage_path || "").startsWith("http") ? d.storage_path : null;
                   return (
-                    <li key={d.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
+                    <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
                       <span className="truncate">{d.observacao || d.tipo}</span>
-                      {url
-                        ? <a href={url} target="_blank" rel="noreferrer" className="text-[#C9A84C] hover:underline">abrir</a>
-                        : <button onClick={() => abrirDoc(d.id)} className="text-[#C9A84C] hover:underline">abrir</button>}
+                      <span className="flex shrink-0 items-center gap-3">
+                        {url
+                          ? <a href={url} target="_blank" rel="noreferrer" className="text-[#C9A84C] hover:underline">abrir</a>
+                          : <button onClick={() => abrirDoc(d.id)} className="text-[#C9A84C] hover:underline">abrir</button>}
+                        <button onClick={() => excluirDoc(d.id)} className="text-[#C0392B] hover:underline">excluir</button>
+                      </span>
                     </li>
                   );
                 })}

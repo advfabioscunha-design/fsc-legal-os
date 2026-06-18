@@ -366,18 +366,19 @@ def add_documento_link(caso_id: str, body: DocLink):
 
 @app.post("/api/v1/casos/{caso_id}/documentos/upload")
 async def upload_documento(caso_id: str, arquivo: UploadFile = File(...)):
-    import time
+    import uuid
     s = get_settings()
     db = get_db()
     conteudo = await arquivo.read()
-    path = f"{caso_id}/{int(time.time())}_{arquivo.filename}"
+    safe = (arquivo.filename or "arquivo").replace("/", "_").replace("\\", "_")
+    path = f"{caso_id}/{uuid.uuid4().hex}_{safe}"   # nome único: nunca colide
     try:
         db.storage.from_(s.bucket_documentos).upload(
             path, conteudo,
-            {"content-type": arquivo.content_type or "application/octet-stream"},
+            {"content-type": arquivo.content_type or "application/octet-stream", "upsert": "true"},
         )
     except Exception as e:
-        raise HTTPException(500, f"Falha no upload: {e}")
+        raise HTTPException(500, f"Falha no upload de '{arquivo.filename}': {e}")
     db.table("documentos").insert({
         "caso_id": caso_id, "tipo": "UPLOAD", "storage_path": path,
         "observacao": arquivo.filename, "status": "RECEBIDO",
@@ -400,6 +401,22 @@ def url_documento(doc_id: str):
         return {"url": url}
     except Exception as e:
         raise HTTPException(500, f"Falha ao gerar link: {e}")
+
+
+@app.delete("/api/v1/documentos/{doc_id}")
+def excluir_documento(doc_id: str):
+    """Remove o documento da pasta do cliente (storage) e do banco."""
+    s = get_settings()
+    db = get_db()
+    d = db.table("documentos").select("storage_path").eq("id", doc_id).single().execute().data
+    sp = (d or {}).get("storage_path") or ""
+    if sp and not sp.startswith("http"):
+        try:
+            db.storage.from_(s.bucket_documentos).remove([sp])
+        except Exception:
+            pass
+    db.table("documentos").delete().eq("id", doc_id).execute()
+    return {"ok": True}
 
 
 @app.post("/api/v1/casos/{caso_id}/iniciar")
