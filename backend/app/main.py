@@ -422,6 +422,110 @@ def excluir_documento(doc_id: str):
     return {"ok": True}
 
 
+# ── SPRINT 1: Motor de Intimações e Processos (Escavador) ────────
+class MonitorarBody(BaseModel):
+    numero_processo: str | None = None
+    oab: str | None = None
+    tribunal: str | None = None
+    caso_id: str | None = None
+
+
+class StatusIntimacao(BaseModel):
+    status: str
+
+
+@app.post("/webhooks/escavador")
+async def webhook_escavador(req: Request):
+    """Recebe callbacks do Escavador. Insert rápido e idempotente, responde já."""
+    from .integracoes import escavador
+    try:
+        payload = await req.json()
+    except Exception:
+        payload = {}
+    return escavador.processar_webhook(payload)
+
+
+@app.post("/api/v1/processos/monitorar")
+def monitorar_processo(body: MonitorarBody):
+    from .integracoes import escavador
+    if not body.numero_processo and not body.oab:
+        raise HTTPException(400, "Informe o número do processo ou a OAB.")
+    return escavador.criar_monitoramento(body.numero_processo, body.oab, body.tribunal, body.caso_id)
+
+
+@app.get("/api/v1/intimacoes")
+def listar_intimacoes(status: str | None = None, tribunal: str | None = None,
+                      q: str | None = None, limite: int = 200):
+    qy = get_db().table("intimacoes").select("*")
+    if status:
+        qy = qy.eq("status", status)
+    if tribunal:
+        qy = qy.eq("tribunal", tribunal)
+    if q:
+        qy = qy.ilike("numero_processo", f"%{q}%")
+    return qy.order("data_movimento", desc=True).limit(limite).execute().data
+
+
+@app.patch("/api/v1/intimacoes/{intimacao_id}")
+def atualizar_intimacao(intimacao_id: str, body: StatusIntimacao):
+    if body.status not in ("A_RESOLVER", "RESOLVIDO", "PERDA_PRAZO"):
+        raise HTTPException(400, "status inválido")
+    get_db().table("intimacoes").update({"status": body.status, "lida": True}).eq("id", intimacao_id).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/intimacoes/nao-lidas")
+def intimacoes_nao_lidas():
+    r = get_db().table("intimacoes").select("id").eq("lida", False).execute().data
+    return {"total": len(r)}
+
+
+@app.post("/api/v1/intimacoes/marcar-lidas")
+def marcar_intimacoes_lidas():
+    get_db().table("intimacoes").update({"lida": True}).eq("lida", False).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/processos")
+def listar_processos(tribunal: str | None = None, grupo: str | None = None,
+                     estado: str | None = None, ano: str | None = None, limite: int = 200):
+    rows = get_db().table("casos").select("*, clientes(nome,whatsapp,email)") \
+        .order("atualizado_em", desc=True).limit(400).execute().data
+    rows = [r for r in rows if r.get("numero_processo")]
+    if tribunal:
+        rows = [r for r in rows if r.get("tribunal") == tribunal]
+    if grupo:
+        rows = [r for r in rows if r.get("grupo") == grupo]
+    if estado:
+        rows = [r for r in rows if r.get("estado") == estado]
+    if ano:
+        rows = [r for r in rows if ano in (r.get("numero_processo") or "")]
+    return rows[:limite]
+
+
+@app.get("/api/v1/buscar")
+def buscar_global(q: str):
+    """Busca global da Top Bar: por nome, CPF/CNPJ ou número do processo."""
+    db = get_db()
+    termo = f"%{q}%"
+    vistos: dict = {}
+    try:
+        for col in ("nome", "cpf_cnpj"):
+            for c in db.table("clientes").select("id,nome,cpf_cnpj").ilike(col, termo).limit(15).execute().data:
+                vistos[c["id"]] = c
+    except Exception:
+        pass
+    casos = []
+    if vistos:
+        casos = db.table("casos").select("id,estado,grupo,numero_processo,cliente_id,clientes(nome,cpf_cnpj)") \
+            .in_("cliente_id", list(vistos.keys())).limit(40).execute().data
+    porproc = db.table("casos").select("id,estado,grupo,numero_processo,clientes(nome,cpf_cnpj)") \
+        .ilike("numero_processo", termo).limit(20).execute().data
+    # dedup por id de caso
+    final = {c["id"]: c for c in (casos + porproc)}
+    return {"casos": list(final.values())}
+
+
 @app.post("/api/v1/casos/{caso_id}/iniciar")
 def iniciar_caso_escritorio(caso_id: str):
     """Botão do CRM: inicia o processo do escritório na esteira (situação ATIVA)

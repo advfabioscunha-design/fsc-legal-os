@@ -30,6 +30,10 @@ class Settings(BaseModel):
     zapsign_base_url: str = os.getenv("ZAPSIGN_BASE_URL", "https://api.zapsign.com.br/api/v1")
     whatsapp_token: str = os.getenv("WHATSAPP_TOKEN", "")
     whatsapp_phone_id: str = os.getenv("WHATSAPP_PHONE_ID", "")
+    # Escavador — monitoramento de processos e intimações
+    escavador_api_token: str = os.getenv("ESCAVADOR_API_TOKEN", "")
+    escavador_base_url: str = os.getenv("ESCAVADOR_BASE_URL", "https://api.escavador.com")
+    escavador_webhook_token: str = os.getenv("ESCAVADOR_WEBHOOK_TOKEN", "fc-legal-os")
 
     # Fila / RPA
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
