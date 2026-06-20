@@ -526,6 +526,167 @@ def buscar_global(q: str):
     return {"casos": list(final.values())}
 
 
+# ── SPRINT 2: Painel Administrativo e Financeiro ─────────────────
+@app.get("/api/v1/admin/metricas")
+def admin_metricas(periodo: str = "mes"):
+    """KPIs do escritório a partir dos casos. periodo: dia|semana|mes|ano."""
+    import re
+    from datetime import datetime, timedelta, timezone as tz
+    db = get_db()
+    casos = db.table("casos").select(
+        "estado,grupo,honorarios_valor,situacao,criado_em,pagamento_confirmado_em"
+    ).limit(5000).execute().data
+
+    agora = datetime.now(tz.utc)
+    dias = {"dia": 1, "semana": 7, "mes": 30, "ano": 365}.get(periodo, 30)
+    corte = agora - timedelta(days=dias)
+
+    def _dt(s):
+        try:
+            return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    no_periodo = [c for c in casos if (_dt(c.get("criado_em")) or agora) >= corte]
+
+    por_nicho: dict = {}
+    for c in no_periodo:
+        g = c.get("grupo") or "OUTROS"
+        por_nicho[g] = por_nicho.get(g, 0) + 1
+
+    CONTRATACAO = {"LEAD", "QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO"}
+    PRODUCAO = {"COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "PETICAO", "REVISAO", "APROVADO", "PROTOCOLO_RPA"}
+    ATIVOS = {"PROTOCOLADO", "CONCLUIDO"}
+    funil = {"contratacao": 0, "producao": 0, "ativos": 0}
+    for c in casos:
+        e = c.get("estado")
+        if e in CONTRATACAO:
+            funil["contratacao"] += 1
+        elif e in PRODUCAO:
+            funil["producao"] += 1
+        elif e in ATIVOS:
+            funil["ativos"] += 1
+
+    def _valor(txt):
+        t = str(txt or "")
+        if "%" in t:
+            return 0.0
+        m = re.search(r"(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:[.,]\d{2})?)", t)
+        if not m:
+            return 0.0
+        try:
+            return float(m.group(1).replace(".", "").replace(",", "."))
+        except Exception:
+            return 0.0
+
+    recebido = a_receber = 0.0
+    vals = []
+    for c in casos:
+        v = _valor(c.get("honorarios_valor"))
+        if v > 0:
+            vals.append(v)
+        if c.get("pagamento_confirmado_em"):
+            recebido += v
+        elif c.get("estado") in (CONTRATACAO | PRODUCAO | ATIVOS) - {"LEAD", "QUALIFICACAO", "PROPOSTA"}:
+            a_receber += v
+    ticket = round(sum(vals) / len(vals), 2) if vals else 0.0
+
+    return {
+        "periodo": periodo,
+        "total_casos": len(no_periodo),
+        "por_nicho": por_nicho,
+        "funil": funil,
+        "financeiro": {
+            "recebido": round(recebido, 2), "a_receber": round(a_receber, 2),
+            "ticket_medio": ticket, "qtd_valores": len(vals),
+        },
+    }
+
+
+# ── Módulo de Custos (entradas/saídas + folha) ───────────────────
+class Lancamento(BaseModel):
+    tipo: str                      # ENTRADA | SAIDA
+    categoria: str | None = None
+    descricao: str | None = None
+    valor: float = 0
+    data: str | None = None
+    recorrente: bool = False
+
+
+class FolhaItem(BaseModel):
+    nome: str
+    cargo: str | None = None
+    salario: float = 0
+
+
+@app.get("/api/v1/financeiro/lancamentos")
+def listar_lancamentos(limite: int = 300):
+    return get_db().table("fin_lancamentos").select("*").order("data", desc=True).limit(limite).execute().data
+
+
+@app.post("/api/v1/financeiro/lancamentos")
+def criar_lancamento(body: Lancamento):
+    if body.tipo not in ("ENTRADA", "SAIDA"):
+        raise HTTPException(400, "tipo inválido (use ENTRADA ou SAIDA)")
+    row = {"tipo": body.tipo, "categoria": body.categoria, "descricao": body.descricao,
+           "valor": body.valor, "recorrente": body.recorrente}
+    if body.data:
+        row["data"] = body.data
+    get_db().table("fin_lancamentos").insert(row).execute()
+    return {"ok": True}
+
+
+@app.delete("/api/v1/financeiro/lancamentos/{lanc_id}")
+def excluir_lancamento(lanc_id: str):
+    get_db().table("fin_lancamentos").delete().eq("id", lanc_id).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/financeiro/folha")
+def listar_folha():
+    return get_db().table("fin_folha").select("*").eq("ativo", True).order("criado_em").execute().data
+
+
+@app.post("/api/v1/financeiro/folha")
+def criar_folha(body: FolhaItem):
+    get_db().table("fin_folha").insert({"nome": body.nome, "cargo": body.cargo, "salario": body.salario}).execute()
+    return {"ok": True}
+
+
+@app.delete("/api/v1/financeiro/folha/{folha_id}")
+def excluir_folha(folha_id: str):
+    get_db().table("fin_folha").delete().eq("id", folha_id).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/financeiro/resumo")
+def financeiro_resumo(periodo: str = "mes"):
+    from datetime import datetime, timedelta, date, timezone as tz
+    db = get_db()
+    lanc = db.table("fin_lancamentos").select("*").limit(5000).execute().data
+    folha = db.table("fin_folha").select("salario").eq("ativo", True).execute().data
+    dias = {"dia": 1, "semana": 7, "mes": 30, "ano": 365}.get(periodo, 30)
+    corte = datetime.now(tz.utc).date() - timedelta(days=dias)
+
+    def _d(s):
+        try:
+            return date.fromisoformat(str(s)[:10])
+        except Exception:
+            return None
+
+    per = [l for l in lanc if (_d(l.get("data")) or corte) >= corte]
+    entradas = sum(float(l.get("valor") or 0) for l in per if l.get("tipo") == "ENTRADA")
+    saidas = sum(float(l.get("valor") or 0) for l in per if l.get("tipo") == "SAIDA")
+    folha_mensal = sum(float(f.get("salario") or 0) for f in folha)
+    recorrente_mensal = sum(float(l.get("valor") or 0) for l in lanc if l.get("tipo") == "SAIDA" and l.get("recorrente"))
+    projecao_anual = (recorrente_mensal + folha_mensal) * 12
+    return {
+        "periodo": periodo, "entradas": round(entradas, 2), "saidas": round(saidas, 2),
+        "saldo": round(entradas - saidas, 2), "folha_mensal": round(folha_mensal, 2),
+        "projecao_anual_custos": round(projecao_anual, 2),
+    }
+
+
 @app.post("/api/v1/casos/{caso_id}/iniciar")
 def iniciar_caso_escritorio(caso_id: str):
     """Botão do CRM: inicia o processo do escritório na esteira (situação ATIVA)

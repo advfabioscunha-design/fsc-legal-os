@@ -11,7 +11,7 @@ const MSG = "Olá! Vim pelo site da FC Advocacia e gostaria de atendimento.";
 const waLink = (n: string) => `https://wa.me/${n}?text=${encodeURIComponent(MSG)}`;
 
 // Telas internas/equipe/cliente: sem botão flutuante
-const OCULTAR_EM = ["/entrar", "/equipe", "/crm", "/cliente", "/portal"];
+const OCULTAR_EM = ["/entrar", "/equipe", "/crm", "/cliente", "/portal", "/processos", "/admin", "/agenda", "/assistente"];
 
 function Opcoes() {
   return (

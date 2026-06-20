@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
-const OCULTAR_FLOATING = ["/entrar", "/cliente", "/crm", "/equipe", "/portal"];
+const OCULTAR_FLOATING = ["/entrar", "/cliente", "/crm", "/equipe", "/portal", "/processos", "/admin", "/agenda", "/assistente"];
 
 type Msg = { autor: "CLIENTE" | "AGENTE"; conteudo: string };
 
