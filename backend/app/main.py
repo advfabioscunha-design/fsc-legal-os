@@ -34,6 +34,16 @@ def _agendar_radar():
             CronTrigger(day_of_week=s.radar_dia_semana, hour=s.radar_hora, minute=0),
             id="radar_semanal", replace_existing=True, max_instances=1,
         )
+        # Agente de Relacionamento: parabéns de aniversário (diário, 12:00 UTC ~ 09:00 BRT)
+        try:
+            from .agentes import relacionamento
+            sched.add_job(
+                relacionamento.parabenizar_aniversariantes,
+                CronTrigger(hour=12, minute=0),
+                id="aniversarios", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[aniversarios] job não agendado: {e}")
         sched.start()
         app.state.scheduler = sched
     except Exception as e:  # API sobe mesmo sem o scheduler
@@ -803,6 +813,25 @@ def distribuir_prazo(body: DistribuirPrazo):
     # notificação ao responsável: ativa quando o WhatsApp/Cloud API estiver ligado
     return {"ok": True, "responsavel": escolhido["nome"], "prazo_id": row["id"],
             "carga_semana": carga.get(escolhido["id"], 0)}
+
+
+# ── SPRINT 4: Assistente CEO (interno) e Relacionamento ──────────
+class AssistenteMsg(BaseModel):
+    conteudo: str
+    historico: list[dict] = []
+
+
+@app.post("/api/v1/assistente")
+def assistente_ceo(body: AssistenteMsg):
+    from .agentes import ceo
+    return ceo.responder(body.historico, body.conteudo)
+
+
+@app.post("/api/v1/relacionamento/aniversarios")
+def disparar_aniversarios():
+    """Disparo manual das felicitações de aniversário (o automático roda diário)."""
+    from .agentes import relacionamento
+    return relacionamento.parabenizar_aniversariantes()
 
 
 @app.post("/api/v1/casos/{caso_id}/iniciar")
