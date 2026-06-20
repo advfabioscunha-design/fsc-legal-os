@@ -687,6 +687,124 @@ def financeiro_resumo(periodo: str = "mes"):
     }
 
 
+# ── SPRINT 3: Agenda e Agente Controlador ────────────────────────
+class Membro(BaseModel):
+    nome: str
+    especialidades: list[str] = []
+    lider: bool = False
+    google_email: str | None = None
+
+
+class Prazo(BaseModel):
+    titulo: str
+    descricao: str | None = None
+    data: str
+    responsavel_id: str | None = None
+    especialidade: str | None = None
+    caso_id: str | None = None
+
+
+class DistribuirPrazo(BaseModel):
+    titulo: str
+    descricao: str | None = None
+    data: str
+    especialidade: str | None = None
+    caso_id: str | None = None
+
+
+@app.get("/api/v1/membros")
+def listar_membros():
+    return get_db().table("membros_equipe").select("*").eq("ativo", True).order("nome").execute().data
+
+
+@app.post("/api/v1/membros")
+def criar_membro(body: Membro):
+    get_db().table("membros_equipe").insert({
+        "nome": body.nome, "especialidades": body.especialidades,
+        "lider": body.lider, "google_email": body.google_email,
+    }).execute()
+    return {"ok": True}
+
+
+@app.delete("/api/v1/membros/{membro_id}")
+def excluir_membro(membro_id: str):
+    get_db().table("membros_equipe").update({"ativo": False}).eq("id", membro_id).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/prazos")
+def listar_prazos(responsavel_id: str | None = None, inicio: str | None = None, fim: str | None = None):
+    qy = get_db().table("prazos").select("*, membros_equipe(nome,lider)")
+    if responsavel_id:
+        qy = qy.eq("responsavel_id", responsavel_id)
+    if inicio:
+        qy = qy.gte("data", inicio)
+    if fim:
+        qy = qy.lte("data", fim)
+    return qy.order("data").limit(1000).execute().data
+
+
+@app.post("/api/v1/prazos")
+def criar_prazo(body: Prazo):
+    get_db().table("prazos").insert({
+        "titulo": body.titulo, "descricao": body.descricao, "data": body.data,
+        "responsavel_id": body.responsavel_id, "especialidade": body.especialidade,
+        "caso_id": body.caso_id, "origem": "MANUAL",
+    }).execute()
+    return {"ok": True}
+
+
+@app.patch("/api/v1/prazos/{prazo_id}")
+def concluir_prazo(prazo_id: str, status: str = "CONCLUIDO"):
+    get_db().table("prazos").update({"status": status}).eq("id", prazo_id).execute()
+    return {"ok": True}
+
+
+@app.delete("/api/v1/prazos/{prazo_id}")
+def excluir_prazo(prazo_id: str):
+    get_db().table("prazos").delete().eq("id", prazo_id).execute()
+    return {"ok": True}
+
+
+@app.post("/api/v1/prazos/distribuir")
+def distribuir_prazo(body: DistribuirPrazo):
+    """Agente Controlador: distribui o prazo ao membro APTO (por especialidade)
+    com MENOR carga de prazos abertos na semana (balanceamento de carga)."""
+    from datetime import datetime, timedelta, date, timezone as tz
+    from .core.db import registrar_evento
+    db = get_db()
+    membros = db.table("membros_equipe").select("*").eq("ativo", True).execute().data
+    if not membros:
+        raise HTTPException(400, "Cadastre membros na equipe antes de distribuir.")
+    aptos = [m for m in membros if not body.especialidade or body.especialidade in (m.get("especialidades") or [])]
+    if not aptos:
+        aptos = membros  # ninguém com a tag: considera todos
+
+    hoje = datetime.now(tz.utc).date()
+    ini = hoje - timedelta(days=hoje.weekday())
+    fim = ini + timedelta(days=7)
+    carga: dict = {}
+    for p in db.table("prazos").select("responsavel_id,data,status").eq("status", "ABERTO").execute().data:
+        try:
+            dd = date.fromisoformat(str(p.get("data"))[:10])
+        except Exception:
+            dd = None
+        if dd and ini <= dd < fim and p.get("responsavel_id"):
+            carga[p["responsavel_id"]] = carga.get(p["responsavel_id"], 0) + 1
+
+    escolhido = min(aptos, key=lambda m: carga.get(m["id"], 0))
+    row = db.table("prazos").insert({
+        "titulo": body.titulo, "descricao": body.descricao, "data": body.data,
+        "responsavel_id": escolhido["id"], "especialidade": body.especialidade,
+        "caso_id": body.caso_id, "origem": "CONTROLADORIA",
+    }).execute().data[0]
+    registrar_evento(body.caso_id, "PRAZO_DISTRIBUIDO",
+                     {"responsavel": escolhido["nome"], "carga_semana": carga.get(escolhido["id"], 0)})
+    # notificação ao responsável: ativa quando o WhatsApp/Cloud API estiver ligado
+    return {"ok": True, "responsavel": escolhido["nome"], "prazo_id": row["id"],
+            "carga_semana": carga.get(escolhido["id"], 0)}
+
+
 @app.post("/api/v1/casos/{caso_id}/iniciar")
 def iniciar_caso_escritorio(caso_id: str):
     """Botão do CRM: inicia o processo do escritório na esteira (situação ATIVA)
