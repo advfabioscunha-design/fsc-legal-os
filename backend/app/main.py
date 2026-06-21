@@ -834,6 +834,32 @@ def disparar_aniversarios():
     return relacionamento.parabenizar_aniversariantes()
 
 
+# ── MÓDULO 1: Webhook do WhatsApp + Sessão (omnichannel) ─────────
+@app.get("/api/whatsapp/webhook")
+def whatsapp_verificar(request: Request):
+    """Verificação inicial exigida pelo Meta (devolve o hub.challenge)."""
+    from fastapi.responses import PlainTextResponse
+    from .integracoes import whatsapp_omni
+    p = request.query_params
+    challenge = whatsapp_omni.verificar_webhook(
+        p.get("hub.mode"), p.get("hub.verify_token"), p.get("hub.challenge")
+    )
+    if challenge is None:
+        raise HTTPException(403, "Token de verificação inválido")
+    return PlainTextResponse(str(challenge))
+
+
+@app.post("/api/whatsapp/webhook")
+async def whatsapp_receber(request: Request):
+    """Recebe mensagens do cliente, gerencia o contexto e espelha a resposta."""
+    from .integracoes import whatsapp_omni
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": True, "ignorado": "payload inválido"}
+    return whatsapp_omni.processar_mensagem(payload)
+
+
 @app.post("/api/v1/casos/{caso_id}/iniciar")
 def iniciar_caso_escritorio(caso_id: str):
     """Botão do CRM: inicia o processo do escritório na esteira (situação ATIVA)
