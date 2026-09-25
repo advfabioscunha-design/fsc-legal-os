@@ -2,11 +2,13 @@
 
 Tenha em mãos: celular (verificações por SMS), cartão de crédito, CNPJ/CPF do escritório.
 
-**E-MAIL OFICIAL DOS CADASTROS: `contato@fscadvocaciadigital.com.br`** (Titan/HostGator).
-Use este e-mail profissional em TODOS os cadastros abaixo (Asaas, ZapSign,
-WhatsApp/Meta, ElevenLabs, BirdID). Exceções já criadas com o Gmail
-(adv.fabios.cunha@gmail.com): Google Cloud, GitHub, Supabase, Vercel,
-DigitalOcean — podem ser migradas depois, sem urgência.
+**E-MAIL OFICIAL DOS CADASTROS: `adv.fabios.cunha@gmail.com`**
+
+> O plano de e-mail Titan (contato@fscadvocaciadigital.com.br) **não foi contratado**
+> — decisão de 10/09/2026. Todos os cadastros e o contato do site usam o Gmail acima.
+> Se um dia quiser e-mail no domínio próprio sem custo, o **Zoho Mail Free**
+> (zoho.com/mail — 1 domínio, 5 GB, grátis) faz o mesmo papel: basta trocar os
+> registros MX do domínio na HostGator.
 
 ## 1. Supabase — banco de dados, login e documentos (GRÁTIS)
 - Site: https://supabase.com

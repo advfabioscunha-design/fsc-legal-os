@@ -18,7 +18,11 @@ services:
     restart: unless-stopped
     volumes: ["redis_data:/data"]
 
+  # Frontend OPCIONAL no servidor: por padrão o site roda na Vercel (grátis,
+  # CDN global) e o VPS cuida só da API + robôs — economiza ~1 GB de RAM.
+  # Para subir o site também aqui: docker compose --profile site up -d --build
   frontend:
+    profiles: ["site"]
     build:
       context: ../frontend
       args:

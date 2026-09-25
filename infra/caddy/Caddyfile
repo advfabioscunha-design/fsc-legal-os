@@ -4,8 +4,12 @@ api.fscadvocaciadigital.com.br {
     encode gzip
 }
 
-# Frontend (Next.js) — site, portal, área do cliente e CRM
-app.fscadvocaciadigital.com.br {
-    reverse_proxy localhost:3000
-    encode gzip
-}
+# Frontend (site, portal, área do cliente e CRM) roda na VERCEL.
+# Só descomente o bloco abaixo se um dia quiser servir o site pelo VPS
+# (nesse caso o DNS de app.* precisa apontar para o IP deste servidor,
+#  e os containers devem subir com: docker compose --profile site up -d).
+#
+# app.fscadvocaciadigital.com.br {
+#     reverse_proxy localhost:3000
+#     encode gzip
+# }
