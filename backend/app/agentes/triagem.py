@@ -156,7 +156,17 @@ def criar_caso(nome: str, contato: str, relato: str,
     }).execute().data[0]
 
     clas = identificar_grupo(relato)
-    db.table("casos").update({"grupo": clas["grupo"]}).eq("id", caso["id"]).execute()
+    NOMES = {
+        "BANCARIO": "Direito Bancário", "IMOBILIARIO": "Distrato Imobiliário",
+        "TRIBUTARIO": "Execução Fiscal", "CONSUMIDOR": "Recuperação de Consumo",
+        "TRABALHISTA": "Causa Trabalhista", "PREVIDENCIARIO": "Causa Previdenciária",
+    }
+    atualiza = {"grupo": clas["grupo"],
+                "titulo": NOMES.get(clas["grupo"], "Atendimento jurídico")}
+    try:
+        db.table("casos").update(atualiza).eq("id", caso["id"]).execute()
+    except Exception:  # coluna `titulo` ainda não migrada
+        db.table("casos").update({"grupo": clas["grupo"]}).eq("id", caso["id"]).execute()
     registrar_evento(caso["id"], "TRIAGEM", clas)
     mudar_estado(caso["id"], "QUALIFICACAO",
                  motivo=f"Triagem: {clas['grupo']} ({clas.get('confianca')})")

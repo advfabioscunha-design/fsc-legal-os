@@ -10,6 +10,8 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const [salvando, setSalvando] = useState(false);
   const [nota, setNota] = useState("");
   const [solicitacao, setSolicitacao] = useState("");
+  const [aviso, setAviso] = useState({ tipo: "AUDIENCIA", titulo: "", mensagem: "" });
+  const [avisando, setAvisando] = useState(false);
   const [novaFase, setNovaFase] = useState("");
   const [subindo, setSubindo] = useState(false);
   const [linkNome, setLinkNome] = useState("");
@@ -17,7 +19,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   // campos editáveis
-  const [edit, setEdit] = useState({ relato_inicial: "", grupo: "", honorarios: "", numero_processo: "" });
+  const [edit, setEdit] = useState({ relato_inicial: "", grupo: "", honorarios: "", numero_processo: "", titulo: "" });
   // cadastro do cliente (o e-mail é a chave do acesso dele à plataforma)
   const [cli, setCli] = useState({ nome: "", email: "", cpf_cnpj: "", whatsapp: "" });
 
@@ -30,6 +32,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       setEdit({
         relato_inicial: d.relato_inicial || "", grupo: d.grupo || "",
         honorarios: d.honorarios_valor || "", numero_processo: d.numero_processo || "",
+        titulo: d.titulo || "",
       });
       setCli({
         nome: d.clientes?.nome || "", email: d.clientes?.email || "",
@@ -145,6 +148,33 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     setSolicitacao(""); carregar();
   }
 
+  async function enviarAviso() {
+    if (!aviso.titulo.trim() || !aviso.mensagem.trim()) {
+      alert("Preencha o título e a mensagem do aviso."); return;
+    }
+    setAvisando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/avisar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aviso),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { alert(d.detail || "Não foi possível enviar o aviso."); return; }
+      const canais = [d.enviado_whatsapp ? `WhatsApp (${d.origem_ddd})` : null, d.enviado_email ? "e-mail" : null]
+        .filter(Boolean).join(" e ");
+      alert(canais
+        ? `Aviso enviado por ${canais}. Aguardando a ciência do cliente no painel.`
+        : `O aviso foi registrado no painel do cliente, mas não saiu por nenhum canal:\n\n${(d.erros || []).join("\n")}`);
+      setAviso({ tipo: "AUDIENCIA", titulo: "", mensagem: "" });
+      carregar();
+    } finally { setAvisando(false); }
+  }
+
+  async function reenviarAviso(id: string) {
+    await fetch(`${API}/api/v1/avisos/${id}/reenviar`, { method: "POST" });
+    carregar();
+  }
+
   async function aprovarEtapa() {
     const r = await fetch(`${API}/api/v1/casos/${casoId}/aprovar-etapa`, { method: "POST" });
     if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || "Não foi possível avançar."); return; }
@@ -192,6 +222,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-[#0F2A44] px-5 py-3">
           <div>
             <p className="text-lg font-bold">{caso?.clientes?.nome ?? "Caso"}</p>
+            {caso?.numero_atendimento && (
+              <p className="font-mono text-xs tracking-wide text-[#C9A84C]">
+                Atendimento nº {caso.numero_atendimento}
+                {caso.titulo ? <span className="ml-2 font-sans text-white/60">· {caso.titulo}</span> : null}
+              </p>
+            )}
             <p className="text-xs text-white/55">
               {situacao !== "ATIVO" && <span className="mr-2 rounded bg-white/15 px-1.5 py-0.5">{situacao}</span>}
               {caso?.estado} {ehEscritorio && <span className="text-[#C9A84C]">· ★ Escritório</span>}
@@ -246,6 +282,11 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               )}
 
               <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Informações do caso</h3>
+              <label className="mb-3 block text-xs text-white/60">Nome do caso <span className="text-white/40">(é o que o cliente vê junto do nº de atendimento)</span>
+                <input value={edit.titulo} onChange={(e) => setEdit({ ...edit, titulo: e.target.value })}
+                  placeholder="Ex.: Revisão de contrato bancário — Banco X"
+                  className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+              </label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-xs text-white/60">Grupo
                   <select value={edit.grupo} onChange={(e) => setEdit({ ...edit, grupo: e.target.value })}
@@ -345,6 +386,68 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <textarea value={solicitacao} onChange={(e) => setSolicitacao(e.target.value)} rows={2} placeholder="Ex.: Enviar RG e comprovante de residência..."
                 className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
               <button onClick={acionarCliente} className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3]">Enviar ao cliente</button>
+            </section>
+
+            {/* Avisar o cliente — audiência, prazo, movimentação */}
+            <section>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Avisar o cliente (e-mail + WhatsApp)</h3>
+              <p className="mb-2 text-xs text-white/55">
+                O aviso sai pelo número do escritório correspondente ao <b className="text-white/75">DDD do cliente</b>
+                {" "}(69 → Rondônia, 48 → Santa Catarina, demais → 48) e também por e-mail.
+                Fica registrado até o cliente tocar em <b className="text-white/75">“Li e estou ciente”</b> no painel —
+                e o sistema reenvia sozinho a cada 24 h enquanto ele não confirmar.
+              </p>
+
+              {(caso.avisos || []).length > 0 && (
+                <ul className="mb-3 space-y-1">
+                  {(caso.avisos || []).slice(0, 6).map((a: any) => (
+                    <li key={a.id} className="rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-white/85">{a.titulo}</span>
+                          <span className="block text-xs text-white/50">
+                            {a.enviado_whatsapp ? `WhatsApp ${a.numero_origem || ""}` : "WhatsApp ✕"} ·{" "}
+                            {a.enviado_email ? "e-mail" : "e-mail ✕"}
+                            {a.lembretes > 0 ? ` · ${a.lembretes} lembrete(s)` : ""}
+                          </span>
+                        </span>
+                        {a.ciencia_em ? (
+                          <span className="shrink-0 rounded bg-[#1DB954]/20 px-1.5 py-0.5 text-[10px] font-bold text-[#1DB954]">
+                            CIENTE {new Date(a.ciencia_em).toLocaleDateString("pt-BR")}
+                          </span>
+                        ) : (
+                          <button onClick={() => reenviarAviso(a.id)}
+                            className="shrink-0 rounded bg-[#F39C12]/20 px-1.5 py-0.5 text-[10px] font-bold text-[#F39C12] hover:bg-[#F39C12]/30">
+                            SEM CIÊNCIA · reenviar
+                          </button>
+                        )}
+                      </div>
+                      {a.erro_envio && <p className="mt-1 text-[11px] text-[#e07a6f]">Falha: {a.erro_envio}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[160px_1fr]">
+                <select value={aviso.tipo} onChange={(e) => setAviso({ ...aviso, tipo: e.target.value })}
+                  className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm">
+                  <option value="AUDIENCIA">Audiência</option>
+                  <option value="MOVIMENTACAO">Movimentação</option>
+                  <option value="PRAZO">Prazo</option>
+                  <option value="PAGAMENTO">Pagamento</option>
+                  <option value="GERAL">Geral</option>
+                </select>
+                <input value={aviso.titulo} onChange={(e) => setAviso({ ...aviso, titulo: e.target.value })}
+                  placeholder="Título (ex.: Audiência marcada para 12/11)"
+                  className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+              </div>
+              <textarea value={aviso.mensagem} onChange={(e) => setAviso({ ...aviso, mensagem: e.target.value })}
+                rows={3} placeholder="Escreva em linguagem simples o que o cliente precisa saber e o que ele deve fazer."
+                className="mt-2 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+              <button onClick={enviarAviso} disabled={avisando}
+                className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3] disabled:opacity-50">
+                {avisando ? "Enviando…" : "Enviar aviso ao cliente"}
+              </button>
             </section>
 
             {/* Histórico / notas */}

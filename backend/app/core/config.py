@@ -31,6 +31,30 @@ class Settings(BaseModel):
     whatsapp_token: str = os.getenv("WHATSAPP_TOKEN", "")
     whatsapp_phone_id: str = os.getenv("WHATSAPP_PHONE_ID", "")
     whatsapp_verify_token: str = os.getenv("WHATSAPP_VERIFY_TOKEN", "fc-legal-os")
+
+    # ── Dois números do escritório, roteados pelo DDD do cliente ──
+    # Cliente com DDD 69 recebe do número de Rondônia; DDD 48 recebe do
+    # número de Santa Catarina; qualquer outro DDD (ou sem telefone)
+    # recebe sempre do 48, que é o padrão do escritório.
+    whatsapp_phone_id_69: str = os.getenv("WHATSAPP_PHONE_ID_69", "")
+    whatsapp_phone_id_48: str = os.getenv("WHATSAPP_PHONE_ID_48", "")
+    whatsapp_numero_69: str = os.getenv("WHATSAPP_NUMERO_69", "5569993225383")
+    whatsapp_numero_48: str = os.getenv("WHATSAPP_NUMERO_48", "5548988357992")
+    whatsapp_ddd_padrao: str = os.getenv("WHATSAPP_DDD_PADRAO", "48")
+
+    # ── E-mail transacional (Gmail com senha de app) ──────────────
+    smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_porta: int = int(os.getenv("SMTP_PORTA", "587"))
+    smtp_usuario: str = os.getenv("SMTP_USUARIO", "")
+    smtp_senha: str = os.getenv("SMTP_SENHA", "")          # senha de app do Google
+    smtp_remetente: str = os.getenv("SMTP_REMETENTE", "FC Advocacia")
+
+    # Endereço do painel do cliente (usado nos links dos avisos)
+    app_url: str = os.getenv("APP_URL", "https://app.fscadvocaciadigital.com.br")
+
+    # Lembrete automático quando o cliente não dá ciência
+    aviso_lembrete_horas: int = int(os.getenv("AVISO_LEMBRETE_HORAS", "24"))
+    aviso_lembretes_max: int = int(os.getenv("AVISO_LEMBRETES_MAX", "3"))
     # Escavador — monitoramento de processos e intimações
     escavador_api_token: str = os.getenv("ESCAVADOR_API_TOKEN", "")
     escavador_base_url: str = os.getenv("ESCAVADOR_BASE_URL", "https://api.escavador.com")

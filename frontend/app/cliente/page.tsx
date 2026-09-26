@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
@@ -22,24 +22,31 @@ const PRE_CONTRATO = ["LEAD", "QUALIFICACAO", "PROPOSTA"];
 type Msg = { id?: number; autor: "CLIENTE" | "AGENTE" | "HUMANO"; conteudo: string; criado_em?: string };
 type Solicitacao = { id: string; descricao: string; status: string; criado_em: string };
 type Doc = { id: string; observacao: string | null; tipo: string; status: string; enviado_por?: string; criado_em: string };
+type Aviso = {
+  id: string; tipo: string; titulo: string; mensagem: string;
+  criado_em: string; ciencia_em: string | null; ciencia_canal?: string | null;
+};
 type Caso = {
   id: string; estado: string; grupo: string | null;
+  titulo?: string | null; numero_atendimento?: string | null;
   numero_processo?: string | null; movimentacoes?: any[];
   aguardando_cliente?: boolean; aguardando_desc?: string | null;
-  mensagens?: Msg[]; solicitacoes?: Solicitacao[]; documentos?: Doc[];
+  avisos_sem_ciencia?: number; documentos_pendentes?: number;
+  criado_em?: string;
+  mensagens?: Msg[]; solicitacoes?: Solicitacao[]; documentos?: Doc[]; avisos?: Aviso[];
 };
 type Cadastro = { id: string; nome: string; email: string; cpf_cnpj: string | null; whatsapp: string | null };
-type Vista = "home" | "acompanhar" | "atendimento" | "contrato" | "cadastro";
+type Vista = "home" | "casos" | "acompanhar" | "atendimento" | "contrato" | "cadastro";
 
-const WHATS = "5569993225383";
-const WHATS_LINK = `https://wa.me/${WHATS}?text=${encodeURIComponent(
-  "Olá! Estou na minha área de cliente da FC Advocacia e gostaria de continuar meu atendimento."
-)}`;
-
+const WHATS_RO = "5569993225383";
+const WHATS_SC = "5548988357992";
 const FALLBACK =
   "Recebi sua mensagem e já estou cuidando do seu caso. Me dê só mais um detalhe " +
   "enquanto preparo o próximo passo. Se preferir, fale agora com nossa equipe pelo WhatsApp — " +
   "não vou te deixar sem resposta.";
+
+const dataHora = (iso?: string | null) =>
+  iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
 export default function AreaCliente() {
   const router = useRouter();
@@ -50,12 +57,13 @@ export default function AreaCliente() {
   const [vista, setVista] = useState<Vista>("home");
 
   const [cadastro, setCadastro] = useState<Cadastro | null>(null);
+  const [casos, setCasos] = useState<Caso[]>([]);
   const [caso, setCaso] = useState<Caso | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [dandoCiencia, setDandoCiencia] = useState<string | null>(null);
 
-  // anexos aguardando o botão ENVIAR
   const [anexos, setAnexos] = useState<File[]>([]);
   const [subindo, setSubindo] = useState(false);
   const [alvoSolicitacao, setAlvoSolicitacao] = useState<string | null>(null);
@@ -64,8 +72,12 @@ export default function AreaCliente() {
 
   const fimRef = useRef<HTMLDivElement | null>(null);
   const primeiroNome = (nome || "").trim().split(" ")[0] || "tudo bem";
+  const whatsEscritorio = (cadastro?.whatsapp || "").replace(/\D/g, "").replace(/^55/, "").startsWith("69") ? WHATS_RO : WHATS_SC;
+  const whatsLink = `https://wa.me/${whatsEscritorio}?text=${encodeURIComponent(
+    "Olá! Estou na minha área de cliente da FC Advocacia e gostaria de continuar meu atendimento."
+  )}`;
 
-  const auth = (tk = token) => ({ Authorization: `Bearer ${tk}` });
+  const auth = useCallback((tk = token) => ({ Authorization: `Bearer ${tk}` }), [token]);
 
   function boasVindas(nm: string): Msg {
     const pn = (nm || "").trim().split(" ")[0] || "";
@@ -78,11 +90,9 @@ export default function AreaCliente() {
     };
   }
 
-  /* Carrega o caso completo: conversa, pendências e documentos.
-     A conversa é sempre a MESMA thread — nada recomeça do zero. */
-  async function carregarCaso(casoId: string, tk: string, nm: string) {
+  const carregarCaso = useCallback(async (casoId: string, tk: string, nm: string) => {
     try {
-      const d = await fetch(`${API}/api/v1/cliente/caso/${casoId}`, { headers: auth(tk) });
+      const d = await fetch(`${API}/api/v1/cliente/caso/${casoId}`, { headers: { Authorization: `Bearer ${tk}` } });
       if (!d.ok) return;
       const det: Caso = await d.json();
       setCaso(det);
@@ -91,7 +101,16 @@ export default function AreaCliente() {
       const pendente = (det.solicitacoes || []).find((s) => s.status === "PENDENTE");
       setAlvoSolicitacao(pendente ? pendente.id : null);
     } catch { /* mantém o que já está na tela */ }
-  }
+  }, []);
+
+  const carregarCasos = useCallback(async (tk: string) => {
+    try {
+      const r = await fetch(`${API}/api/v1/cliente/meus-casos`, { headers: { Authorization: `Bearer ${tk}` } });
+      const lista: Caso[] = r.ok ? await r.json() : [];
+      setCasos(lista);
+      return lista;
+    } catch { return []; }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -101,18 +120,22 @@ export default function AreaCliente() {
       const nm = sess.session.user.user_metadata?.nome || sess.session.user.email || "";
       setToken(tk); setNome(nm); setEmail(sess.session.user.email || "");
       try {
-        const rc = await fetch(`${API}/api/v1/cliente/cadastro`, { headers: auth(tk) });
+        const rc = await fetch(`${API}/api/v1/cliente/cadastro`, { headers: { Authorization: `Bearer ${tk}` } });
         if (rc.ok) setCadastro(await rc.json());
-      } catch { /* segue sem cadastro carregado */ }
-      try {
-        const r = await fetch(`${API}/api/v1/cliente/meus-casos`, { headers: auth(tk) });
-        const casos: Caso[] = r.ok ? await r.json() : [];
-        if (casos.length > 0) await carregarCaso(casos[0].id, tk, nm);
-        else setMsgs([boasVindas(nm)]);
-      } catch { setMsgs([boasVindas(nm)]); }
-      finally { setCarregando(false); }
+      } catch { /* segue */ }
+      const lista = await carregarCasos(tk);
+      // abre direto o caso indicado no link do aviso (?caso=...)
+      const alvo = new URLSearchParams(window.location.search).get("caso");
+      const escolhido = lista.find((c) => c.id === alvo) || lista[0];
+      if (escolhido) {
+        await carregarCaso(escolhido.id, tk, nm);
+        if (alvo) setVista("acompanhar");
+      } else {
+        setMsgs([boasVindas(nm)]);
+      }
+      setCarregando(false);
     })();
-  }, [router]);
+  }, [router, carregarCasos, carregarCaso]);
 
   useEffect(() => { if (vista === "atendimento") fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, enviando, vista]);
 
@@ -120,6 +143,25 @@ export default function AreaCliente() {
 
   function addAgente(resposta?: string | null) {
     setMsgs((m) => [...m, { autor: "AGENTE", conteudo: (resposta || "").trim() || FALLBACK }]);
+  }
+
+  async function abrirCaso(c: Caso, destino: Vista = "acompanhar") {
+    setCaso(c);
+    await carregarCaso(c.id, token, nome);
+    setVista(destino);
+  }
+
+  async function darCiencia(avisoId: string) {
+    setDandoCiencia(avisoId);
+    try {
+      const r = await fetch(`${API}/api/v1/cliente/avisos/${avisoId}/ciencia`, {
+        method: "POST", headers: auth(),
+      });
+      if (!r.ok) { alert("Não foi possível registrar a ciência. Tente novamente."); return; }
+      if (caso) await carregarCaso(caso.id, token, nome);
+      await carregarCasos(token);
+    } catch { alert("Falha de conexão ao registrar a ciência."); }
+    finally { setDandoCiencia(null); }
   }
 
   async function enviar(e: React.FormEvent) {
@@ -137,6 +179,7 @@ export default function AreaCliente() {
         const data = r.ok ? await r.json() : null;
         if (data?.caso_id) {
           setCaso({ id: data.caso_id, estado: "QUALIFICACAO", grupo: data.grupo ?? null });
+          await carregarCasos(token);
         }
         addAgente(data?.primeira_resposta);
       } else {
@@ -159,9 +202,6 @@ export default function AreaCliente() {
   }
   function removerAnexo(i: number) { setAnexos((a) => a.filter((_, j) => j !== i)); }
 
-  /* Envia os anexos. Se o caso da tela estiver desatualizado (o cadastro
-     do cliente pode ter mais de um caso), busca o caso atual e reenvia
-     uma vez antes de avisar o usuário. */
   async function postarDocumentos(casoId: string) {
     const fd = new FormData();
     anexos.forEach((f) => fd.append("arquivos", f));
@@ -176,7 +216,6 @@ export default function AreaCliente() {
     if (!anexos.length || subindo) return;
     setSubindo(true);
     try {
-      // sem atendimento aberto ainda? abre um agora para o documento ter destino
       let atual = caso;
       if (!atual) {
         try {
@@ -188,10 +227,7 @@ export default function AreaCliente() {
             }),
           });
           const dl = rl.ok ? await rl.json() : null;
-          if (dl?.caso_id) {
-            atual = { id: dl.caso_id, estado: "QUALIFICACAO", grupo: dl.grupo ?? null };
-            setCaso(atual);
-          }
+          if (dl?.caso_id) { atual = { id: dl.caso_id, estado: "QUALIFICACAO", grupo: dl.grupo ?? null }; setCaso(atual); }
         } catch { /* cai no aviso abaixo */ }
       }
       if (!atual) {
@@ -203,16 +239,12 @@ export default function AreaCliente() {
       let { r, data } = await postarDocumentos(idUsado);
 
       if (r.status === 404 || r.status === 403) {
-        // recarrega a lista de casos do cadastro e tenta de novo
-        try {
-          const lista = await fetch(`${API}/api/v1/cliente/meus-casos`, { headers: auth() });
-          const casos: Caso[] = lista.ok ? await lista.json() : [];
-          if (casos.length && casos[0].id !== idUsado) {
-            idUsado = casos[0].id;
-            setCaso((c) => (c ? { ...c, id: idUsado } : { ...casos[0] }));
-            ({ r, data } = await postarDocumentos(idUsado));
-          }
-        } catch { /* mantém o erro original */ }
+        const lista = await carregarCasos(token);
+        if (lista.length && lista[0].id !== idUsado) {
+          idUsado = lista[0].id;
+          setCaso((c) => (c ? { ...c, id: idUsado } : { ...lista[0] }));
+          ({ r, data } = await postarDocumentos(idUsado));
+        }
       }
 
       if (!r.ok) {
@@ -236,11 +268,11 @@ export default function AreaCliente() {
           : "Recebi os documentos, obrigado! Já estão na sua pasta. Ainda falta um item que pedimos — assim que enviar, o processo volta para a produção.",
       }]);
       await carregarCaso(idUsado, token, nome);
+      await carregarCasos(token);
     } catch { alert("Falha de conexão ao enviar os documentos."); }
     finally { setSubindo(false); }
   }
 
-  // índice atual na esteira
   const idxEsteira = (() => {
     if (!caso) return -1;
     if (PRE_CONTRATO.includes(caso.estado)) return -1;
@@ -248,10 +280,12 @@ export default function AreaCliente() {
   })();
   const recebido = caso && ESTEIRA[ESTEIRA.length - 1].estados.includes(caso.estado);
   const pendentes = (caso?.solicitacoes || []).filter((s) => s.status === "PENDENTE");
+  const avisosSemCiencia = (caso?.avisos || []).filter((a) => !a.ciencia_em);
+  const totalPendencias = casos.reduce((n, c) => n + (c.avisos_sem_ciencia || 0), 0);
+  const nomeCaso = (c: Caso) => c.titulo || "Atendimento jurídico";
 
   return (
     <main className="min-h-screen bg-ice text-charcoal">
-      {/* Barra superior */}
       <header className="sticky top-0 z-30 border-b border-black/5 bg-white/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
           <Link href="/" className="flex items-baseline gap-2">
@@ -259,7 +293,7 @@ export default function AreaCliente() {
             <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">Advocacia</span>
           </Link>
           <div className="flex items-center gap-4">
-            <a href={WHATS_LINK} target="_blank" rel="noreferrer"
+            <a href={whatsLink} target="_blank" rel="noreferrer"
               className="rounded-full bg-[#25D366] px-4 py-1.5 text-xs font-semibold text-white">WhatsApp</a>
             <button onClick={sair} className="text-sm text-charcoal/50 hover:text-charcoal">Sair</button>
           </div>
@@ -268,20 +302,21 @@ export default function AreaCliente() {
 
       <div className="mx-auto max-w-5xl px-5 py-6">
         <h1 className="font-serif text-2xl font-bold text-navy">Olá, {primeiroNome}</h1>
-        <p className="mb-6 text-sm text-charcoal/60">Bem-vindo(a) à sua área. Como podemos te ajudar hoje?</p>
+        <p className="mb-6 text-sm text-charcoal/60">
+          {casos.length > 1
+            ? `Você tem ${casos.length} atendimentos conosco. Cada um tem o seu próprio número — é por ele que identificamos o seu caso.`
+            : "Bem-vindo(a) à sua área. Como podemos te ajudar hoje?"}
+        </p>
 
-        {/* CAIXA DE MENSAGENS — o que o escritório precisa de você */}
-        {!carregando && pendentes.length > 0 && vista !== "atendimento" && (
+        {/* Avisos sem ciência — o que o escritório precisa que você veja */}
+        {!carregando && avisosSemCiencia.length > 0 && vista !== "acompanhar" && (
           <div className="mb-6 rounded-2xl border border-gold/40 bg-gold/10 p-5">
             <p className="text-sm font-bold text-navy">
-              ✉ Você tem {pendentes.length} {pendentes.length === 1 ? "pedido" : "pedidos"} do escritório
+              ✉ {avisosSemCiencia.length === 1 ? "Há um aviso novo sobre o seu caso" : `Há ${avisosSemCiencia.length} avisos novos sobre o seu caso`}
             </p>
-            <ul className="mt-2 space-y-1 text-sm text-charcoal/75">
-              {pendentes.map((s) => <li key={s.id}>• {s.descricao}</li>)}
-            </ul>
-            <button onClick={() => setVista("atendimento")}
+            <button onClick={() => setVista("acompanhar")}
               className="mt-3 rounded-xl bg-gold px-5 py-2 text-sm font-bold text-navy hover:bg-amber">
-              Responder e enviar documentos →
+              Ver e confirmar recebimento →
             </button>
           </div>
         )}
@@ -289,13 +324,21 @@ export default function AreaCliente() {
         {carregando ? (
           <p className="text-charcoal/50">Carregando...</p>
         ) : vista === "home" ? (
-          /* ── HOME ── */
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            <button onClick={() => setVista("acompanhar")}
-              className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+            <button onClick={() => setVista(casos.length > 1 ? "casos" : "acompanhar")}
+              className="group relative flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
               <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy text-2xl">📁</span>
-              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Acompanhar Demanda</h2>
-              <p className="mt-2 text-sm text-charcoal/60">Veja a esteira do seu caso, do início ao protocolo, e as movimentações do processo.</p>
+              {totalPendencias > 0 && (
+                <span className="absolute right-5 top-5 rounded-full bg-gold px-2 py-0.5 text-[11px] font-bold text-navy">{totalPendencias}</span>
+              )}
+              <h2 className="mt-4 font-serif text-xl font-bold text-navy">
+                {casos.length > 1 ? "Meus atendimentos" : "Acompanhar Demanda"}
+              </h2>
+              <p className="mt-2 text-sm text-charcoal/60">
+                {casos.length > 1
+                  ? `Escolha qual dos seus ${casos.length} atendimentos deseja acompanhar.`
+                  : "Veja a esteira do seu caso, do início ao protocolo, e as movimentações do processo."}
+              </p>
               <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
             </button>
 
@@ -323,20 +366,99 @@ export default function AreaCliente() {
               <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
             </button>
           </div>
+        ) : vista === "casos" ? (
+          /* ── LISTA DE ATENDIMENTOS ── */
+          <section className="rounded-2xl border border-black/5 bg-white p-6 shadow-sm">
+            <button onClick={() => setVista("home")} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
+            <h2 className="font-serif text-xl font-bold text-navy">Meus atendimentos</h2>
+            <p className="mt-1 text-sm text-charcoal/60">
+              Cada caso tem um número próprio. Use esse número sempre que falar conosco — assim
+              sabemos na hora de qual processo você está tratando.
+            </p>
+            <ul className="mt-5 space-y-3">
+              {casos.map((c) => {
+                const pend = (c.avisos_sem_ciencia || 0) + (c.documentos_pendentes || 0);
+                return (
+                  <li key={c.id}>
+                    <button onClick={() => abrirCaso(c)}
+                      className="flex w-full items-center justify-between gap-4 rounded-xl border border-black/5 bg-ice px-4 py-4 text-left transition hover:border-gold hover:bg-white">
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-navy">{nomeCaso(c)}</span>
+                        <span className="mt-0.5 block font-mono text-xs tracking-wide text-gold">
+                          Atendimento nº {c.numero_atendimento || "—"}
+                        </span>
+                        <span className="mt-1 block text-xs text-charcoal/50">
+                          Aberto em {dataHora(c.criado_em).split(",")[0]}
+                          {c.numero_processo ? ` · Processo ${c.numero_processo}` : ""}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {pend > 0 && (
+                          <span className="rounded-full bg-gold px-2.5 py-1 text-[11px] font-bold text-navy">{pend} pendência{pend > 1 ? "s" : ""}</span>
+                        )}
+                        <span className="text-gold">→</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+              {casos.length === 0 && (
+                <li className="text-sm text-charcoal/55">
+                  Você ainda não tem atendimento aberto. Use o chat para iniciar.
+                </li>
+              )}
+            </ul>
+          </section>
         ) : vista === "cadastro" ? (
-          /* ── MEU CADASTRO ── */
           <MeuCadastro cadastro={cadastro} email={email} caso={caso} token={token}
             onVoltar={() => setVista("home")} onSalvo={(c) => setCadastro(c)} />
         ) : vista === "acompanhar" ? (
-          /* ── ACOMPANHAR DEMANDA ── */
+          /* ── ACOMPANHAR UM ATENDIMENTO ── */
           <section className="rounded-2xl border border-black/5 bg-white p-6 shadow-sm">
-            <button onClick={() => setVista("home")} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
-            <h2 className="font-serif text-xl font-bold text-navy">Andamento da sua causa</h2>
+            <button onClick={() => setVista(casos.length > 1 ? "casos" : "home")}
+              className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
+
+            <h2 className="font-serif text-xl font-bold text-navy">{caso ? nomeCaso(caso) : "Andamento da sua causa"}</h2>
+            {caso?.numero_atendimento && (
+              <p className="mt-0.5 font-mono text-xs tracking-wide text-gold">Atendimento nº {caso.numero_atendimento}</p>
+            )}
+            {caso?.numero_processo && <p className="mt-1 text-xs text-charcoal/50">Processo nº {caso.numero_processo}</p>}
+
+            {/* Avisos do escritório, com ciência */}
+            {(caso?.avisos || []).length > 0 && (
+              <div className="mt-5 space-y-3">
+                {(caso!.avisos || []).map((a) => (
+                  <div key={a.id}
+                    className={`rounded-xl border p-4 ${a.ciencia_em ? "border-black/5 bg-ice" : "border-gold/50 bg-gold/10"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-navy">{a.titulo}</p>
+                        <p className="mt-1 whitespace-pre-line text-sm text-charcoal/75">{a.mensagem}</p>
+                        <p className="mt-2 text-[11px] text-charcoal/45">Enviado em {dataHora(a.criado_em)}</p>
+                      </div>
+                      {!a.ciencia_em && <span className="shrink-0 rounded-full bg-gold px-2 py-0.5 text-[10px] font-bold text-navy">NOVO</span>}
+                    </div>
+                    {a.ciencia_em ? (
+                      <p className="mt-3 text-xs font-medium text-forest">
+                        ✓ Você confirmou o recebimento em {dataHora(a.ciencia_em)}
+                      </p>
+                    ) : (
+                      <button onClick={() => darCiencia(a.id)} disabled={dandoCiencia === a.id}
+                        className="mt-3 rounded-xl bg-navy px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
+                        {dandoCiencia === a.id ? "Registrando…" : "Li e estou ciente"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {caso?.aguardando_cliente && (
-              <div className="mt-3 rounded-lg border border-amber/50 bg-amber/10 p-4 text-sm text-charcoal/80">
+              <div className="mt-4 rounded-lg border border-amber/50 bg-amber/10 p-4 text-sm text-charcoal/80">
                 <b className="text-navy">Seu processo saiu temporariamente da produção</b> porque precisamos de um complemento: {caso.aguardando_desc}. Envie pelo <button onClick={() => setVista("atendimento")} className="font-semibold text-gold underline">atendimento</button> e ele volta na hora para a produção.
               </div>
             )}
+
             {!caso ? (
               <p className="mt-3 text-sm text-charcoal/60">
                 Você ainda não tem um caso aberto. Use o <b>Atendimento</b> para iniciar — assim que contratar,
@@ -344,9 +466,8 @@ export default function AreaCliente() {
               </p>
             ) : (
               <>
-                {caso.numero_processo && <p className="mt-1 text-xs text-charcoal/50">Processo nº {caso.numero_processo}</p>}
                 {idxEsteira < 0 && (
-                  <p className="mt-3 rounded-lg bg-gold/10 px-4 py-3 text-sm text-charcoal/70">
+                  <p className="mt-5 rounded-lg bg-gold/10 px-4 py-3 text-sm text-charcoal/70">
                     Seu caso está em análise para contratação. A esteira começa após a assinatura dos documentos iniciais.
                   </p>
                 )}
@@ -379,7 +500,7 @@ export default function AreaCliente() {
                   ) : (
                     <p className="mt-3 text-sm text-charcoal/55">
                       Após o protocolo, cada movimentação ou intimação do processo aparecerá aqui automaticamente —
-                      e o status acima é atualizado a cada novo passo. Você não precisa fazer nada: nós te avisamos.
+                      e avisamos você por e-mail e WhatsApp a cada novo passo.
                     </p>
                   )}
                 </div>
@@ -390,11 +511,15 @@ export default function AreaCliente() {
           /* ── ATENDIMENTO + ENVIO DE DOCUMENTOS ── */
           <section className="flex flex-col rounded-2xl border border-black/5 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-black/5 px-5 py-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-semibold text-navy">Atendimento FC Advocacia</p>
-                <p className="text-xs text-charcoal/50">Tire dúvidas e envie documentos — tudo por aqui.</p>
+                <p className="truncate text-xs text-charcoal/50">
+                  {caso?.numero_atendimento
+                    ? `${nomeCaso(caso)} · nº ${caso.numero_atendimento}`
+                    : "Tire dúvidas e envie documentos — tudo por aqui."}
+                </p>
               </div>
-              <button onClick={() => setVista("home")} className="text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
+              <button onClick={() => setVista("home")} className="shrink-0 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
             </div>
 
             {pendentes.length > 0 && (
@@ -427,7 +552,6 @@ export default function AreaCliente() {
               <div ref={fimRef} />
             </div>
 
-            {/* Anexos escolhidos, aguardando o botão ENVIAR */}
             {anexos.length > 0 && (
               <div className="border-t border-black/5 bg-ice px-5 py-3">
                 <p className="mb-2 text-xs font-semibold text-navy">
@@ -507,6 +631,9 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
     <section className="rounded-2xl border border-black/5 bg-white p-6 shadow-sm">
       <button onClick={onVoltar} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
       <h2 className="font-serif text-xl font-bold text-navy">Meu cadastro</h2>
+      <p className="mt-1 text-sm text-charcoal/60">
+        É por estes contatos que avisamos você a cada movimentação do seu caso — por e-mail e WhatsApp.
+      </p>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="text-xs font-medium text-charcoal/60">Nome completo

@@ -8,7 +8,7 @@ from .core.config import get_settings
 from .core.db import get_db
 from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
-from .integracoes import asaas, zapsign, whatsapp
+from .integracoes import asaas, zapsign, whatsapp, avisos
 
 app = FastAPI(title="FC Legal OS", version="4.0")
 app.add_middleware(
@@ -44,6 +44,15 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[aniversarios] job não agendado: {e}")
+        # Lembretes: reenvia avisos que o cliente ainda não deu ciência
+        try:
+            sched.add_job(
+                avisos.reenviar_pendentes,
+                CronTrigger(minute=20),          # de hora em hora
+                id="lembretes_ciencia", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[lembretes] job não agendado: {e}")
         sched.start()
         app.state.scheduler = sched
     except Exception as e:  # API sobe mesmo sem o scheduler
@@ -146,6 +155,11 @@ def detalhe_caso(caso_id: str):
             .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
     except Exception:
         caso["solicitacoes"] = []
+    try:
+        caso["avisos"] = db.table("avisos").select("*") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).limit(50).execute().data
+    except Exception:
+        caso["avisos"] = []
     return caso
 
 
@@ -308,6 +322,7 @@ class EditarCaso(BaseModel):
     grupo: str | None = None
     honorarios: str | None = None
     numero_processo: str | None = None
+    titulo: str | None = None          # nome do caso, visível ao cliente
 
 
 def _set_situacao(caso_id: str, situacao: str, motivo: str | None, evento: str):
@@ -960,15 +975,102 @@ def acionar_cliente(caso_id: str, body: AcionarBody):
         }).eq("id", caso_id).execute()
     except Exception:
         pass
-    # tenta enviar já pelo WhatsApp (quando o agente/Cloud API estiver ligado)
-    enviado = False
+    # 3) avisa o cliente por e-mail e WhatsApp (número escolhido pelo DDD)
+    envio = {}
     try:
-        from .integracoes.whatsapp import enviar_para_cliente
-        enviar_para_cliente(caso_id, body.solicitacao)
-        enviado = True
+        envio = avisos.notificar(
+            caso_id, "DOCUMENTO",
+            "Precisamos de um documento seu",
+            body.solicitacao,
+            solicitacao_id=solicitacao_id,
+        )
+    except Exception as e:
+        envio = {"erros": [str(e)]}
+    return {"ok": True, "solicitacao_id": solicitacao_id, **envio}
+
+
+class AvisoBody(BaseModel):
+    titulo: str
+    mensagem: str
+    tipo: str = "GERAL"      # AUDIENCIA | MOVIMENTACAO | PRAZO | PAGAMENTO | GERAL
+
+
+@app.post("/api/v1/casos/{caso_id}/avisar")
+def avisar_cliente(caso_id: str, body: AvisoBody):
+    """CRM: comunica o cliente sobre audiência, prazo ou qualquer
+    movimentação. Sai por e-mail e WhatsApp (número escolhido pelo DDD)
+    e fica aguardando a ciência dele no painel."""
+    if not body.titulo.strip() or not body.mensagem.strip():
+        raise HTTPException(400, "Informe o título e a mensagem do aviso.")
+    return avisos.notificar(caso_id, body.tipo.upper(),
+                            body.titulo.strip(), body.mensagem.strip())
+
+
+@app.post("/api/v1/avisos/{aviso_id}/reenviar")
+def reenviar_aviso(aviso_id: str):
+    """CRM: reenvia um aviso específico que o cliente ainda não viu."""
+    db = get_db()
+    a = db.table("avisos").select("*").eq("id", aviso_id).maybe_single().execute().data
+    if not a:
+        raise HTTPException(404, "Aviso não encontrado.")
+    if a.get("ciencia_em"):
+        return {"ok": True, "info": "O cliente já deu ciência neste aviso."}
+    r = avisos.notificar(a["caso_id"], a["tipo"], a["titulo"], a["mensagem"],
+                         solicitacao_id=a.get("solicitacao_id"))
+    db.table("avisos").update({
+        "lembretes": (a.get("lembretes") or 0) + 1,
+        "ultimo_lembrete": datetime.now(_tz.utc).isoformat(),
+    }).eq("id", aviso_id).execute()
+    return r
+
+
+@app.post("/api/v1/avisos/reenviar-pendentes")
+def reenviar_avisos_pendentes():
+    """Dispara manualmente a rodada de lembretes (roda sozinha de hora em hora)."""
+    return avisos.reenviar_pendentes()
+
+
+# Como cada fase é explicada ao cliente no aviso automático
+FASE_PARA_CLIENTE = {
+    "QUALIFICACAO": ("Estamos analisando o seu caso",
+                     "Recebemos as suas informações e nossa equipe já está analisando a viabilidade da sua causa."),
+    "PROPOSTA": ("Sua proposta está pronta",
+                 "Concluímos a análise e preparamos a proposta de atuação para o seu caso. Acesse para conferir."),
+    "CONTRATO": ("Contrato disponível para assinatura",
+                 "O contrato de honorários já está disponível para a sua assinatura."),
+    "PAGAMENTO": ("Pagamento liberado",
+                  "O contrato foi assinado e a etapa de pagamento está liberada."),
+    "COLETA_DOCS": ("Hora de reunir os documentos",
+                    "Entramos na fase de coleta de documentos. Assim que precisarmos de algo, avisamos por aqui — e você pode enviar pelo próprio chat, por anexo ou foto."),
+    "COLETA_PROVAS": ("Coleta de provas complementares",
+                      "Estamos reunindo as provas complementares do seu caso."),
+    "ANALISE": ("Análise técnica do seu caso",
+                "Seus documentos estão em análise técnica pela nossa equipe."),
+    "PETICAO": ("Sua petição está sendo elaborada",
+                "Iniciamos a redação da petição do seu caso."),
+    "REVISAO": ("Petição em revisão final",
+                "A petição foi concluída e está em revisão final pelo advogado responsável."),
+    "APROVADO": ("Petição aprovada",
+                 "A petição foi aprovada e segue para o protocolo no tribunal."),
+    "PROTOCOLO_RPA": ("Protocolando no tribunal",
+                      "Sua petição está sendo protocolada no tribunal."),
+    "PROTOCOLADO": ("Processo protocolado",
+                    "Sua ação foi protocolada. A partir de agora você acompanha cada movimentação por aqui."),
+    "CONCLUIDO": ("Caso concluído",
+                  "Seu caso foi concluído. Agradecemos pela confiança."),
+}
+
+
+def _avisar_fase(caso_id: str, fase: str) -> None:
+    """Avisa o cliente (e-mail + WhatsApp) quando a fase muda."""
+    dados = FASE_PARA_CLIENTE.get(fase)
+    if not dados:
+        return
+    titulo, mensagem = dados
+    try:
+        avisos.notificar(caso_id, "MOVIMENTACAO", titulo, mensagem)
     except Exception:
         pass
-    return {"ok": True, "solicitacao_id": solicitacao_id, "enviado_whatsapp": enviado}
 
 
 @app.post("/api/v1/casos/{caso_id}/aprovar-etapa")
@@ -987,6 +1089,7 @@ def aprovar_etapa(caso_id: str):
         mudar_estado(caso_id, prox, motivo="Aprovação humana — avançar etapa")
     except TransicaoInvalida as e:
         raise HTTPException(409, str(e))
+    _avisar_fase(caso_id, prox)
     return {"ok": True, "novo_estado": prox}
 
 
@@ -1023,6 +1126,7 @@ def mover_fase(caso_id: str, body: MoverFase):
         "estado": body.fase, "atualizado_em": datetime.now(_tz.utc).isoformat(),
     }).eq("id", caso_id).execute()
     registrar_evento(caso_id, "FASE_MOVIDA_MANUAL", {"fase": body.fase})
+    _avisar_fase(caso_id, body.fase)
     return {"ok": True, "novo_estado": body.fase}
 
 
@@ -1161,6 +1265,21 @@ def equipe_registrar(body: RegistroEquipe, authorization: str | None = Header(de
 #      →  solicitação vira ATENDIDA e o caso volta para a produção
 # ================================================================
 
+# Nome amigável do caso quando o escritório ainda não deu um título
+NOME_POR_GRUPO = {
+    "BANCARIO": "Direito Bancário",
+    "IMOBILIARIO": "Distrato Imobiliário",
+    "TRIBUTARIO": "Execução Fiscal",
+    "CONSUMIDOR": "Recuperação de Consumo",
+    "TRABALHISTA": "Causa Trabalhista",
+    "PREVIDENCIARIO": "Causa Previdenciária",
+}
+
+
+def _nome_do_caso(grupo: str | None) -> str:
+    return NOME_POR_GRUPO.get(grupo or "", "Atendimento jurídico")
+
+
 def _clientes_do_token(authorization: str | None) -> tuple[dict, list[str]]:
     """Devolve (cadastro principal, ids de TODOS os cadastros do usuário).
 
@@ -1240,11 +1359,45 @@ def _caso_do_cliente(caso_id: str, cliente_ids: list[str] | str) -> dict:
 
 @app.get("/api/v1/cliente/meus-casos")
 def cliente_meus_casos(authorization: str | None = Header(default=None)):
-    """Casos do cliente logado — vinculados pelo e-mail do cadastro."""
+    """Casos do cliente logado, cada um com o seu NÚMERO DE ATENDIMENTO.
+    É por esse número que o cliente distingue um processo do outro quando
+    tem mais de um em andamento."""
     _, ids = _clientes_do_token(authorization)
-    return get_db().table("casos") \
-        .select("id,estado,grupo,numero_processo,aguardando_cliente,aguardando_desc,criado_em") \
-        .in_("cliente_id", ids).order("atualizado_em", desc=True).execute().data
+    db = get_db()
+    casos = db.table("casos") \
+        .select("id,estado,grupo,titulo,numero_atendimento,numero_processo,"
+                "aguardando_cliente,aguardando_desc,criado_em,atualizado_em") \
+        .in_("cliente_id", ids).order("criado_em").execute().data or []
+    if not casos:
+        return []
+
+    idsc = [c["id"] for c in casos]
+    # pendências por caso: avisos sem ciência e documentos ainda não enviados
+    sem_ciencia: dict[str, int] = {}
+    try:
+        for a in (db.table("avisos").select("caso_id")
+                    .in_("caso_id", idsc).is_("ciencia_em", "null")
+                    .execute().data or []):
+            sem_ciencia[a["caso_id"]] = sem_ciencia.get(a["caso_id"], 0) + 1
+    except Exception:
+        pass
+    pend_doc: dict[str, int] = {}
+    try:
+        for x in (db.table("solicitacoes").select("caso_id")
+                    .in_("caso_id", idsc).eq("status", "PENDENTE")
+                    .execute().data or []):
+            pend_doc[x["caso_id"]] = pend_doc.get(x["caso_id"], 0) + 1
+    except Exception:
+        pass
+
+    for c in casos:
+        c["avisos_sem_ciencia"] = sem_ciencia.get(c["id"], 0)
+        c["documentos_pendentes"] = pend_doc.get(c["id"], 0)
+        if not c.get("titulo"):
+            c["titulo"] = _nome_do_caso(c.get("grupo"))
+    # mais recentes primeiro na tela, mas a numeração seguiu a ordem de criação
+    casos.sort(key=lambda c: c.get("atualizado_em") or c.get("criado_em") or "", reverse=True)
+    return casos
 
 
 @app.get("/api/v1/cliente/cadastro")
@@ -1301,13 +1454,36 @@ def cliente_caso(caso_id: str, authorization: str | None = Header(default=None))
             .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
     except Exception:
         documentos = []
+    try:
+        lista_avisos = db.table("avisos") \
+            .select("id,tipo,titulo,mensagem,criado_em,ciencia_em,ciencia_canal") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).limit(50).execute().data
+    except Exception:
+        lista_avisos = []
     return {
         "id": caso["id"], "estado": caso["estado"], "grupo": caso.get("grupo"),
+        "titulo": caso.get("titulo") or _nome_do_caso(caso.get("grupo")),
+        "numero_atendimento": caso.get("numero_atendimento"),
         "numero_processo": caso.get("numero_processo"),
         "aguardando_cliente": caso.get("aguardando_cliente"),
         "aguardando_desc": caso.get("aguardando_desc"),
-        "mensagens": mensagens, "solicitacoes": solicitacoes, "documentos": documentos,
+        "mensagens": mensagens, "solicitacoes": solicitacoes,
+        "documentos": documentos, "avisos": lista_avisos,
     }
+
+
+@app.post("/api/v1/cliente/avisos/{aviso_id}/ciencia")
+def cliente_dar_ciencia(aviso_id: str, authorization: str | None = Header(default=None)):
+    """Botão 'Li e estou ciente' do painel. Registra data, hora e canal —
+    é a prova de que a comunicação chegou ao cliente."""
+    _, ids = _clientes_do_token(authorization)
+    db = get_db()
+    a = db.table("avisos").select("id,caso_id").eq("id", aviso_id) \
+          .maybe_single().execute().data
+    if not a:
+        raise HTTPException(404, "Aviso não encontrado.")
+    _caso_do_cliente(a["caso_id"], ids)          # confere a posse
+    return avisos.dar_ciencia(aviso_id, canal="PAINEL")
 
 
 @app.post("/api/v1/cliente/caso/{caso_id}/documentos")
