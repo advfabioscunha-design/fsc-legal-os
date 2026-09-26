@@ -1161,45 +1161,90 @@ def equipe_registrar(body: RegistroEquipe, authorization: str | None = Header(de
 #      →  solicitação vira ATENDIDA e o caso volta para a produção
 # ================================================================
 
-def _cliente_do_token(authorization: str | None) -> dict:
-    """Devolve o registro em `clientes` do usuário logado, criando o
-    vínculo pelo e-mail do login quando ainda não existir."""
+def _clientes_do_token(authorization: str | None) -> tuple[dict, list[str]]:
+    """Devolve (cadastro principal, ids de TODOS os cadastros do usuário).
+
+    A base carrega cadastros duplicados do início da operação — o mesmo
+    e-mail (às vezes o mesmo telefone gravado no campo e-mail) aparece em
+    vários registros de `clientes`, cada um dono de casos diferentes.
+    Por isso a posse de um caso é conferida contra a LISTA de cadastros
+    daquele login, e não contra um único registro escolhido ao acaso:
+    era isso que fazia o envio de documento responder "caso não
+    encontrado". O principal é o cadastro com caso mais recente.
+    """
     user = _usuario_do_token(authorization)
     email = (user.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(400, "Conta sem e-mail — não é possível localizar o cadastro.")
     db = get_db()
-    achado = db.table("clientes").select("*").eq("email", email).limit(1).execute().data
-    if achado:
-        cli = achado[0]
-    else:
+
+    achados = db.table("clientes").select("*").ilike("email", email).execute().data or []
+    if not achados:
         nome = (user.get("user_metadata") or {}).get("nome") or email.split("@")[0]
-        cli = db.table("clientes").insert(
+        achados = [db.table("clientes").insert(
             {"nome": nome, "email": email, "origem": "PORTAL"}
-        ).execute().data[0]
-    # mantém o perfil apontando para o cadastro (usado pelas políticas RLS)
+        ).execute().data[0]]
+
+    # amplia para os cadastros irmãos: mesmo CPF ou mesmo WhatsApp de algum
+    # dos registros encontrados (é assim que os duplicados antigos se ligam)
+    chaves_cpf = {c.get("cpf_cnpj") for c in achados if c.get("cpf_cnpj")}
+    chaves_zap = {c.get("whatsapp") for c in achados if c.get("whatsapp")}
+    for coluna, valores in (("cpf_cnpj", chaves_cpf), ("whatsapp", chaves_zap)):
+        for v in valores:
+            try:
+                irmaos = db.table("clientes").select("*").eq(coluna, v).execute().data or []
+            except Exception:
+                irmaos = []
+            for ir in irmaos:
+                if ir["id"] not in {c["id"] for c in achados}:
+                    achados.append(ir)
+
+    ids = [c["id"] for c in achados]
+    principal = achados[0]
+    if len(achados) > 1:
+        # o cadastro "vivo" é o que tem o caso mais recente
+        try:
+            ult = db.table("casos").select("cliente_id").in_("cliente_id", ids) \
+                    .order("atualizado_em", desc=True).limit(1).execute().data
+            if ult:
+                dono = ult[0]["cliente_id"]
+                principal = next((c for c in achados if c["id"] == dono), principal)
+        except Exception:
+            pass
+
     try:
-        db.table("perfis").update({"cliente_id": cli["id"]}).eq("id", user["id"]).execute()
+        db.table("perfis").update({"cliente_id": principal["id"]}) \
+          .eq("id", user["id"]).execute()
     except Exception:
         pass
-    return cli
+    return principal, ids
 
 
-def _caso_do_cliente(caso_id: str, cliente_id: str) -> dict:
+def _cliente_do_token(authorization: str | None) -> dict:
+    return _clientes_do_token(authorization)[0]
+
+
+def _caso_do_cliente(caso_id: str, cliente_ids: list[str] | str) -> dict:
+    """Confere se o caso pertence ao usuário logado (qualquer um dos
+    cadastros dele). Aceita id único por compatibilidade."""
+    if isinstance(cliente_ids, str):
+        cliente_ids = [cliente_ids]
     caso = get_db().table("casos").select("*").eq("id", caso_id) \
              .maybe_single().execute().data
-    if not caso or caso.get("cliente_id") != cliente_id:
+    if not caso:
         raise HTTPException(404, "Caso não encontrado.")
+    if caso.get("cliente_id") not in cliente_ids:
+        raise HTTPException(403, "Este caso não pertence ao seu cadastro.")
     return caso
 
 
 @app.get("/api/v1/cliente/meus-casos")
 def cliente_meus_casos(authorization: str | None = Header(default=None)):
     """Casos do cliente logado — vinculados pelo e-mail do cadastro."""
-    cli = _cliente_do_token(authorization)
+    _, ids = _clientes_do_token(authorization)
     return get_db().table("casos") \
         .select("id,estado,grupo,numero_processo,aguardando_cliente,aguardando_desc,criado_em") \
-        .eq("cliente_id", cli["id"]).order("criado_em", desc=True).execute().data
+        .in_("cliente_id", ids).order("atualizado_em", desc=True).execute().data
 
 
 @app.get("/api/v1/cliente/cadastro")
@@ -1238,8 +1283,8 @@ def cliente_atualizar_cadastro(body: CadastroCliente,
 def cliente_caso(caso_id: str, authorization: str | None = Header(default=None)):
     """Conversa + documentos + solicitações pendentes de UM caso do cliente.
     É a 'caixa de mensagens' dentro do cadastro dele."""
-    cli = _cliente_do_token(authorization)
-    caso = _caso_do_cliente(caso_id, cli["id"])
+    cli, ids = _clientes_do_token(authorization)
+    caso = _caso_do_cliente(caso_id, ids)
     db = get_db()
     mensagens = db.table("mensagens").select("id,autor,conteudo,canal,criado_em") \
                   .eq("caso_id", caso_id).order("criado_em").execute().data
@@ -1278,8 +1323,8 @@ async def cliente_enviar_documentos(
     para a esteira — com os documentos já anexados."""
     import re, uuid
     from .core.db import registrar_evento
-    cli = _cliente_do_token(authorization)
-    _caso_do_cliente(caso_id, cli["id"])
+    cli, ids = _clientes_do_token(authorization)
+    _caso_do_cliente(caso_id, ids)
     s = get_settings()
     db = get_db()
 
@@ -1377,8 +1422,8 @@ def cliente_mensagem(caso_id: str, body: MensagemCliente,
                      authorization: str | None = Header(default=None)):
     """Mensagem do cliente pela plataforma — mesma thread do caso, para o
     atendimento nunca recomeçar nem repetir perguntas já respondidas."""
-    cli = _cliente_do_token(authorization)
-    _caso_do_cliente(caso_id, cli["id"])
+    cli, ids = _clientes_do_token(authorization)
+    _caso_do_cliente(caso_id, ids)
     return especialista.atender(caso_id, body.conteudo, "PORTAL")
 
 

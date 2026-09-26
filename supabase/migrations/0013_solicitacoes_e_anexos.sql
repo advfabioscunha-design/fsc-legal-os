@@ -33,8 +33,18 @@ comment on column documentos.enviado_por is
 -- ── CLIENTES: contato completo (o e-mail passa a ser obrigatório
 --    na prática, pois é a chave que liga o login do portal ao caso)
 alter table clientes add column if not exists atualizado_em timestamptz not null default now();
-create unique index if not exists idx_clientes_email_unico
-  on clientes (lower(email)) where email is not null and email <> '';
+
+-- ATENÇÃO: o índice único de e-mail NÃO foi aplicado porque a base tem
+-- cadastros duplicados herdados (inclusive telefones gravados na coluna
+-- `email`). A deduplicação passou a acontecer no código
+-- (`triagem.identificar_cliente`), que reaproveita o cliente existente.
+-- Depois de limpar os duplicados, rode:
+--   create unique index idx_clientes_email_unico
+--     on clientes (lower(email)) where email is not null and email <> '';
+--
+-- Para conferir o que está duplicado:
+--   select lower(email) e, count(*) from clientes
+--   where email is not null and email <> '' group by 1 having count(*) > 1;
 
 -- ── RLS: o cliente enxerga e responde as próprias solicitações ──
 alter table solicitacoes enable row level security;

@@ -159,19 +159,72 @@ export default function AreaCliente() {
   }
   function removerAnexo(i: number) { setAnexos((a) => a.filter((_, j) => j !== i)); }
 
+  /* Envia os anexos. Se o caso da tela estiver desatualizado (o cadastro
+     do cliente pode ter mais de um caso), busca o caso atual e reenvia
+     uma vez antes de avisar o usuário. */
+  async function postarDocumentos(casoId: string) {
+    const fd = new FormData();
+    anexos.forEach((f) => fd.append("arquivos", f));
+    const qs = alvoSolicitacao ? `?solicitacao_id=${encodeURIComponent(alvoSolicitacao)}` : "";
+    const r = await fetch(`${API}/api/v1/cliente/caso/${casoId}/documentos${qs}`, {
+      method: "POST", headers: auth(), body: fd,
+    });
+    return { r, data: await r.json().catch(() => ({} as any)) };
+  }
+
   async function enviarDocumentos() {
     if (!anexos.length || subindo) return;
-    if (!caso) { alert("Escreva primeiro uma mensagem para abrirmos o seu atendimento."); return; }
     setSubindo(true);
     try {
-      const fd = new FormData();
-      anexos.forEach((f) => fd.append("arquivos", f));
-      const qs = alvoSolicitacao ? `?solicitacao_id=${encodeURIComponent(alvoSolicitacao)}` : "";
-      const r = await fetch(`${API}/api/v1/cliente/caso/${caso.id}/documentos${qs}`, {
-        method: "POST", headers: auth(), body: fd,
-      });
-      const data = await r.json().catch(() => ({} as any));
-      if (!r.ok) { alert(data.detail || "Não foi possível enviar os documentos."); return; }
+      // sem atendimento aberto ainda? abre um agora para o documento ter destino
+      let atual = caso;
+      if (!atual) {
+        try {
+          const rl = await fetch(`${API}/api/v1/leads`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              nome, email, contato: email, canal: "PORTAL",
+              relato: "Envio de documentos pela área do cliente.",
+            }),
+          });
+          const dl = rl.ok ? await rl.json() : null;
+          if (dl?.caso_id) {
+            atual = { id: dl.caso_id, estado: "QUALIFICACAO", grupo: dl.grupo ?? null };
+            setCaso(atual);
+          }
+        } catch { /* cai no aviso abaixo */ }
+      }
+      if (!atual) {
+        alert("Não consegui abrir seu atendimento agora. Escreva uma mensagem no chat e tente de novo.");
+        return;
+      }
+
+      let idUsado = atual.id;
+      let { r, data } = await postarDocumentos(idUsado);
+
+      if (r.status === 404 || r.status === 403) {
+        // recarrega a lista de casos do cadastro e tenta de novo
+        try {
+          const lista = await fetch(`${API}/api/v1/cliente/meus-casos`, { headers: auth() });
+          const casos: Caso[] = lista.ok ? await lista.json() : [];
+          if (casos.length && casos[0].id !== idUsado) {
+            idUsado = casos[0].id;
+            setCaso((c) => (c ? { ...c, id: idUsado } : { ...casos[0] }));
+            ({ r, data } = await postarDocumentos(idUsado));
+          }
+        } catch { /* mantém o erro original */ }
+      }
+
+      if (!r.ok) {
+        alert(
+          r.status === 404 || r.status === 403
+            ? "Não consegui localizar o seu atendimento para anexar o documento. " +
+              "Saia e entre de novo na plataforma, ou nos chame pelo WhatsApp que " +
+              "recebemos o documento por lá e eu anexo no seu processo."
+            : data.detail || "Não foi possível enviar os documentos."
+        );
+        return;
+      }
       setAnexos([]);
       setMsgs((m) => [...m, {
         autor: "CLIENTE",
@@ -182,7 +235,7 @@ export default function AreaCliente() {
           ? "Recebi os documentos, muito obrigado! Já estão na sua pasta e o seu processo voltou para a produção. Qualquer outra coisa que eu precisar, aviso por aqui."
           : "Recebi os documentos, obrigado! Já estão na sua pasta. Ainda falta um item que pedimos — assim que enviar, o processo volta para a produção.",
       }]);
-      await carregarCaso(caso.id, token, nome);
+      await carregarCaso(idUsado, token, nome);
     } catch { alert("Falha de conexão ao enviar os documentos."); }
     finally { setSubindo(false); }
   }
