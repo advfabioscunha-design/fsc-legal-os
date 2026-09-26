@@ -48,20 +48,106 @@ def identificar_grupo(relato: str) -> dict:
     return dados
 
 
+# Estados em que o caso ainda está "vivo": uma nova mensagem do mesmo
+# cliente CONTINUA esse caso em vez de abrir outro do zero — é o que
+# garante que o atendimento nunca recomece nem repita perguntas.
+_ESTADOS_ENCERRADOS = {"PROTOCOLADO", "INVIAVEL", "CANCELADO", "CONCLUIDO"}
+
+
+def _so_digitos(v: str | None) -> str:
+    return "".join(ch for ch in (v or "") if ch.isdigit())
+
+
+def identificar_cliente(nome: str, email: str | None = None,
+                        whatsapp: str | None = None, cpf: str | None = None,
+                        canal: str = "PORTAL") -> dict:
+    """Encontra o cliente pelo e-mail, CPF ou WhatsApp; se não existir, cria.
+    Sempre COMPLETA o cadastro com os dados novos que chegaram — assim o
+    e-mail entra no cadastro mesmo que o primeiro contato tenha sido por
+    telefone, e o cliente nunca vira um registro duplicado."""
+    db = get_db()
+    email = (email or "").strip().lower() or None
+    whats = _so_digitos(whatsapp) or None
+    cpf = _so_digitos(cpf) or None
+
+    achado = None
+    for coluna, valor in (("email", email), ("cpf_cnpj", cpf), ("whatsapp", whats)):
+        if not valor:
+            continue
+        try:
+            r = db.table("clientes").select("*").eq(coluna, valor) \
+                  .limit(1).execute().data
+        except Exception:
+            r = []
+        if r:
+            achado = r[0]
+            break
+
+    if achado:
+        # completa os campos que ainda estavam vazios (não sobrescreve o que já existe)
+        faltando = {}
+        if email and not achado.get("email"):
+            faltando["email"] = email
+        if whats and not achado.get("whatsapp"):
+            faltando["whatsapp"] = whats
+        if cpf and not achado.get("cpf_cnpj"):
+            faltando["cpf_cnpj"] = cpf
+        if nome and not achado.get("nome"):
+            faltando["nome"] = nome
+        if faltando:
+            db.table("clientes").update(faltando).eq("id", achado["id"]).execute()
+            achado.update(faltando)
+        return achado
+
+    novo = {"nome": nome or "Cliente", "origem": canal}
+    if email:
+        novo["email"] = email
+    if whats:
+        novo["whatsapp"] = whats
+    if cpf:
+        novo["cpf_cnpj"] = cpf
+    return db.table("clientes").insert(novo).execute().data[0]
+
+
+def caso_em_aberto(cliente_id: str) -> dict | None:
+    """Último caso ainda em andamento deste cliente (ou None)."""
+    try:
+        casos = get_db().table("casos").select("*").eq("cliente_id", cliente_id) \
+                  .order("atualizado_em", desc=True).limit(10).execute().data
+    except Exception:
+        return None
+    for c in casos or []:
+        if c.get("estado") not in _ESTADOS_ENCERRADOS:
+            return c
+    return None
+
+
 def criar_caso(nome: str, contato: str, relato: str,
-               canal: str = "PORTAL", cpf: str | None = None) -> dict:
-    """Entrada de um novo lead: cria cliente + caso, classifica o grupo
-    e passa o controle ao Agente Especialista do grupo."""
+               canal: str = "PORTAL", cpf: str | None = None,
+               email: str | None = None, whatsapp: str | None = None) -> dict:
+    """Entrada de um lead: identifica (ou cria) o cliente, CONTINUA o caso
+    aberto se já houver um, classifica o grupo e entrega ao Especialista."""
     db = get_db()
 
-    dados_cliente = {
-        "nome": nome,
-        "whatsapp" if canal == "WHATSAPP" else "email": contato,
-        "origem": canal,
-    }
-    if cpf:
-        dados_cliente["cpf_cnpj"] = cpf
-    cliente = db.table("clientes").insert(dados_cliente).execute().data[0]
+    # `contato` é o campo legado: pode vir e-mail ou telefone
+    if contato and "@" in contato:
+        email = email or contato
+    elif contato:
+        whatsapp = whatsapp or contato
+    if canal == "WHATSAPP":
+        whatsapp = whatsapp or contato
+
+    cliente = identificar_cliente(nome, email=email, whatsapp=whatsapp,
+                                  cpf=cpf, canal=canal)
+
+    # ── conversa interligada: se já existe caso vivo, segue nele ──
+    aberto = caso_em_aberto(cliente["id"])
+    if aberto:
+        from .especialista import atender
+        resposta = atender(aberto["id"], relato, canal=canal)
+        return {"caso_id": aberto["id"], "grupo": aberto.get("grupo"),
+                "continuado": True,
+                "primeira_resposta": resposta.get("resposta")}
 
     caso = db.table("casos").insert({
         "cliente_id": cliente["id"],
@@ -80,4 +166,5 @@ def criar_caso(nome: str, contato: str, relato: str,
     primeira = atender(caso["id"], relato, canal=canal)
 
     return {"caso_id": caso["id"], "grupo": clas["grupo"],
+            "continuado": False,
             "primeira_resposta": primeira.get("resposta")}

@@ -1,90 +1,80 @@
-# RETOMADA DA OPERAÇÃO — FSC Legal OS
-**Plano definido em 10/09/2026** · Decisão: pagar **somente a Hetzner** (sem e-mail Titan)
+# RETOMADA — CONCLUÍDA em 25/09/2026
+
+**Status: operação 100% no ar.**
 
 ---
 
-## O que já está PRONTO no código (não precisa refazer)
+## Infraestrutura atual
 
-Sessões anteriores deixaram a plataforma praticamente completa:
-
-**Frontend** (`frontend/app/`): home, landings dos 4 nichos (`/areas/...`), portal de
-atendimento, **botão flutuante de WhatsApp**, login (`/entrar`), **área do cliente**
-(`/cliente`), **CRM da equipe** (`/crm`, `/processos`, `/agenda`, `/admin`), contrato
-online, assistente interno.
-
-**Backend** (`backend/app/`): agentes (triagem, especialista por nicho, contrato,
-jurisprudencial, **radar**, relacionamento, ceo), integrações (Asaas, ZapSign,
-WhatsApp + omnichannel, áudio/voz, **DataJud/CNJ**, Escavador), workers (fila,
-RPA Eproc) e **job `radar_semanal.py`** — busca automática de jurisprudência
-toda segunda-feira às 6h (`RADAR_AUTO=true`).
-
-> Ou seja: **falta apenas colocar no ar.** O servidor foi cancelado e o DNS quebrou.
-
----
-
-## PASSO 1 — Hetzner (você) · ~US$ 20 + US$ ~8/mês
-
-1. Quitar as 3 faturas em aberto: https://accounts.hetzner.com/invoice/088001131295
-   (as outras aparecem em *Invoices → Overview*: 088000994701 · 081001049659)
-2. **Trocar o cartão** em https://accounts.hetzner.com/account/payment
-   — o atual foi recusado 3× e foi isso que derrubou o servidor.
-3. Criar o servidor: Cloud → **New Server** → Ubuntu 24.04 · tipo **CX32**
-   (4 GB) · região Nuremberg/Falkenstein · autenticação por senha root.
-4. Me passar o **IP** que aparecer.
-
-## PASSO 2 — DNS na HostGator (eu faço, com você logado) · R$ 0
-
-Painel → Domínios → `fscadvocaciadigital.com.br` → Editar Zona Avançada de DNS:
-
-| Tipo | Nome | Valor |
+| Camada | Onde | Estado |
 |---|---|---|
-| CNAME | `app` | `cname.vercel-dns.com` |
-| A | `api` | *(IP do servidor novo)* |
+| Site, portal, CRM (Next.js) | Vercel | ✅ no ar · build `Ready` |
+| API + robôs + fila (FastAPI/RQ/Redis) | VPS Hostinger KVM 1 · `2.25.248.85` · Ubuntu 24.04 | ✅ containers `api`, `worker`, `redis` Up |
+| Banco, autenticação, arquivos | Supabase | ✅ conectado e lendo |
+| HTTPS | Caddy + Let's Encrypt | ✅ certificado emitido |
+| Domínio | HostGator (pago até 05/2028) | ✅ |
 
-> É o que devolve o site ao ar no seu domínio. Sem custo — o domínio está pago até 2028.
+### DNS (zona HostGator)
 
-## PASSO 3 — Subir o backend na VPS (eu conduzo)
+| Registro | Tipo | Valor |
+|---|---|---|
+| `app` | CNAME | `cname.vercel-dns.com` |
+| `api` | A | `2.25.248.85` |
+| `www` | CNAME | `cname.vercel-dns.com` |
+| `@` (raiz) | A | `216.198.79.1` (Vercel) |
 
-```bash
-# no servidor, como root:
-curl -sL https://raw.githubusercontent.com/advfabioscunha-design/fsc-legal-os/main/infra/deploy.sh | bash
-nano /opt/fsc-legal-os/backend/.env     # preencher chaves (modelo em .env.example)
-cd /opt/fsc-legal-os/backend && docker compose up -d --build
-```
+**Endereço oficial do site: `app.fscadvocaciadigital.com.br`.**
+`www.fscadvocaciadigital.com.br` e `fscadvocaciadigital.com.br` (sem www)
+fazem redirecionamento permanente **308 → app**, com HTTPS próprio emitido pela
+Vercel. Os registros de e-mail (MX, SPF, DKIM da Titan) não foram tocados.
 
-Chaves mínimas para funcionar: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `CLAUDE_API_KEY`.
-As demais (Asaas, ZapSign, WhatsApp, ElevenLabs) podem entrar depois, por módulo.
-
-## PASSO 4 — Ligar o frontend ao backend (eu faço)
-
-Vercel → projeto `fsc-legal-os` → Settings → Environment Variables:
-
-```
-NEXT_PUBLIC_API_URL         = https://api.fscadvocaciadigital.com.br
-NEXT_PUBLIC_SUPABASE_URL    = https://midywtybplbdqmkxfoyj.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY = (Supabase → Settings → API → anon public)
-NEXT_PUBLIC_WHATSAPP_NUMBER = 55DDD9XXXXXXXX   ← seu número do escritório
-```
-→ Redeploy.
-
-## PASSO 5 — Radar de jurisprudência automático (grátis)
-
-Já implementado. A API **DataJud do CNJ é pública e gratuita** (chave já embutida).
-Depois do PASSO 3 ele roda sozinho toda segunda às 6h e atualiza teses por nicho.
-Teste manual: `POST https://api.fscadvocaciadigital.com.br/api/v1/radar/executar`
+> Os dois registros antigos apontavam para o servidor Hetzner cancelado
+> (`159.69.124.171`) — era essa a causa real da queda, não falta de pagamento.
 
 ---
 
-## Custos da operação depois de retomada
+## O que foi feito nesta retomada
 
-| Item | Custo |
+1. **Servidor novo provisionado**: Docker, Caddy, firewall (ufw) e **swap de 2 GB**
+   (protege os 4 GB de RAM do plano).
+2. **Código publicado** em `/opt/fsc-legal-os` e serviços no ar.
+3. **DNS corrigido** (`app` → Vercel · `api` → VPS novo).
+4. **HTTPS automático** ativo em `api.fscadvocaciadigital.com.br`.
+5. **`.env` do servidor preenchido** (Supabase + Claude) — chaves nunca expostas em tela.
+6. **Variáveis de ambiente criadas na Vercel** e redeploy feito:
+   - `NEXT_PUBLIC_API_URL` = `https://api.fscadvocaciadigital.com.br`
+   - `NEXT_PUBLIC_SUPABASE_URL` = `https://midywtybplbdqmkxfoyj.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_WHATSAPP_NUMBER` = `5569993225383`
+7. **Causa das builds quebradas resolvida**: desde 17/06 *todos* os deploys da
+   Vercel falhavam porque as variáveis do Supabase não existiam no projeto — o
+   site estava servindo a versão de **14/06**. Com as variáveis criadas, a build
+   passou e o site agora roda o código mais recente.
+
+## Testes feitos (com resultado)
+
+| Teste | Resultado |
 |---|---|
-| Servidor Hetzner CX32 | ~R$ 48/mês |
-| Domínio | pago até 05/2028 |
-| Vercel · Supabase · GitHub · DataJud | R$ 0 |
-| Claude API (agentes) | por uso |
-| **E-mail profissional** | **não contratado** — usar `adv.fabios.cunha@gmail.com`. Alternativa grátis futura: Zoho Mail Free |
+| `GET https://api.../health` | `{"status":"ok","ambiente":"prod","versao":"4.0"}` |
+| `GET /api/v1/teses` | retornou as teses do Supabase |
+| `https://app.fscadvocaciadigital.com.br` | HTTP **200**, SSL válido |
+| Chamada do site → API (CORS) | **200** a partir do navegador |
+| Login/portal | carrega e protege rota (Supabase ok) |
+| **Radar Jurimétrico** `POST /api/v1/cerebro/radar-semanal` | **200** — gravou snapshots novos de BANCÁRIO, IMOBILIÁRIO, TRIBUTÁRIO e CONSUMIDOR |
+| Agendamento semanal | ligado (`RADAR_AUTO=true`, segunda 06:00 UTC) |
 
-## Pendências que NÃO custam nada (faço quando você quiser)
-- Revisar alertas de segurança do Supabase (políticas RLS).
-- Publicar as alterações pendentes no GitHub (`SUBIR_GITHUB.bat`).
+---
+
+## Pontos em aberto (nenhum bloqueia a operação)
+
+1. **Repositório GitHub está PÚBLICO.** Toda a lógica de negócio da plataforma é
+   legível por qualquer pessoa. Não há senhas expostas (o `.env` nunca foi
+   versionado), mas recomendo voltar a privado — nesse caso gero um token de
+   leitura para o servidor.
+2. **2FA da Vercel** está desligado (pulei na hora do login para não travar).
+   Vale ativar.
+3. **Dívida Hetzner** (~US$ 20) segue em aberto, em seu nome.
+4. **Cartão internacional recusado** — trocar antes de contratar qualquer coisa
+   em dólar de novo.
+5. Se `app.fscadvocaciadigital.com.br` não abrir no seu computador, é só cache de
+   DNS local (do servidor responde 200). Some sozinho em algumas horas.

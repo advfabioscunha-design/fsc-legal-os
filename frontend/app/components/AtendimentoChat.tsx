@@ -33,29 +33,62 @@ export default function AtendimentoChat({
   const [iniciado, setIniciado] = useState(false);
   const [nome, setNome] = useState("");
   const [telefone, setTelefone] = useState("");
+  const [email, setEmail] = useState("");
   const [casoId, setCasoId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([SAUDACAO]);
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
   const fimRef = useRef<HTMLDivElement | null>(null);
 
+  /* Conversa interligada: o cadastro e o caso ficam guardados neste
+     navegador, então ao voltar ao site o atendimento CONTINUA de onde
+     parou — sem pedir nome, telefone ou e-mail outra vez. */
+  const CHAVE = "fsc_atendimento";
+  useEffect(() => {
+    try {
+      const bruto = localStorage.getItem(CHAVE);
+      if (!bruto) return;
+      const s = JSON.parse(bruto);
+      if (s.nome) setNome(s.nome);
+      if (s.telefone) setTelefone(s.telefone);
+      if (s.email) setEmail(s.email);
+      if (s.casoId) setCasoId(s.casoId);
+      if (Array.isArray(s.msgs) && s.msgs.length) setMsgs(s.msgs);
+      if (s.iniciado) setIniciado(true);
+    } catch { /* primeira visita */ }
+  }, []);
+
+  function guardar(extra: Record<string, unknown> = {}) {
+    try {
+      localStorage.setItem(CHAVE, JSON.stringify({
+        nome, telefone, email, casoId, msgs, iniciado: true, ...extra,
+      }));
+    } catch { /* navegador sem armazenamento — a conversa segue na sessão */ }
+  }
+
   function iniciarConversa(e: React.FormEvent) {
     e.preventDefault();
     if (!nome.trim() || telefone.replace(/\D/g, "").length < 10) return;
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) return;
     const pn = nome.trim().split(" ")[0];
-    setMsgs([{
+    const abertura: Msg[] = [{
       autor: "AGENTE",
       conteudo:
         `Olá, ${pn}! Seja muito bem-vindo(a) à FC Advocacia. Muito obrigado pela sua preferência! ` +
         `Estou aqui para te ajudar a resolver o seu problema com toda atenção. ` +
         `Me conte, com suas palavras, o que está acontecendo.`,
-    }]);
+    }];
+    setMsgs(abertura);
     setIniciado(true);
+    guardar({ msgs: abertura });
   }
 
   useEffect(() => {
     if (aberto) fimRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, enviando, aberto]);
+
+  // guarda a conversa a cada nova mensagem
+  useEffect(() => { if (iniciado) guardar(); /* eslint-disable-next-line */ }, [msgs, casoId, iniciado]);
 
   function addAgente(resposta?: string | null) {
     setMsgs((m) => [...m, { autor: "AGENTE", conteudo: (resposta || "").trim() || FALLBACK }]);
@@ -73,10 +106,16 @@ export default function AtendimentoChat({
         const r = await fetch(`${API}/api/v1/leads`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ nome: nome.trim() || "Visitante do site", contato: telefone.trim() || "site", relato: texto, canal: "SITE" }),
+          body: JSON.stringify({
+            nome: nome.trim() || "Visitante do site",
+            email: email.trim() || null,
+            whatsapp: telefone.trim() || null,
+            contato: email.trim() || telefone.trim() || "site",
+            relato: texto, canal: "SITE",
+          }),
         });
         const data = r.ok ? await r.json() : null;
-        if (data?.caso_id) setCasoId(data.caso_id);
+        if (data?.caso_id) { setCasoId(data.caso_id); guardar({ casoId: data.caso_id }); }
         addAgente(data?.primeira_resposta);
       } else {
         const r = await fetch(`${API}/api/v1/casos/${casoId}/mensagens`, {
@@ -153,6 +192,12 @@ export default function AtendimentoChat({
                   <label className="mb-1 block text-xs font-medium text-charcoal/60">Seu telefone / WhatsApp</label>
                   <input value={telefone} onChange={(e) => setTelefone(e.target.value)} required inputMode="tel" placeholder="(00) 00000-0000"
                     className="w-full rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm text-charcoal outline-none focus:border-gold" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-charcoal/60">Seu e-mail</label>
+                  <input value={email} onChange={(e) => setEmail(e.target.value)} required type="email" inputMode="email" placeholder="voce@email.com"
+                    className="w-full rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm text-charcoal outline-none focus:border-gold" />
+                  <p className="mt-1 text-[11px] text-charcoal/45">É com ele que você acessa a plataforma e acompanha o seu caso.</p>
                 </div>
                 <button type="submit"
                   className="mt-2 w-full rounded-xl bg-gold px-5 py-3 text-sm font-bold text-navy transition hover:bg-amber">

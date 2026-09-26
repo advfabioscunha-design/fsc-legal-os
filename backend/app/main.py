@@ -59,9 +59,11 @@ def health():
 # ── Portal: novo lead e conversa ─────────────────────────────────
 class NovoLead(BaseModel):
     nome: str
-    contato: str
+    contato: str = ""           # legado: e-mail OU telefone
     relato: str
     cpf: str | None = None
+    email: str | None = None    # cadastro completo
+    whatsapp: str | None = None
     canal: str = "PORTAL"
 
 
@@ -70,7 +72,10 @@ def novo_lead(body: NovoLead):
     from .core.cpf import cpf_valido
     if body.cpf and not cpf_valido(body.cpf):
         raise HTTPException(400, "CPF inválido — confira os números.")
-    return triagem.criar_caso(body.nome, body.contato, body.relato, body.canal, cpf=body.cpf)
+    return triagem.criar_caso(
+        body.nome, body.contato, body.relato, body.canal,
+        cpf=body.cpf, email=body.email, whatsapp=body.whatsapp,
+    )
 
 
 @app.get("/api/v1/validar-cpf")
@@ -134,8 +139,47 @@ def detalhe_caso(caso_id: str):
     caso = db.table("casos").select("*, clientes(*)").eq("id", caso_id).single().execute().data
     caso["mensagens"] = db.table("mensagens").select("*").eq("caso_id", caso_id) \
                           .order("criado_em").execute().data
-    caso["documentos"] = db.table("documentos").select("*").eq("caso_id", caso_id).execute().data
+    caso["documentos"] = db.table("documentos").select("*").eq("caso_id", caso_id) \
+                           .order("criado_em", desc=True).execute().data
+    try:
+        caso["solicitacoes"] = db.table("solicitacoes").select("*") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        caso["solicitacoes"] = []
     return caso
+
+
+class EditarCliente(BaseModel):
+    nome: str | None = None
+    email: str | None = None
+    cpf_cnpj: str | None = None
+    whatsapp: str | None = None
+
+
+@app.patch("/api/v1/clientes/{cliente_id}")
+def editar_cliente(cliente_id: str, body: EditarCliente):
+    """CRM: completa ou corrige o cadastro do cliente (inclusive o e-mail,
+    que é o que liga o acesso dele à plataforma)."""
+    campos = {k: (v.strip() if isinstance(v, str) else v)
+              for k, v in body.model_dump().items() if v is not None}
+    if campos.get("email"):
+        campos["email"] = campos["email"].lower()
+        if "@" not in campos["email"]:
+            raise HTTPException(400, "E-mail inválido.")
+    if campos.get("whatsapp"):
+        campos["whatsapp"] = "".join(c for c in campos["whatsapp"] if c.isdigit())
+    if campos.get("cpf_cnpj"):
+        from .core.cpf import cpf_valido
+        so_num = "".join(c for c in campos["cpf_cnpj"] if c.isdigit())
+        if len(so_num) == 11 and not cpf_valido(so_num):
+            raise HTTPException(400, "CPF inválido — confira os números.")
+        campos["cpf_cnpj"] = so_num
+    if campos:
+        try:
+            get_db().table("clientes").update(campos).eq("id", cliente_id).execute()
+        except Exception as e:
+            raise HTTPException(400, f"Não foi possível salvar: {e}")
+    return {"ok": True}
 
 
 @app.post("/api/v1/casos/{caso_id}/aprovar-protocolar")
@@ -884,15 +928,30 @@ class AcionarBody(BaseModel):
 
 @app.post("/api/v1/casos/{caso_id}/acionar-cliente")
 def acionar_cliente(caso_id: str, body: AcionarBody):
-    """Operador digita o que precisa do cliente; vai para o agente de triagem
-    do WhatsApp coletar (mensagem/documento/assinatura/pagamento)."""
+    """Operador digita o que precisa do cliente. A solicitação é registrada
+    e cai na CAIXA DE MENSAGENS do cliente, dentro do cadastro dele, onde
+    ele pode responder e anexar documentos pelo próprio chat."""
     from .core.db import registrar_evento
     db = get_db()
+
+    # 1) registra a solicitação (é ela que o cliente vê e responde)
+    solicitacao_id = None
+    try:
+        sol = db.table("solicitacoes").insert({
+            "caso_id": caso_id, "descricao": body.solicitacao,
+            "status": "PENDENTE", "criado_por": "ESCRITORIO",
+        }).execute().data[0]
+        solicitacao_id = sol["id"]
+    except Exception:
+        pass  # migração 0013 ainda não aplicada — segue pelo histórico
+
+    # 2) a mensagem aparece na conversa do cliente na plataforma
     texto = f"[SOLICITAÇÃO AO CLIENTE] {body.solicitacao}"
     db.table("mensagens").insert({
-        "caso_id": caso_id, "canal": "WHATSAPP", "autor": "HUMANO", "conteudo": texto,
+        "caso_id": caso_id, "canal": "PORTAL", "autor": "HUMANO", "conteudo": texto,
     }).execute()
-    registrar_evento(caso_id, "SOLICITACAO_CLIENTE", {"texto": body.solicitacao})
+    registrar_evento(caso_id, "SOLICITACAO_CLIENTE",
+                     {"texto": body.solicitacao, "solicitacao_id": solicitacao_id})
     # processo sai da produção até o cliente complementar (visível na área do cliente)
     try:
         db.table("casos").update({
@@ -909,7 +968,7 @@ def acionar_cliente(caso_id: str, body: AcionarBody):
         enviado = True
     except Exception:
         pass
-    return {"ok": True, "enviado_whatsapp": enviado}
+    return {"ok": True, "solicitacao_id": solicitacao_id, "enviado_whatsapp": enviado}
 
 
 @app.post("/api/v1/casos/{caso_id}/aprovar-etapa")
@@ -1091,19 +1150,236 @@ def equipe_registrar(body: RegistroEquipe, authorization: str | None = Header(de
     return {"ok": True, "papel": "OPERADOR"}
 
 
+# ================================================================
+#  ÁREA DO CLIENTE — cadastro, caixa de mensagens e envio de docs
+#
+#  Caminho completo:
+#    CRM "Acionar o cliente"  →  solicitacoes (PENDENTE)
+#      →  caixa de mensagens do cliente (GET /cliente/caso/{id})
+#      →  cliente anexa/fotografa e clica ENVIAR (POST .../documentos)
+#      →  arquivo vai para a pasta do caso no storage + tabela documentos
+#      →  solicitação vira ATENDIDA e o caso volta para a produção
+# ================================================================
+
+def _cliente_do_token(authorization: str | None) -> dict:
+    """Devolve o registro em `clientes` do usuário logado, criando o
+    vínculo pelo e-mail do login quando ainda não existir."""
+    user = _usuario_do_token(authorization)
+    email = (user.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(400, "Conta sem e-mail — não é possível localizar o cadastro.")
+    db = get_db()
+    achado = db.table("clientes").select("*").eq("email", email).limit(1).execute().data
+    if achado:
+        cli = achado[0]
+    else:
+        nome = (user.get("user_metadata") or {}).get("nome") or email.split("@")[0]
+        cli = db.table("clientes").insert(
+            {"nome": nome, "email": email, "origem": "PORTAL"}
+        ).execute().data[0]
+    # mantém o perfil apontando para o cadastro (usado pelas políticas RLS)
+    try:
+        db.table("perfis").update({"cliente_id": cli["id"]}).eq("id", user["id"]).execute()
+    except Exception:
+        pass
+    return cli
+
+
+def _caso_do_cliente(caso_id: str, cliente_id: str) -> dict:
+    caso = get_db().table("casos").select("*").eq("id", caso_id) \
+             .maybe_single().execute().data
+    if not caso or caso.get("cliente_id") != cliente_id:
+        raise HTTPException(404, "Caso não encontrado.")
+    return caso
+
+
 @app.get("/api/v1/cliente/meus-casos")
 def cliente_meus_casos(authorization: str | None = Header(default=None)):
     """Casos do cliente logado — vinculados pelo e-mail do cadastro."""
-    user = _usuario_do_token(authorization)
-    email = user.get("email")
-    if not email:
-        return []
+    cli = _cliente_do_token(authorization)
+    return get_db().table("casos") \
+        .select("id,estado,grupo,numero_processo,aguardando_cliente,aguardando_desc,criado_em") \
+        .eq("cliente_id", cli["id"]).order("criado_em", desc=True).execute().data
+
+
+@app.get("/api/v1/cliente/cadastro")
+def cliente_cadastro(authorization: str | None = Header(default=None)):
+    """Cadastro do cliente logado (nome, e-mail, CPF, WhatsApp)."""
+    cli = _cliente_do_token(authorization)
+    return {k: cli.get(k) for k in
+            ("id", "nome", "email", "cpf_cnpj", "whatsapp", "origem", "criado_em")}
+
+
+class CadastroCliente(BaseModel):
+    nome: str | None = None
+    cpf_cnpj: str | None = None
+    whatsapp: str | None = None
+
+
+@app.patch("/api/v1/cliente/cadastro")
+def cliente_atualizar_cadastro(body: CadastroCliente,
+                               authorization: str | None = Header(default=None)):
+    """O próprio cliente completa o cadastro. O e-mail não muda aqui:
+    ele é a chave do login e do vínculo com os casos."""
+    cli = _cliente_do_token(authorization)
+    campos = {k: v for k, v in body.model_dump().items() if v}
+    if campos.get("cpf_cnpj"):
+        from .core.cpf import cpf_valido
+        if not cpf_valido(campos["cpf_cnpj"]):
+            raise HTTPException(400, "CPF inválido — confira os números.")
+    if campos.get("whatsapp"):
+        campos["whatsapp"] = "".join(c for c in campos["whatsapp"] if c.isdigit())
+    if campos:
+        get_db().table("clientes").update(campos).eq("id", cli["id"]).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/cliente/caso/{caso_id}")
+def cliente_caso(caso_id: str, authorization: str | None = Header(default=None)):
+    """Conversa + documentos + solicitações pendentes de UM caso do cliente.
+    É a 'caixa de mensagens' dentro do cadastro dele."""
+    cli = _cliente_do_token(authorization)
+    caso = _caso_do_cliente(caso_id, cli["id"])
     db = get_db()
-    cli = db.table("clientes").select("id").eq("email", email).maybe_single().execute().data
-    if not cli:
-        return []
-    return db.table("casos").select("id,estado,grupo,subtipo") \
-             .eq("cliente_id", cli["id"]).order("criado_em", desc=True).execute().data
+    mensagens = db.table("mensagens").select("id,autor,conteudo,canal,criado_em") \
+                  .eq("caso_id", caso_id).order("criado_em").execute().data
+    # notas internas do CRM não aparecem para o cliente
+    mensagens = [m for m in mensagens if m.get("canal") != "CRM"]
+    try:
+        solicitacoes = db.table("solicitacoes").select("*").eq("caso_id", caso_id) \
+                         .order("criado_em", desc=True).execute().data
+    except Exception:
+        solicitacoes = []
+    try:
+        documentos = db.table("documentos") \
+            .select("id,observacao,tipo,status,enviado_por,criado_em") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        documentos = []
+    return {
+        "id": caso["id"], "estado": caso["estado"], "grupo": caso.get("grupo"),
+        "numero_processo": caso.get("numero_processo"),
+        "aguardando_cliente": caso.get("aguardando_cliente"),
+        "aguardando_desc": caso.get("aguardando_desc"),
+        "mensagens": mensagens, "solicitacoes": solicitacoes, "documentos": documentos,
+    }
+
+
+@app.post("/api/v1/cliente/caso/{caso_id}/documentos")
+async def cliente_enviar_documentos(
+    caso_id: str,
+    arquivos: list[UploadFile] = File(...),
+    solicitacao_id: str | None = None,
+    observacao: str | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """Botão ENVIAR do chat do cliente: recebe anexos ou fotos tiradas na
+    hora, grava na pasta do caso, responde a solicitação e devolve o caso
+    para a esteira — com os documentos já anexados."""
+    import re, uuid
+    from .core.db import registrar_evento
+    cli = _cliente_do_token(authorization)
+    _caso_do_cliente(caso_id, cli["id"])
+    s = get_settings()
+    db = get_db()
+
+    if not arquivos:
+        raise HTTPException(400, "Nenhum arquivo foi anexado.")
+
+    salvos, falhas = [], []
+    for arq in arquivos:
+        conteudo = await arq.read()
+        if not conteudo:
+            continue
+        if len(conteudo) > 25 * 1024 * 1024:
+            falhas.append(f"{arq.filename}: arquivo acima de 25 MB")
+            continue
+        base = (arq.filename or "documento").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", base) or "documento"
+        path = f"{caso_id}/{uuid.uuid4().hex}_{safe}"
+        try:
+            db.storage.from_(s.bucket_documentos).upload(
+                path, conteudo,
+                {"content-type": arq.content_type or "application/octet-stream",
+                 "upsert": "true"},
+            )
+        except Exception as e:
+            falhas.append(f"{base}: {e}")
+            continue
+        linha = {
+            "caso_id": caso_id, "tipo": "ENVIO_CLIENTE", "storage_path": path,
+            "observacao": observacao or arq.filename, "status": "RECEBIDO",
+        }
+        try:
+            linha["enviado_por"] = "CLIENTE"
+            if solicitacao_id:
+                linha["solicitacao_id"] = solicitacao_id
+            db.table("documentos").insert(linha).execute()
+        except Exception:
+            linha.pop("enviado_por", None)
+            linha.pop("solicitacao_id", None)
+            db.table("documentos").insert(linha).execute()
+        salvos.append(base)
+
+    if not salvos:
+        raise HTTPException(500, "Não foi possível enviar: " + "; ".join(falhas))
+
+    # a conversa registra o envio — o histórico segue único e contínuo
+    lista = ", ".join(salvos)
+    db.table("mensagens").insert({
+        "caso_id": caso_id, "canal": "PORTAL", "autor": "CLIENTE",
+        "conteudo": f"📎 Enviei {len(salvos)} documento(s): {lista}"
+                    + (f"\n{observacao}" if observacao else ""),
+    }).execute()
+
+    # a solicitação é atendida
+    if solicitacao_id:
+        try:
+            db.table("solicitacoes").update({
+                "status": "ATENDIDA",
+                "atendida_em": datetime.now(_tz.utc).isoformat(),
+            }).eq("id", solicitacao_id).execute()
+        except Exception:
+            pass
+
+    # se não restou pendência, o caso volta para a produção
+    pendentes = 0
+    try:
+        pendentes = len(db.table("solicitacoes").select("id")
+                        .eq("caso_id", caso_id).eq("status", "PENDENTE")
+                        .execute().data or [])
+    except Exception:
+        pendentes = 0
+    retomado = False
+    if pendentes == 0:
+        try:
+            db.table("casos").update({
+                "aguardando_cliente": False, "aguardando_desc": None,
+                "atualizado_em": datetime.now(_tz.utc).isoformat(),
+            }).eq("id", caso_id).execute()
+            retomado = True
+        except Exception:
+            pass
+
+    registrar_evento(caso_id, "DOCUMENTOS_RECEBIDOS_DO_CLIENTE",
+                     {"arquivos": salvos, "solicitacao_id": solicitacao_id,
+                      "retomou_producao": retomado})
+    return {"ok": True, "enviados": salvos, "falhas": falhas,
+            "pendencias_restantes": pendentes, "retomou_producao": retomado}
+
+
+class MensagemCliente(BaseModel):
+    conteudo: str
+
+
+@app.post("/api/v1/cliente/caso/{caso_id}/mensagens")
+def cliente_mensagem(caso_id: str, body: MensagemCliente,
+                     authorization: str | None = Header(default=None)):
+    """Mensagem do cliente pela plataforma — mesma thread do caso, para o
+    atendimento nunca recomeçar nem repetir perguntas já respondidas."""
+    cli = _cliente_do_token(authorization)
+    _caso_do_cliente(caso_id, cli["id"])
+    return especialista.atender(caso_id, body.conteudo, "PORTAL")
 
 
 @app.get("/api/v1/teses")

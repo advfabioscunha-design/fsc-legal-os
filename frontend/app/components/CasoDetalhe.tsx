@@ -18,6 +18,8 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
 
   // campos editáveis
   const [edit, setEdit] = useState({ relato_inicial: "", grupo: "", honorarios: "", numero_processo: "" });
+  // cadastro do cliente (o e-mail é a chave do acesso dele à plataforma)
+  const [cli, setCli] = useState({ nome: "", email: "", cpf_cnpj: "", whatsapp: "" });
 
   async function carregar() {
     setCarregando(true);
@@ -28,6 +30,10 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       setEdit({
         relato_inicial: d.relato_inicial || "", grupo: d.grupo || "",
         honorarios: d.honorarios_valor || "", numero_processo: d.numero_processo || "",
+      });
+      setCli({
+        nome: d.clientes?.nome || "", email: d.clientes?.email || "",
+        cpf_cnpj: d.clientes?.cpf_cnpj || "", whatsapp: d.clientes?.whatsapp || "",
       });
     } catch { setCaso(null); }
     finally { setCarregando(false); }
@@ -41,6 +47,16 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(edit),
       });
+      if (caso?.clientes?.id) {
+        const r = await fetch(`${API}/api/v1/clientes/${caso.clientes.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cli),
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({} as any));
+          alert(e.detail || "Caso salvo, mas o cadastro do cliente não pôde ser atualizado.");
+        }
+      }
       await carregar(); onMudou();
     } finally { setSalvando(false); }
   }
@@ -202,16 +218,35 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
 
             {/* Dados editáveis */}
             <section>
-              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Informações do caso</h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="text-xs text-white/60">Contato
-                  <input disabled value={caso.clientes?.email || caso.clientes?.whatsapp || "—"}
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-[#0A1628]/60 px-3 py-2 text-sm text-white/70" />
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Cadastro do cliente</h3>
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs text-white/60">Nome
+                  <input value={cli.nome} onChange={(e) => setCli({ ...cli, nome: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">E-mail <span className="text-[#C9A84C]">(acesso do cliente à plataforma)</span>
+                  <input value={cli.email} onChange={(e) => setCli({ ...cli, email: e.target.value })}
+                    type="email" placeholder="cliente@email.com"
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">WhatsApp
+                  <input value={cli.whatsapp} onChange={(e) => setCli({ ...cli, whatsapp: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
                 </label>
                 <label className="text-xs text-white/60">CPF/CNPJ
-                  <input disabled value={caso.clientes?.cpf_cnpj || "—"}
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-[#0A1628]/60 px-3 py-2 text-sm text-white/70" />
+                  <input value={cli.cpf_cnpj} onChange={(e) => setCli({ ...cli, cpf_cnpj: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
                 </label>
+              </div>
+              {!cli.email && (
+                <p className="mb-3 rounded-lg border border-[#F39C12]/40 bg-[#F39C12]/10 px-3 py-2 text-xs text-[#F39C12]">
+                  Sem e-mail cadastrado o cliente não consegue acessar a plataforma para receber
+                  pedidos nem enviar documentos. Preencha e salve.
+                </p>
+              )}
+
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Informações do caso</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-xs text-white/60">Grupo
                   <select value={edit.grupo} onChange={(e) => setEdit({ ...edit, grupo: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm">
@@ -246,7 +281,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                   const url = (d.storage_path || "").startsWith("http") ? d.storage_path : null;
                   return (
                     <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
-                      <span className="truncate">{d.observacao || d.tipo}</span>
+                      <span className="truncate">
+                        {d.enviado_por === "CLIENTE" && (
+                          <span className="mr-2 rounded bg-[#1DB954]/20 px-1.5 py-0.5 text-[10px] font-bold text-[#1DB954]">CLIENTE</span>
+                        )}
+                        {d.observacao || d.tipo}
+                      </span>
                       <span className="flex shrink-0 items-center gap-3">
                         {url
                           ? <a href={url} target="_blank" rel="noreferrer" className="text-[#C9A84C] hover:underline">abrir</a>
@@ -282,8 +322,26 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
 
             {/* Acionar cliente */}
             <section>
-              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Acionar o cliente (WhatsApp)</h3>
-              <p className="mb-2 text-xs text-white/55">Digite o que precisa do cliente (informação, documento, assinatura, pagamento). Vai para o agente de triagem do WhatsApp coletar e devolver à esteira.</p>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Pedir documento / informação ao cliente</h3>
+              <p className="mb-2 text-xs text-white/55">
+                O pedido cai na <b className="text-white/75">caixa de mensagens do cliente</b>, dentro do cadastro dele.
+                Ele anexa o arquivo ou tira a foto pelo próprio chat e, ao enviar, o documento aparece
+                nesta pasta e o caso volta sozinho para a produção.
+              </p>
+
+              {(caso.solicitacoes || []).length > 0 && (
+                <ul className="mb-3 space-y-1">
+                  {(caso.solicitacoes || []).map((s: any) => (
+                    <li key={s.id} className="flex items-start gap-2 rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
+                      <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                        s.status === "PENDENTE" ? "bg-[#F39C12]/20 text-[#F39C12]" : "bg-[#1DB954]/20 text-[#1DB954]"
+                      }`}>{s.status === "PENDENTE" ? "AGUARDANDO" : "ATENDIDA"}</span>
+                      <span className="text-white/75">{s.descricao}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               <textarea value={solicitacao} onChange={(e) => setSolicitacao(e.target.value)} rows={2} placeholder="Ex.: Enviar RG e comprovante de residência..."
                 className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
               <button onClick={acionarCliente} className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3]">Enviar ao cliente</button>
