@@ -643,7 +643,7 @@ def _content_disposition(nome: str) -> str:
     nomes com travessão, emoji ou acento quebram a resposta. Enviamos uma
     versão ASCII para compatibilidade e a versão UTF-8 (RFC 5987) para os
     navegadores modernos, que é a que o usuário vê."""
-    import unicodedata
+    import re, unicodedata
     from urllib.parse import quote
     limpo = re.sub(r'[\\/:*?"<>|]', "_", (nome or "arquivo")).strip() or "arquivo"
     ascii_nome = (unicodedata.normalize("NFKD", limpo)
