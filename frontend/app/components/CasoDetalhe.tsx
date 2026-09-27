@@ -224,19 +224,24 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
         return;
       }
       setInstrucaoDoc("");
-      if (d.resumo_ia) alert(`Documento gerado e aguardando sua revisão.\n\nO que o agente entendeu do caso:\n${d.resumo_ia}`);
+      const novoId = d?.documento?.id;
+      if (novoId) window.open(`/documento/${novoId}`, "_blank");
       carregar();
     } catch { alert("Falha de conexão ao gerar o documento."); }
     finally { setGerando(""); }
   }
 
-  async function aprovarDocumento(id: string, enviarAgora: boolean) {
-    const r = await fetch(`${API}/api/v1/documentos-assinatura/${id}/aprovar?enviar=${enviarAgora}`, { method: "POST" });
+  async function enviarAoCliente(id: string) {
+    if (!window.confirm(
+      "Enviar este documento ao cliente para assinatura?\n\n" +
+      "Ele recebe no chat da plataforma e por e-mail, com orientação para baixar, " +
+      "assinar e devolver o arquivo assinado pelo próprio chat."
+    )) return;
+    const r = await fetch(`${API}/api/v1/documentos-assinatura/${id}/enviar-cliente`, { method: "POST" });
     const d = await r.json().catch(() => ({} as any));
-    if (!r.ok) { alert(d.detail || "Não foi possível aprovar."); return; }
-    if (enviarAgora && d.link_assinatura) {
-      alert(`Enviado para assinatura.\n\nO cliente recebeu o link por e-mail, WhatsApp e no painel:\n${d.link_assinatura}`);
-    }
+    if (!r.ok) { alert(d.detail || "Não foi possível enviar."); return; }
+    const canais = [d.enviado_email ? "e-mail" : null, d.enviado_whatsapp ? "WhatsApp" : null].filter(Boolean).join(" e ");
+    alert(`Enviado ao cliente pelo chat da plataforma${canais ? ` e por ${canais}` : ""}.`);
     carregar();
   }
 
@@ -551,7 +556,9 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <p className="mb-2 text-xs text-white/55">
                 O agente monta o documento a partir do <b className="text-white/75">modelo oficial do escritório</b>,
                 trocando só o que muda: qualificação, objeto conforme o relato, foro e local
-                (a cidade do cliente), data e assinatura. Nada vai para o cliente sem a sua aprovação.
+                (a cidade do cliente), data e assinatura. O documento <b className="text-white/75">abre
+                em outra aba</b> para o senhor ajustar; de lá é só baixar ou enviar ao cliente,
+                que assina e devolve pelo próprio chat.
               </p>
               <input value={instrucaoDoc} onChange={(e) => setInstrucaoDoc(e.target.value)}
                 placeholder="Orientação para o agente (opcional): ex. incluir pedido de tutela de urgência"
@@ -570,6 +577,8 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                   const cor = x.status === "ASSINADO" ? "#1DB954"
                     : x.status === "ENVIADO" ? "#2D7DD2"
                     : x.status === "APROVADO" ? "#C9A84C" : "#F39C12";
+                  const rotuloStatus = x.status === "ENVIADO" ? "COM O CLIENTE"
+                    : x.status === "EM_REVISAO" ? "EM REVISÃO" : x.status;
                   return (
                     <li key={x.id} className="rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
                       <div className="flex items-start justify-between gap-2">
@@ -580,25 +589,24 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                           </span>
                         </span>
                         <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold"
-                          style={{ color: cor, backgroundColor: `${cor}26` }}>{x.status.replace("_", " ")}</span>
+                          style={{ color: cor, backgroundColor: `${cor}26` }}>{rotuloStatus}</span>
                       </div>
                       {x.tipo_acao && x.tipo === "PROCURACAO" && (
                         <p className="mt-1 text-xs text-white/55">Ação: {x.tipo_acao}</p>
                       )}
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                        <a href={`/documento/${x.id}`} target="_blank" rel="noreferrer"
+                          className="font-bold text-[#C9A84C] hover:underline">abrir e ajustar</a>
                         <a href={`${API}/api/v1/documentos-assinatura/${x.id}/baixar`} target="_blank" rel="noreferrer"
-                          className="text-[#C9A84C] hover:underline">baixar {x.assinado_url ? "assinado" : ".docx"}</a>
-                        {x.status === "EM_REVISAO" && (
-                          <>
-                            <button onClick={() => aprovarDocumento(x.id, false)} className="text-white/70 hover:text-white hover:underline">aprovar</button>
-                            <button onClick={() => aprovarDocumento(x.id, true)} className="font-bold text-[#1DB954] hover:underline">aprovar e enviar para assinatura</button>
-                          </>
+                          className="text-white/70 hover:text-white hover:underline">baixar .docx</a>
+                        {x.assinado_url && (
+                          <a href={`${API}/api/v1/documentos-assinatura/${x.id}/baixar`} target="_blank" rel="noreferrer"
+                            className="font-bold text-[#1DB954] hover:underline">baixar assinado</a>
                         )}
-                        {x.status === "APROVADO" && (
-                          <button onClick={() => aprovarDocumento(x.id, true)} className="font-bold text-[#1DB954] hover:underline">enviar para assinatura</button>
-                        )}
-                        {x.link_assinatura && (
-                          <a href={x.link_assinatura} target="_blank" rel="noreferrer" className="text-[#2D7DD2] hover:underline">abrir link de assinatura</a>
+                        {x.status !== "ASSINADO" && (
+                          <button onClick={() => enviarAoCliente(x.id)} className="font-bold text-[#1DB954] hover:underline">
+                            {x.status === "ENVIADO" ? "reenviar ao cliente" : "enviar ao cliente para assinar"}
+                          </button>
                         )}
                         {x.status !== "ASSINADO" && (
                           <button onClick={() => excluirDocumentoAssin(x.id)} className="ml-auto text-[#C0392B] hover:underline">descartar</button>

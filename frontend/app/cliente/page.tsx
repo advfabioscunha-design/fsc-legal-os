@@ -74,6 +74,8 @@ export default function AreaCliente() {
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [dandoCiencia, setDandoCiencia] = useState<string | null>(null);
+  const [subindoAssinado, setSubindoAssinado] = useState<string | null>(null);
+  const assinadoRef = useRef<Record<string, HTMLInputElement | null>>({});
 
   const [anexos, setAnexos] = useState<File[]>([]);
   const [subindo, setSubindo] = useState(false);
@@ -160,6 +162,43 @@ export default function AreaCliente() {
     setCaso(c);
     await carregarCaso(c.id, token, nome);
     setVista(destino);
+  }
+
+  /* Baixa o documento que o escritório mandou assinar (com o token do login). */
+  async function baixarParaAssinar(docId: string, titulo: string) {
+    try {
+      const r = await fetch(`${API}/api/v1/cliente/documentos-assinatura/${docId}/baixar`, { headers: auth() });
+      if (!r.ok) { alert("Não foi possível baixar o documento. Tente novamente."); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${titulo}.docx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch { alert("Falha de conexão ao baixar."); }
+  }
+
+  /* Devolve o documento já assinado. */
+  async function enviarAssinado(docId: string, e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setSubindoAssinado(docId);
+    try {
+      const fd = new FormData();
+      fd.append("arquivo", f);
+      const r = await fetch(`${API}/api/v1/cliente/documentos-assinatura/${docId}/assinado`, {
+        method: "POST", headers: auth(), body: fd,
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { alert(d.detail || "Não foi possível enviar o documento assinado."); return; }
+      setMsgs((m) => [...m, { autor: "AGENTE",
+        conteudo: "Recebemos o seu documento assinado. Muito obrigado! Já está arquivado no seu processo." }]);
+      if (caso) await carregarCaso(caso.id, token, nome);
+      await carregarCasos(token);
+      alert("Documento assinado enviado com sucesso. Obrigado!");
+    } catch { alert("Falha de conexão ao enviar."); }
+    finally { setSubindoAssinado(null); }
   }
 
   async function darCiencia(avisoId: string) {
@@ -323,24 +362,35 @@ export default function AreaCliente() {
         {!carregando && (caso?.assinaturas || []).some((a) => a.status === "ENVIADO") && (
           <div className="mb-6 rounded-2xl border border-forest/40 bg-forest/10 p-5">
             <p className="text-sm font-bold text-navy">✍ Documento aguardando a sua assinatura</p>
-            <ul className="mt-3 space-y-2">
+            <ol className="mt-2 space-y-0.5 text-xs text-charcoal/70">
+              <li>1. Baixe o documento e confira o conteúdo</li>
+              <li>2. Assine — pode imprimir e assinar à caneta, ou assinar digitalmente no celular</li>
+              <li>3. Volte aqui e envie o arquivo assinado</li>
+            </ol>
+            <ul className="mt-4 space-y-2">
               {(caso!.assinaturas || []).filter((a) => a.status === "ENVIADO").map((a) => (
-                <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-4 py-3">
-                  <span className="min-w-0">
-                    <span className="block font-semibold text-navy">{a.titulo}</span>
-                    <span className="block text-xs text-charcoal/50">Enviado em {dataHora(a.enviado_em)}</span>
-                  </span>
-                  {a.link_assinatura && (
-                    <a href={a.link_assinatura} target="_blank" rel="noreferrer"
-                      className="shrink-0 rounded-xl bg-forest px-5 py-2 text-sm font-bold text-white hover:opacity-90">
-                      Assinar agora →
-                    </a>
-                  )}
+                <li key={a.id} className="rounded-xl bg-white px-4 py-3">
+                  <p className="font-semibold text-navy">{a.titulo}</p>
+                  <p className="text-xs text-charcoal/50">Enviado em {dataHora(a.enviado_em)}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button onClick={() => baixarParaAssinar(a.id, a.titulo)}
+                      className="rounded-xl bg-navy px-5 py-2 text-sm font-semibold text-white hover:opacity-90">
+                      ⬇ Baixar documento
+                    </button>
+                    <button onClick={() => assinadoRef.current?.[a.id]?.click()} disabled={subindoAssinado === a.id}
+                      className="rounded-xl bg-forest px-5 py-2 text-sm font-bold text-white hover:opacity-90 disabled:opacity-50">
+                      {subindoAssinado === a.id ? "Enviando…" : "Enviar assinado"}
+                    </button>
+                    <input type="file" className="hidden"
+                      accept="image/*,application/pdf,.doc,.docx"
+                      ref={(el) => { if (assinadoRef.current) assinadoRef.current[a.id] = el; }}
+                      onChange={(e) => enviarAssinado(a.id, e)} />
+                  </div>
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-[11px] text-charcoal/55">
-              A assinatura é digital e vale juridicamente. Abra o link, confira o documento e assine na própria tela.
+            <p className="mt-3 text-[11px] text-charcoal/55">
+              Pode enviar em PDF, Word ou até uma foto do documento assinado — o que for mais fácil para você.
             </p>
           </div>
         )}

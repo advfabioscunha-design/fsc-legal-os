@@ -445,6 +445,75 @@ def gerar(caso_id: str, tipo: str, titulo_livre: str | None = None,
     return {"ok": True, "documento": linha, "resumo_ia": redacao.get("resumo", "")}
 
 
+ESTILOS_TITULO = ("Title", "Heading")
+
+
+def ler_paragrafos(documento_id: str) -> dict:
+    """Devolve o documento gerado como uma lista de parágrafos editáveis.
+    É o que o advogado vê e ajusta na aba do navegador antes de mandar
+    para o cliente assinar."""
+    from docx import Document
+    import io
+    s = get_settings()
+    db = get_db()
+    d = db.table("documentos_assinatura").select("*").eq("id", documento_id) \
+          .single().execute().data
+    arq = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
+    doc = Document(io.BytesIO(arq))
+
+    paragrafos = []
+    for i, p in enumerate(doc.paragraphs):
+        alin = str(p.alignment or "").split(" ")[0].lower()
+        negrito = bool(p.runs and p.runs[0].bold)
+        titulo = p.style.name.startswith(ESTILOS_TITULO) if p.style else False
+        paragrafos.append({
+            "indice": i, "texto": p.text,
+            "alinhamento": ("center" if "center" in alin else
+                            "right" if "right" in alin else
+                            "justify" if "justify" in alin else "left"),
+            "negrito": negrito or titulo,
+            "vazio": not p.text.strip(),
+        })
+    return {"documento": d, "paragrafos": paragrafos}
+
+
+def gravar_paragrafos(documento_id: str, paragrafos: list[dict]) -> dict:
+    """Aplica no .docx o texto ajustado pelo advogado, parágrafo a parágrafo.
+    A formatação do modelo é preservada: só o texto do run muda."""
+    from docx import Document
+    from datetime import datetime, timezone as _tz2
+    import io, uuid
+    s = get_settings()
+    db = get_db()
+    d = db.table("documentos_assinatura").select("*").eq("id", documento_id) \
+          .single().execute().data
+    if d["status"] == "ASSINADO":
+        raise RuntimeError("Documento já assinado não pode ser alterado.")
+
+    arq = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
+    doc = Document(io.BytesIO(arq))
+    por_indice = {int(p["indice"]): (p.get("texto") or "") for p in paragrafos}
+    for i, p in enumerate(doc.paragraphs):
+        if i in por_indice and por_indice[i] != p.text:
+            _trocar_texto(p, por_indice[i])
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    path = f"{d['caso_id']}/gerados/{uuid.uuid4().hex}_{d['tipo'].lower()}.docx"
+    db.storage.from_(s.bucket_documentos).upload(
+        path, buf.getvalue(),
+        {"content-type": "application/vnd.openxmlformats-officedocument."
+                         "wordprocessingml.document", "upsert": "true"},
+    )
+    atualizado = db.table("documentos_assinatura").update({
+        "storage_path": path, "gerado_por": "HUMANO",
+        "atualizado_em": datetime.now(_tz2.utc).isoformat(),
+    }).eq("id", documento_id).execute().data[0]
+    registrar_evento(d["caso_id"], "DOCUMENTO_EDITADO",
+                     {"documento_id": documento_id})
+    return {"ok": True, "documento": atualizado}
+
+
 def regravar(documento_id: str, alteracoes: dict) -> dict:
     """O advogado ajustou a qualificação, o objeto, o foro ou a data:
     o .docx é refeito a partir do modelo com os dados corrigidos.

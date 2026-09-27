@@ -647,6 +647,84 @@ def enviar_documento_assinatura(doc_id: str):
         raise HTTPException(502, f"Falha ao enviar para assinatura: {e}")
 
 
+class ParagrafosBody(BaseModel):
+    paragrafos: list[dict]
+
+
+@app.get("/api/v1/documentos-assinatura/{doc_id}/conteudo")
+def conteudo_documento(doc_id: str):
+    """Texto do documento em parágrafos, para o editor abrir em nova aba."""
+    from .agentes import documentos as redator
+    try:
+        return redator.ler_paragrafos(doc_id)
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível abrir o documento: {e}")
+
+
+@app.put("/api/v1/documentos-assinatura/{doc_id}/conteudo")
+def salvar_conteudo_documento(doc_id: str, body: ParagrafosBody):
+    """Salva os ajustes feitos pelo advogado, mantendo a formatação do modelo."""
+    from .agentes import documentos as redator
+    try:
+        return redator.gravar_paragrafos(doc_id, body.paragrafos)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível salvar: {e}")
+
+
+@app.post("/api/v1/documentos-assinatura/{doc_id}/enviar-cliente")
+def enviar_documento_ao_cliente(doc_id: str):
+    """Manda o documento para o cliente assinar À MÃO e devolver pela
+    plataforma: ele baixa, assina, e reenvia pelo próprio chat.
+
+    (A assinatura digital automática existe no código, mas está desligada
+    por decisão do escritório — será ligada mais adiante.)"""
+    from .core.db import registrar_evento
+    db = get_db()
+    d = db.table("documentos_assinatura").select("*").eq("id", doc_id) \
+          .maybe_single().execute().data
+    if not d:
+        raise HTTPException(404, "Documento não encontrado.")
+    if d["status"] == "ASSINADO":
+        return {"ok": True, "info": "Documento já assinado."}
+
+    agora = datetime.now(_tz.utc).isoformat()
+    db.table("documentos_assinatura").update({
+        "status": "ENVIADO", "enviado_em": agora, "atualizado_em": agora,
+        "aprovado_por": get_settings().advogado, "aprovado_em": agora,
+    }).eq("id", doc_id).execute()
+
+    instrucao = (
+        f"Preparamos o seu {d['titulo']}.\n\n"
+        "Como assinar, em 3 passos:\n"
+        "1. Toque em BAIXAR e abra o arquivo;\n"
+        "2. Assine — pode imprimir e assinar à caneta, ou assinar digitalmente "
+        "no próprio celular;\n"
+        "3. Volte aqui e use ENVIAR ASSINADO para nos devolver o documento.\n\n"
+        "Assim que recebermos, seguimos com o seu processo."
+    )
+    # entra na conversa do cliente
+    try:
+        db.table("mensagens").insert({
+            "caso_id": d["caso_id"], "canal": "PORTAL", "autor": "HUMANO",
+            "conteudo": f"📄 {d['titulo']} disponível para assinatura.\n\n{instrucao}",
+        }).execute()
+    except Exception:
+        pass
+    # e sai por e-mail/WhatsApp com o link do painel
+    envio = {}
+    try:
+        envio = avisos.notificar(d["caso_id"], "CONTRATO",
+                                 f"{d['titulo']} para assinatura", instrucao)
+    except Exception as e:
+        envio = {"erros": [str(e)]}
+
+    registrar_evento(d["caso_id"], "DOCUMENTO_ENVIADO_CLIENTE",
+                     {"documento_id": doc_id, "tipo": d["tipo"]})
+    return {"ok": True, "status": "ENVIADO", **envio}
+
+
 @app.get("/api/v1/documentos-assinatura/{doc_id}/baixar")
 def baixar_documento_assinatura(doc_id: str):
     from fastapi.responses import Response, RedirectResponse
@@ -1925,6 +2003,116 @@ def cliente_caso(caso_id: str, authorization: str | None = Header(default=None))
         "mensagens": mensagens, "solicitacoes": solicitacoes,
         "documentos": documentos, "avisos": lista_avisos,
     }
+
+
+def _documento_do_cliente(doc_id: str, cliente_ids: list[str]) -> dict:
+    d = get_db().table("documentos_assinatura").select("*").eq("id", doc_id) \
+          .maybe_single().execute().data
+    if not d:
+        raise HTTPException(404, "Documento não encontrado.")
+    _caso_do_cliente(d["caso_id"], cliente_ids)
+    return d
+
+
+@app.get("/api/v1/cliente/documentos-assinatura/{doc_id}/baixar")
+def cliente_baixar_documento(doc_id: str,
+                             authorization: str | None = Header(default=None)):
+    """O cliente baixa o documento que precisa assinar."""
+    from fastapi.responses import Response
+    _, ids = _clientes_do_token(authorization)
+    d = _documento_do_cliente(doc_id, ids)
+    s = get_settings()
+    try:
+        conteudo = get_db().storage.from_(s.bucket_documentos).download(d["storage_path"])
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível baixar: {e}")
+    return Response(
+        content=conteudo,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": _content_disposition(d["titulo"] + ".docx")},
+    )
+
+
+@app.post("/api/v1/cliente/documentos-assinatura/{doc_id}/assinado")
+async def cliente_enviar_assinado(
+    doc_id: str,
+    arquivo: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    """O cliente devolve o documento já assinado. Ele entra na pasta do caso,
+    o documento passa a ASSINADO e o escritório é avisado."""
+    import re as _re, uuid
+    from .core.db import registrar_evento
+    _, ids = _clientes_do_token(authorization)
+    d = _documento_do_cliente(doc_id, ids)
+    s = get_settings()
+    db = get_db()
+
+    conteudo = await arquivo.read()
+    if not conteudo:
+        raise HTTPException(400, "Arquivo vazio.")
+    if len(conteudo) > 25 * 1024 * 1024:
+        raise HTTPException(400, "Arquivo acima de 25 MB.")
+
+    base = (arquivo.filename or "assinado").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    safe = _re.sub(r"[^A-Za-z0-9._-]", "_", base) or "assinado"
+    path = f"{d['caso_id']}/assinados/{uuid.uuid4().hex}_{safe}"
+    try:
+        db.storage.from_(s.bucket_documentos).upload(
+            path, conteudo,
+            {"content-type": arquivo.content_type or "application/octet-stream",
+             "upsert": "true"},
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Falha ao receber o arquivo: {e}")
+
+    agora = datetime.now(_tz.utc).isoformat()
+    db.table("documentos_assinatura").update({
+        "status": "ASSINADO", "assinado_em": agora,
+        "assinado_url": path, "atualizado_em": agora,
+    }).eq("id", doc_id).execute()
+
+    # entra na pasta do caso junto dos demais documentos
+    linha = {
+        "caso_id": d["caso_id"], "tipo": f"ASSINADO_{d['tipo']}",
+        "storage_path": path, "status": "RECEBIDO",
+        "observacao": f"{d['titulo']} (assinado pelo cliente)",
+    }
+    try:
+        linha["enviado_por"] = "CLIENTE"
+        db.table("documentos").insert(linha).execute()
+    except Exception:
+        linha.pop("enviado_por", None)
+        db.table("documentos").insert(linha).execute()
+
+    try:
+        db.table("mensagens").insert({
+            "caso_id": d["caso_id"], "canal": "PORTAL", "autor": "CLIENTE",
+            "conteudo": f"✍ Enviei o {d['titulo']} assinado.",
+        }).execute()
+        db.table("mensagens").insert({
+            "caso_id": d["caso_id"], "canal": "PORTAL", "autor": "AGENTE",
+            "conteudo": f"Recebemos o seu {d['titulo']} assinado. Muito obrigado! "
+                        f"Já está arquivado no seu processo e seguimos com o próximo passo.",
+        }).execute()
+    except Exception:
+        pass
+
+    # se não restou pendência, o caso volta para a produção
+    try:
+        pend = db.table("documentos_assinatura").select("id") \
+                 .eq("caso_id", d["caso_id"]).eq("status", "ENVIADO").execute().data or []
+        if not pend:
+            db.table("casos").update({
+                "aguardando_cliente": False, "aguardando_desc": None,
+                "atualizado_em": agora,
+            }).eq("id", d["caso_id"]).execute()
+    except Exception:
+        pass
+
+    registrar_evento(d["caso_id"], "DOCUMENTO_ASSINADO_RECEBIDO",
+                     {"documento_id": doc_id, "tipo": d["tipo"]})
+    return {"ok": True, "status": "ASSINADO", "arquivo": base}
 
 
 @app.post("/api/v1/cliente/avisos/{aviso_id}/ciencia")
