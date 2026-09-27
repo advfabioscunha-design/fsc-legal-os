@@ -172,7 +172,8 @@ export default function AreaCliente() {
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `${titulo}.docx`;
+      const tipo = r.headers.get("content-type") || "";
+      a.href = url; a.download = `${titulo}${tipo.includes("pdf") ? ".pdf" : ".docx"}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch { alert("Falha de conexão ao baixar."); }
@@ -363,7 +364,7 @@ export default function AreaCliente() {
           <div className="mb-6 rounded-2xl border border-forest/40 bg-forest/10 p-5">
             <p className="text-sm font-bold text-navy">✍ Documento aguardando a sua assinatura</p>
             <ol className="mt-2 space-y-0.5 text-xs text-charcoal/70">
-              <li>1. Baixe o documento e confira o conteúdo</li>
+              <li>1. Baixe o documento em PDF e confira o conteúdo</li>
               <li>2. Assine — pode imprimir e assinar à caneta, ou assinar digitalmente no celular</li>
               <li>3. Volte aqui e envie o arquivo assinado</li>
             </ol>

@@ -689,6 +689,15 @@ def enviar_documento_ao_cliente(doc_id: str):
     if d["status"] == "ASSINADO":
         return {"ok": True, "info": "Documento já assinado."}
 
+    # o cliente recebe em PDF: preserva a formatação e não se altera sem rastro
+    from .agentes import documentos as redator
+    pdf_ok, pdf_erro = False, None
+    try:
+        redator.gerar_pdf_do_documento(doc_id)
+        pdf_ok = True
+    except Exception as e:
+        pdf_erro = str(e)
+
     agora = datetime.now(_tz.utc).isoformat()
     db.table("documentos_assinatura").update({
         "status": "ENVIADO", "enviado_em": agora, "atualizado_em": agora,
@@ -721,12 +730,13 @@ def enviar_documento_ao_cliente(doc_id: str):
         envio = {"erros": [str(e)]}
 
     registrar_evento(d["caso_id"], "DOCUMENTO_ENVIADO_CLIENTE",
-                     {"documento_id": doc_id, "tipo": d["tipo"]})
-    return {"ok": True, "status": "ENVIADO", **envio}
+                     {"documento_id": doc_id, "tipo": d["tipo"], "pdf": pdf_ok})
+    return {"ok": True, "status": "ENVIADO", "pdf": pdf_ok,
+            **({"pdf_erro": pdf_erro} if pdf_erro else {}), **envio}
 
 
 @app.get("/api/v1/documentos-assinatura/{doc_id}/baixar")
-def baixar_documento_assinatura(doc_id: str):
+def baixar_documento_assinatura(doc_id: str, formato: str = "docx"):
     from fastapi.responses import Response, RedirectResponse
     s = get_settings()
     db = get_db()
@@ -734,8 +744,38 @@ def baixar_documento_assinatura(doc_id: str):
           .maybe_single().execute().data
     if not d:
         raise HTTPException(404, "Documento não encontrado.")
-    if d.get("assinado_url"):                 # já assinado: PDF do assinador
-        return RedirectResponse(d["assinado_url"])
+    if d.get("assinado_url"):                 # já assinado: devolve o que o cliente mandou
+        alvo = d["assinado_url"]
+        if str(alvo).startswith("http"):
+            return RedirectResponse(alvo)
+        try:
+            conteudo = db.storage.from_(s.bucket_documentos).download(alvo)
+        except Exception as e:
+            raise HTTPException(500, f"Não foi possível baixar: {e}")
+        return Response(
+            content=conteudo, media_type="application/octet-stream",
+            headers={"Content-Disposition":
+                     _content_disposition(d["titulo"] + " (assinado)" + _sufixo(alvo))},
+        )
+
+    # PDF sob demanda (é o que o cliente recebe); .docx é a peça de trabalho
+    if formato == "pdf":
+        caminho = d.get("pdf_path")
+        if not caminho:
+            try:
+                from .agentes import documentos as redator
+                caminho = redator.gerar_pdf_do_documento(doc_id)["pdf_path"]
+            except Exception as e:
+                raise HTTPException(503, f"Não foi possível gerar o PDF: {e}")
+        try:
+            conteudo = db.storage.from_(s.bucket_documentos).download(caminho)
+        except Exception as e:
+            raise HTTPException(500, f"Não foi possível baixar: {e}")
+        return Response(
+            content=conteudo, media_type="application/pdf",
+            headers={"Content-Disposition": _content_disposition(d["titulo"] + ".pdf")},
+        )
+
     try:
         conteudo = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
     except Exception as e:
@@ -756,6 +796,12 @@ def cancelar_documento_assinatura(doc_id: str):
         raise HTTPException(409, "Documento já assinado não pode ser excluído.")
     db.table("documentos_assinatura").delete().eq("id", doc_id).execute()
     return {"ok": True}
+
+
+def _sufixo(caminho: str) -> str:
+    """Extensão do arquivo (.pdf, .docx, .jpg...) a partir do caminho."""
+    nome = str(caminho or "").split("/")[-1]
+    return ("." + nome.rsplit(".", 1)[1]) if "." in nome else ""
 
 
 def _content_disposition(nome: str) -> str:
@@ -2022,14 +2068,26 @@ def cliente_baixar_documento(doc_id: str,
     _, ids = _clientes_do_token(authorization)
     d = _documento_do_cliente(doc_id, ids)
     s = get_settings()
+    db = get_db()
+
+    # o cliente sempre recebe PDF; se ainda não existir, gera na hora
+    caminho, tipo, ext = d.get("pdf_path"), "application/pdf", ".pdf"
+    if not caminho:
+        try:
+            from .agentes import documentos as redator
+            caminho = redator.gerar_pdf_do_documento(doc_id)["pdf_path"]
+        except Exception:
+            caminho = d["storage_path"]          # servidor sem conversor: manda o .docx
+            tipo = ("application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document")
+            ext = ".docx"
     try:
-        conteudo = get_db().storage.from_(s.bucket_documentos).download(d["storage_path"])
+        conteudo = db.storage.from_(s.bucket_documentos).download(caminho)
     except Exception as e:
         raise HTTPException(500, f"Não foi possível baixar: {e}")
     return Response(
-        content=conteudo,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": _content_disposition(d["titulo"] + ".docx")},
+        content=conteudo, media_type=tipo,
+        headers={"Content-Disposition": _content_disposition(d["titulo"] + ext)},
     )
 
 

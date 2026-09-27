@@ -74,16 +74,17 @@ export default function EditorDocumento() {
     finally { setSalvando(false); }
   }
 
-  async function baixar() {
+  async function baixar(formato: "docx" | "pdf") {
     if (sujo && !(await salvar(true))) return;
-    window.open(`${API}/api/v1/documentos-assinatura/${id}/baixar`, "_blank");
+    const qs = formato === "pdf" ? "?formato=pdf" : "";
+    window.open(`${API}/api/v1/documentos-assinatura/${id}/baixar${qs}`, "_blank");
   }
 
   async function enviarAoCliente() {
     if (!window.confirm(
       "Enviar este documento ao cliente para assinatura?\n\n" +
-      "Ele recebe pelo chat da plataforma e por e-mail, com orientação para " +
-      "baixar, assinar e devolver o arquivo assinado pelo próprio chat."
+      "Ele recebe o documento EM PDF, pelo chat da plataforma e por e-mail, " +
+      "com orientação para baixar, assinar e devolver o arquivo assinado pelo próprio chat."
     )) return;
     setEnviando(true);
     try {
@@ -93,7 +94,8 @@ export default function EditorDocumento() {
       if (!r.ok) { setAviso(d.detail || "Não foi possível enviar."); return; }
       const canais = [d.enviado_email ? "e-mail" : null, d.enviado_whatsapp ? "WhatsApp" : null]
         .filter(Boolean).join(" e ");
-      setAviso(`Enviado ao cliente pelo chat da plataforma${canais ? ` e por ${canais}` : ""}.`);
+      setAviso(`Enviado ao cliente em PDF, pelo chat da plataforma${canais ? ` e por ${canais}` : ""}.`
+        + (d.pdf === false ? ` Atenção: o PDF não pôde ser gerado (${d.pdf_erro || "erro"}) — foi enviado o arquivo Word.` : ""));
       carregar();
     } catch { setAviso("Falha de conexão ao enviar."); }
     finally { setEnviando(false); }
@@ -133,9 +135,13 @@ export default function EditorDocumento() {
                 {salvando ? "Salvando…" : "Salvar"}
               </button>
             )}
-            <button onClick={baixar}
+            <button onClick={() => baixar("docx")}
+              className="rounded-xl border border-black/10 px-4 py-2 text-sm font-semibold text-charcoal/70 hover:border-gold">
+              ⬇ .docx
+            </button>
+            <button onClick={() => baixar("pdf")}
               className="rounded-xl bg-navy px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
-              ⬇ Baixar .docx
+              ⬇ Baixar PDF
             </button>
             {!bloqueado && (
               <button onClick={enviarAoCliente} disabled={enviando}
@@ -174,7 +180,7 @@ export default function EditorDocumento() {
 
       <p className="mx-auto mt-4 max-w-4xl px-5 text-center text-[11px] text-charcoal/45">
         Edite qualquer trecho direto na folha. A formatação do modelo do escritório
-        (fonte, recuos, alinhamento) é preservada no arquivo final.
+        (fonte, recuos, alinhamento) é preservada no arquivo final. O cliente recebe em PDF.
       </p>
     </main>
   );

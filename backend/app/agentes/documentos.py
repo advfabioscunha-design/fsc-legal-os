@@ -445,6 +445,68 @@ def gerar(caso_id: str, tipo: str, titulo_livre: str | None = None,
     return {"ok": True, "documento": linha, "resumo_ia": redacao.get("resumo", "")}
 
 
+# ══════════════════════════════════════════════════════════════════
+#  Conversão para PDF — é assim que o documento chega ao cliente
+# ══════════════════════════════════════════════════════════════════
+def converter_para_pdf(docx_bytes: bytes) -> bytes:
+    """Converte o .docx em PDF com o LibreOffice, preservando a formatação
+    do modelo do escritório. Levanta exceção se a conversão falhar — quem
+    chama decide se manda o .docx como alternativa."""
+    import subprocess, tempfile, os as _os, glob as _glob
+
+    with tempfile.TemporaryDirectory() as tmp:
+        entrada = _os.path.join(tmp, "documento.docx")
+        with open(entrada, "wb") as f:
+            f.write(docx_bytes)
+        perfil = _os.path.join(tmp, "perfil")
+        try:
+            subprocess.run(
+                ["soffice", "--headless", "--norestore", "--nolockcheck",
+                 f"-env:UserInstallation=file://{perfil}",
+                 "--convert-to", "pdf:writer_pdf_Export",
+                 "--outdir", tmp, entrada],
+                check=True, capture_output=True, timeout=120,
+            )
+        except FileNotFoundError:
+            raise RuntimeError("LibreOffice não está instalado no servidor.")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("A conversão para PDF demorou demais.")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"LibreOffice falhou: {(e.stderr or b'').decode()[:200]}")
+
+        saidas = _glob.glob(_os.path.join(tmp, "*.pdf"))
+        if not saidas:
+            raise RuntimeError("O LibreOffice não gerou o PDF.")
+        with open(saidas[0], "rb") as f:
+            return f.read()
+
+
+def gerar_pdf_do_documento(documento_id: str) -> dict:
+    """Converte o documento gerado em PDF e guarda o caminho no registro.
+    Chamado quando o documento é enviado ao cliente para assinatura."""
+    from datetime import datetime, timezone as _tz2
+    import uuid
+    s = get_settings()
+    db = get_db()
+    d = db.table("documentos_assinatura").select("*").eq("id", documento_id) \
+          .single().execute().data
+
+    docx = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
+    pdf = converter_para_pdf(docx)
+
+    path = f"{d['caso_id']}/gerados/{uuid.uuid4().hex}_{d['tipo'].lower()}.pdf"
+    db.storage.from_(s.bucket_documentos).upload(
+        path, pdf, {"content-type": "application/pdf", "upsert": "true"},
+    )
+    db.table("documentos_assinatura").update({
+        "pdf_path": path, "atualizado_em": datetime.now(_tz2.utc).isoformat(),
+    }).eq("id", documento_id).execute()
+    registrar_evento(d["caso_id"], "DOCUMENTO_CONVERTIDO_PDF",
+                     {"documento_id": documento_id})
+    return {"ok": True, "pdf_path": path, "tamanho": len(pdf)}
+
+
 ESTILOS_TITULO = ("Title", "Heading")
 
 
@@ -505,8 +567,9 @@ def gravar_paragrafos(documento_id: str, paragrafos: list[dict]) -> dict:
         {"content-type": "application/vnd.openxmlformats-officedocument."
                          "wordprocessingml.document", "upsert": "true"},
     )
+    # o texto mudou: o PDF anterior não vale mais e será refeito no envio
     atualizado = db.table("documentos_assinatura").update({
-        "storage_path": path, "gerado_por": "HUMANO",
+        "storage_path": path, "gerado_por": "HUMANO", "pdf_path": None,
         "atualizado_em": datetime.now(_tz2.utc).isoformat(),
     }).eq("id", documento_id).execute().data[0]
     registrar_evento(d["caso_id"], "DOCUMENTO_EDITADO",
