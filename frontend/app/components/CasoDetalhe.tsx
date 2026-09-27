@@ -12,6 +12,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const [solicitacao, setSolicitacao] = useState("");
   const [aviso, setAviso] = useState({ tipo: "AUDIENCIA", titulo: "", mensagem: "" });
   const [avisando, setAvisando] = useState(false);
+  const [contas, setContas] = useState({
+    valor_recebido: "", honorarios_contratuais: "", honorarios_sucumbenciais: "",
+    despesas: "", forma_repasse: "", resultado: "", observacoes: "",
+  });
+  const [prestando, setPrestando] = useState(false);
+  const [mostrarContas, setMostrarContas] = useState(false);
   const [novaFase, setNovaFase] = useState("");
   const [subindo, setSubindo] = useState(false);
   const [linkNome, setLinkNome] = useState("");
@@ -251,6 +257,44 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     if (!window.confirm("Descartar este documento gerado?")) return;
     await fetch(`${API}/api/v1/documentos-assinatura/${id}`, { method: "DELETE" });
     carregar();
+  }
+
+  const num = (v: string) => Number(String(v).replace(/\./g, "").replace(",", ".")) || 0;
+  const repasseCalculado = Math.max(
+    num(contas.valor_recebido) - num(contas.honorarios_contratuais) - num(contas.despesas), 0);
+
+  async function enviarPrestacaoContas() {
+    if (!num(contas.valor_recebido) && !contas.resultado.trim()) {
+      alert("Informe ao menos o resultado da causa ou o valor recebido."); return;
+    }
+    if (!window.confirm(
+      `Enviar a prestação de contas e ENCERRAR o atendimento?\n\n` +
+      `Valor a repassar ao cliente: R$ ${repasseCalculado.toFixed(2).replace(".", ",")}\n\n` +
+      `O cliente recebe, no mesmo fio de e-mail, o demonstrativo e o histórico completo do atendimento. ` +
+      `O caso passa para CONCLUÍDO.`
+    )) return;
+    setPrestando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/prestacao-contas`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          valor_recebido: num(contas.valor_recebido),
+          honorarios_contratuais: num(contas.honorarios_contratuais),
+          honorarios_sucumbenciais: num(contas.honorarios_sucumbenciais),
+          despesas: num(contas.despesas),
+          forma_repasse: contas.forma_repasse || null,
+          resultado: contas.resultado || null,
+          observacoes: contas.observacoes || null,
+        }),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { alert(d.detail || "Não foi possível enviar."); return; }
+      alert(`Prestação de contas enviada${d.enviado_email ? " por e-mail" : ""}`
+        + `${d.enviado_whatsapp ? " e WhatsApp" : ""}.\n\n`
+        + `${d.itens_historico} registros de histórico foram incluídos. O atendimento foi encerrado.`);
+      setMostrarContas(false);
+      onMudou(); carregar();
+    } finally { setPrestando(false); }
   }
 
   async function enviarAviso() {
@@ -687,6 +731,81 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                 className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3] disabled:opacity-50">
                 {avisando ? "Enviando…" : "Enviar aviso ao cliente"}
               </button>
+            </section>
+
+            {/* Prestação de contas — encerra o atendimento */}
+            <section>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Prestação de contas</h3>
+              <p className="mb-2 text-xs text-white/55">
+                Fecha o atendimento: o cliente recebe, <b className="text-white/75">no mesmo fio de
+                e-mail</b> em que tudo foi tratado, o demonstrativo dos valores e o
+                histórico completo do caso, do primeiro contato ao encerramento.
+              </p>
+              {!mostrarContas ? (
+                <button onClick={() => setMostrarContas(true)}
+                  className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+                  📑 Preparar prestação de contas
+                </button>
+              ) : (
+                <div className="rounded-lg border border-white/10 bg-[#0A1628]/50 p-3">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label className="text-xs text-white/60">Valor recebido no processo
+                      <input value={contas.valor_recebido} inputMode="decimal" placeholder="0,00"
+                        onChange={(e) => setContas({ ...contas, valor_recebido: e.target.value })}
+                        className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                    </label>
+                    <label className="text-xs text-white/60">Honorários contratuais
+                      <input value={contas.honorarios_contratuais} inputMode="decimal" placeholder="0,00"
+                        onChange={(e) => setContas({ ...contas, honorarios_contratuais: e.target.value })}
+                        className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                    </label>
+                    <label className="text-xs text-white/60">Honorários sucumbenciais
+                      <input value={contas.honorarios_sucumbenciais} inputMode="decimal" placeholder="0,00"
+                        onChange={(e) => setContas({ ...contas, honorarios_sucumbenciais: e.target.value })}
+                        className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                    </label>
+                    <label className="text-xs text-white/60">Despesas processuais
+                      <input value={contas.despesas} inputMode="decimal" placeholder="0,00"
+                        onChange={(e) => setContas({ ...contas, despesas: e.target.value })}
+                        className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                    </label>
+                    <label className="text-xs text-white/60 sm:col-span-2">Forma do repasse
+                      <input value={contas.forma_repasse} placeholder="PIX para a chave do cliente em 08/10"
+                        onChange={(e) => setContas({ ...contas, forma_repasse: e.target.value })}
+                        className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                    </label>
+                  </div>
+                  <label className="mt-2 block text-xs text-white/60">Resultado da causa
+                    <textarea value={contas.resultado} rows={2}
+                      placeholder="Ex.: Ação julgada procedente, com restituição em dobro das tarifas e dano moral."
+                      onChange={(e) => setContas({ ...contas, resultado: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                  </label>
+                  <label className="mt-2 block text-xs text-white/60">Observações finais
+                    <textarea value={contas.observacoes} rows={2}
+                      onChange={(e) => setContas({ ...contas, observacoes: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                  </label>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <span className="text-sm text-white/70">
+                      Repasse ao cliente:{" "}
+                      <b className="text-[#1DB954]">R$ {repasseCalculado.toFixed(2).replace(".", ",")}</b>
+                    </span>
+                    <button onClick={enviarPrestacaoContas} disabled={prestando}
+                      className="rounded-lg bg-[#1DB954] px-4 py-2 text-sm font-bold text-white hover:bg-[#17a349] disabled:opacity-50">
+                      {prestando ? "Enviando…" : "Enviar e encerrar atendimento"}
+                    </button>
+                    <button onClick={() => setMostrarContas(false)}
+                      className="text-xs text-white/50 hover:text-white">cancelar</button>
+                  </div>
+                </div>
+              )}
+              {(caso.prestacoes_contas || []).length > 0 && (
+                <p className="mt-2 text-xs text-[#1DB954]">
+                  ✓ Prestação de contas já enviada em{" "}
+                  {new Date(caso.prestacoes_contas[0].enviada_em || caso.prestacoes_contas[0].criado_em).toLocaleDateString("pt-BR")}
+                </p>
+              )}
             </section>
 
             {/* Histórico / notas */}

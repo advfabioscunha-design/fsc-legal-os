@@ -176,6 +176,11 @@ def detalhe_caso(caso_id: str):
             .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
     except Exception:
         caso["documentos_assinatura"] = []
+    try:
+        caso["prestacoes_contas"] = db.table("prestacoes_contas").select("*") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        caso["prestacoes_contas"] = []
     return caso
 
 
@@ -529,6 +534,43 @@ class GerarDocumento(BaseModel):
     tipo: str
     titulo: str | None = None
     instrucao: str | None = None     # orientação do advogado para o agente
+
+
+class PrestacaoBody(BaseModel):
+    valor_recebido: float = 0
+    honorarios_contratuais: float = 0
+    honorarios_sucumbenciais: float = 0
+    despesas: float = 0
+    repasse_cliente: float | None = None
+    forma_repasse: str | None = None
+    resultado: str | None = None
+    observacoes: str | None = None
+
+
+@app.get("/api/v1/casos/{caso_id}/historico")
+def historico_do_caso(caso_id: str):
+    """Linha do tempo do atendimento, do primeiro contato até agora."""
+    return avisos.montar_historico(caso_id)
+
+
+@app.post("/api/v1/casos/{caso_id}/prestacao-contas")
+def enviar_prestacao_contas(caso_id: str, body: PrestacaoBody):
+    """Encerra o atendimento: envia ao cliente, no MESMO fio de e-mail,
+    a prestação de contas com o demonstrativo financeiro e o histórico
+    completo do que foi feito, do início ao fim."""
+    try:
+        return avisos.prestacao_de_contas(caso_id, body.model_dump())
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível enviar a prestação de contas: {e}")
+
+
+@app.get("/api/v1/casos/{caso_id}/prestacoes-contas")
+def listar_prestacoes(caso_id: str):
+    try:
+        return get_db().table("prestacoes_contas").select("*") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        return []
 
 
 @app.post("/api/v1/email/ler-respostas")

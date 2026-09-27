@@ -95,9 +95,17 @@ def enviar_whatsapp(destino: str, texto: str, phone_id: str) -> None:
 
 
 def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str,
-                 anexos: list[tuple[str, bytes, str]] | None = None) -> None:
-    """Envia o e-mail. `anexos` é uma lista de (nome, conteúdo, mime) — é por
-    aí que o documento para assinatura vai junto da mensagem."""
+                 anexos: list[tuple[str, bytes, str]] | None = None,
+                 responder_a: str | None = None) -> str:
+    """Envia o e-mail e devolve o Message-ID.
+
+    `anexos`: lista de (nome, conteúdo, mime) — é por aí que o documento
+      para assinatura viaja junto da mensagem.
+    `responder_a`: Message-ID do primeiro e-mail do caso. Com ele, tudo
+      fica na MESMA conversa na caixa do cliente: o histórico do
+      atendimento inteiro em um fio só.
+    """
+    from email.utils import make_msgid
     s = get_settings()
     if not (s.smtp_usuario and s.smtp_senha and destino):
         raise RuntimeError("E-mail não configurado")
@@ -106,6 +114,11 @@ def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str,
     msg["From"] = f"{s.smtp_remetente} <{s.smtp_usuario}>"
     msg["To"] = destino
     msg["Reply-To"] = s.email_escritorio
+    meu_id = make_msgid(domain="fscadvocaciadigital.com.br")
+    msg["Message-ID"] = meu_id
+    if responder_a:
+        msg["In-Reply-To"] = responder_a
+        msg["References"] = responder_a
     msg.set_content(corpo_texto)
     msg.add_alternative(corpo_html, subtype="html")
 
@@ -124,6 +137,25 @@ def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str,
             srv.starttls(context=ctx)
             srv.login(s.smtp_usuario, s.smtp_senha)
             srv.send_message(msg)
+    return meu_id
+
+
+def fio_do_caso(caso_id: str) -> str | None:
+    """Message-ID do primeiro e-mail deste atendimento."""
+    try:
+        c = get_db().table("casos").select("email_thread_id").eq("id", caso_id) \
+              .maybe_single().execute().data
+        return (c or {}).get("email_thread_id")
+    except Exception:
+        return None
+
+
+def guardar_fio(caso_id: str, message_id: str) -> None:
+    try:
+        get_db().table("casos").update({"email_thread_id": message_id}) \
+          .eq("id", caso_id).execute()
+    except Exception:
+        pass
 
 
 # ── Textos ───────────────────────────────────────────────────────
@@ -235,9 +267,14 @@ def notificar(caso_id: str, tipo: str, titulo: str, mensagem: str,
             cli.get("nome") or "", num_atend, titulo, mensagem,
             link, numero_publico(ddd_origem),
         )
-        enviar_email(cli.get("email") or "",
-                     f"[{num_atend}] {titulo} — FC Advocacia{assunto_extra}",
-                     corpo_txt, corpo_html, anexos=anexos)
+        fio = fio_do_caso(caso_id)
+        novo_id = enviar_email(
+            cli.get("email") or "",
+            f"[{num_atend}] {titulo} — FC Advocacia{assunto_extra}",
+            corpo_txt, corpo_html, anexos=anexos, responder_a=fio,
+        )
+        if not fio and novo_id:
+            guardar_fio(caso_id, novo_id)   # este vira o fio do atendimento
         ok_mail = True
     except Exception as e:
         erros.append(f"email: {e}")
@@ -456,6 +493,233 @@ def reenviar_pendentes_do_cliente(cliente_id: str) -> int:
         except Exception:
             continue
     return n
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PRESTAÇÃO DE CONTAS — o último e-mail do fio, que encerra o caso
+# ══════════════════════════════════════════════════════════════════
+ROTULO_EVENTO = {
+    "TRIAGEM": "Atendimento iniciado",
+    "ESTADO_MUDOU": "Andamento",
+    "SOLICITACAO_CLIENTE": "Documento solicitado",
+    "DOCUMENTOS_RECEBIDOS_DO_CLIENTE": "Documentos recebidos",
+    "DOCUMENTO_GERADO": "Documento elaborado",
+    "DOCUMENTO_ENVIADO_CLIENTE": "Documento enviado para assinatura",
+    "DOCUMENTO_ASSINADO_RECEBIDO": "Documento assinado recebido",
+    "ASSINADO_RECEBIDO_EMAIL": "Documento assinado recebido por e-mail",
+    "AVISO_ENVIADO": "Comunicação enviada",
+    "CIENCIA_CLIENTE": "Cliente confirmou o recebimento",
+    "PROCESSO_INICIADO_ESTEIRA": "Processo iniciado",
+    "CONTRATO_ENVIADO": "Contrato enviado",
+    "CASO_ESCRITORIO_CRIADO": "Caso cadastrado",
+    "CLIENTE_RETORNOU": "Cliente respondeu",
+    "CONTATO_ATUALIZADO": "Contato atualizado",
+}
+
+
+def montar_historico(caso_id: str) -> list[dict]:
+    """Linha do tempo do atendimento, do primeiro contato ao encerramento."""
+    db = get_db()
+    linha: list[dict] = []
+    try:
+        for e in (db.table("eventos").select("tipo,payload,criado_em")
+                    .eq("caso_id", caso_id).order("criado_em").execute().data or []):
+            rot = ROTULO_EVENTO.get(e["tipo"])
+            if not rot:
+                continue
+            det = ""
+            p = e.get("payload") or {}
+            if e["tipo"] == "ESTADO_MUDOU":
+                det = f"{p.get('de', '')} → {p.get('para', '')}".strip(" →")
+            elif e["tipo"] == "SOLICITACAO_CLIENTE":
+                det = p.get("texto", "")
+            elif e["tipo"] in ("DOCUMENTO_GERADO", "DOCUMENTO_ENVIADO_CLIENTE",
+                               "DOCUMENTO_ASSINADO_RECEBIDO"):
+                det = p.get("tipo", "")
+            elif e["tipo"] == "AVISO_ENVIADO":
+                det = p.get("titulo", "")
+            elif e["tipo"] in ("DOCUMENTOS_RECEBIDOS_DO_CLIENTE",
+                               "ASSINADO_RECEBIDO_EMAIL"):
+                det = ", ".join(p.get("arquivos", []) or [])
+            linha.append({"quando": e["criado_em"], "o_que": rot, "detalhe": det})
+    except Exception:
+        pass
+    return linha
+
+
+def _br_data(iso) -> str:
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).strftime("%d/%m/%Y")
+    except Exception:
+        return str(iso)[:10]
+
+
+def _reais(v) -> str:
+    try:
+        return ("R$ " + f"{float(v):,.2f}").replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "R$ 0,00"
+
+
+def prestacao_de_contas(caso_id: str, valores: dict) -> dict:
+    """Envia a prestação de contas: linha do tempo completa do atendimento
+    + demonstrativo financeiro. É o último e-mail do fio e encerra o caso."""
+    s = get_settings()
+    db = get_db()
+    caso = db.table("casos").select("*, clientes(*)").eq("id", caso_id) \
+             .single().execute().data
+    cli = caso.get("clientes") or {}
+    num = caso.get("numero_atendimento") or "—"
+    historico = montar_historico(caso_id)
+
+    recebido = float(valores.get("valor_recebido") or 0)
+    hc = float(valores.get("honorarios_contratuais") or 0)
+    hs = float(valores.get("honorarios_sucumbenciais") or 0)
+    desp = float(valores.get("despesas") or 0)
+    repasse = valores.get("repasse_cliente")
+    repasse = float(repasse) if repasse not in (None, "") else max(recebido - hc - desp, 0)
+
+    registro = db.table("prestacoes_contas").insert({
+        "caso_id": caso_id, "valor_recebido": recebido,
+        "honorarios_contratuais": hc, "honorarios_sucumbenciais": hs,
+        "despesas": desp, "repasse_cliente": repasse,
+        "forma_repasse": valores.get("forma_repasse"),
+        "observacoes": valores.get("observacoes"),
+        "resultado": valores.get("resultado"),
+        "historico": historico,
+    }).execute().data[0]
+
+    # ── corpo em texto (WhatsApp e fallback) ──
+    linhas_hist = "\n".join(
+        f"• {_br_data(h['quando'])} — {h['o_que']}" + (f": {h['detalhe']}" if h["detalhe"] else "")
+        for h in historico
+    ) or "• (sem registros)"
+    financeiro_txt = (
+        f"Valor recebido no processo: {_reais(recebido)}\n"
+        f"Honorários contratuais: {_reais(hc)}\n"
+        + (f"Honorários sucumbenciais (do escritório): {_reais(hs)}\n" if hs else "")
+        + (f"Despesas processuais: {_reais(desp)}\n" if desp else "")
+        + f"VALOR REPASSADO A VOCÊ: {_reais(repasse)}"
+        + (f"\nForma do repasse: {valores.get('forma_repasse')}" if valores.get("forma_repasse") else "")
+    )
+    mensagem = (
+        f"Chegamos ao fim do seu atendimento nº {num}.\n\n"
+        + (f"RESULTADO\n{valores.get('resultado')}\n\n" if valores.get("resultado") else "")
+        + f"DEMONSTRATIVO FINANCEIRO\n{financeiro_txt}\n\n"
+        f"HISTÓRICO DO ATENDIMENTO\n{linhas_hist}\n\n"
+        + (f"{valores.get('observacoes')}\n\n" if valores.get("observacoes") else "")
+        + "Este e-mail encerra formalmente o atendimento e segue no mesmo fio de "
+        "conversa, com tudo o que foi tratado desde o primeiro contato.\n\n"
+        "Foi uma honra cuidar do seu caso. Qualquer dúvida sobre estes valores, "
+        "é só responder esta mensagem."
+    )
+
+    # ── HTML com tabelas ──
+    tabela_fin = "".join(
+        f'<tr><td style="padding:6px 0;color:#4A4A4A">{rot}</td>'
+        f'<td style="padding:6px 0;text-align:right;color:#2B2B2B">{_reais(val)}</td></tr>'
+        for rot, val in [("Valor recebido no processo", recebido),
+                         ("Honorários contratuais", hc)]
+        + ([("Honorários sucumbenciais (do escritório)", hs)] if hs else [])
+        + ([("Despesas processuais", desp)] if desp else [])
+    )
+    tabela_hist = "".join(
+        f'<tr><td style="padding:5px 10px 5px 0;color:#8A8A8A;white-space:nowrap;'
+        f'vertical-align:top">{_br_data(h["quando"])}</td>'
+        f'<td style="padding:5px 0;color:#2B2B2B"><strong>{h["o_que"]}</strong>'
+        + (f'<br><span style="color:#6B6B6B">{h["detalhe"]}</span>' if h["detalhe"] else "")
+        + "</td></tr>"
+        for h in historico
+    ) or '<tr><td style="color:#8A8A8A">Sem registros.</td></tr>'
+
+    html = f"""<!doctype html><html><body style="margin:0;background:#F4F5F7;
+ font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#2B2B2B">
+ <div style="max-width:600px;margin:0 auto;padding:24px">
+  <div style="background:#0F2A44;border-radius:12px 12px 0 0;padding:20px 24px">
+    <span style="color:#fff;font-size:20px;font-weight:700">FC</span>
+    <span style="color:#C9A84C;font-size:11px;letter-spacing:3px;
+      text-transform:uppercase;margin-left:8px">Advocacia</span>
+  </div>
+  <div style="background:#fff;border-radius:0 0 12px 12px;padding:28px 24px">
+    <h1 style="margin:0 0 4px;font-size:20px;color:#0F2A44">Prestação de contas</h1>
+    <p style="margin:0 0 22px;font-size:12px;color:#7A7A7A">
+      Atendimento nº <strong style="color:#0F2A44">{num}</strong>
+      &nbsp;·&nbsp; {cli.get('nome', '')}</p>
+
+    {f'<h2 style="margin:0 0 6px;font-size:15px;color:#0F2A44">Resultado</h2><p style="margin:0 0 22px;font-size:14px;line-height:1.6;white-space:pre-line">{valores.get("resultado")}</p>' if valores.get("resultado") else ""}
+
+    <h2 style="margin:0 0 8px;font-size:15px;color:#0F2A44">Demonstrativo financeiro</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:14px">{tabela_fin}
+      <tr><td colspan="2" style="border-top:1px solid #ECECEC;padding-top:10px"></td></tr>
+      <tr><td style="padding:4px 0;font-weight:700;color:#0F2A44">Valor repassado a você</td>
+          <td style="padding:4px 0;text-align:right;font-weight:700;font-size:16px;
+              color:#1D7A4C">{_reais(repasse)}</td></tr>
+    </table>
+    {f'<p style="margin:10px 0 0;font-size:13px;color:#6B6B6B">Forma do repasse: {valores.get("forma_repasse")}</p>' if valores.get("forma_repasse") else ""}
+
+    <h2 style="margin:28px 0 8px;font-size:15px;color:#0F2A44">Histórico do atendimento</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">{tabela_hist}</table>
+
+    {f'<p style="margin:24px 0 0;font-size:14px;line-height:1.6;white-space:pre-line">{valores.get("observacoes")}</p>' if valores.get("observacoes") else ""}
+
+    <p style="margin:24px 0 0;font-size:13px;color:#6B6B6B;line-height:1.6">
+      Este e-mail encerra formalmente o atendimento e segue no mesmo fio de conversa,
+      com tudo o que foi tratado desde o primeiro contato. Qualquer dúvida sobre estes
+      valores, é só responder esta mensagem.</p>
+    <hr style="border:0;border-top:1px solid #ECECEC;margin:26px 0">
+    <p style="margin:0;font-size:12px;color:#8A8A8A;line-height:1.7">
+      {s.advogado} — {s.oab}</p>
+  </div>
+ </div></body></html>"""
+
+    ok_mail, erro = False, None
+    try:
+        fio = fio_do_caso(caso_id)
+        novo_id = enviar_email(
+            cli.get("email") or "",
+            f"[{num}] Prestação de contas — FC Advocacia",
+            mensagem, html, responder_a=fio,
+        )
+        if not fio and novo_id:
+            guardar_fio(caso_id, novo_id)
+        ok_mail = True
+    except Exception as e:
+        erro = str(e)
+
+    ok_whats = False
+    try:
+        phone_id, ddd = escolher_origem(cli.get("whatsapp"))
+        enviar_whatsapp(cli.get("whatsapp") or "",
+                        _texto_whatsapp(cli.get("nome") or "", num,
+                                        "Prestação de contas", mensagem,
+                                        f"{s.app_url}/cliente", ddd), phone_id)
+        ok_whats = True
+    except Exception:
+        pass
+
+    agora = datetime.now(_tz.utc).isoformat()
+    db.table("prestacoes_contas").update({"enviada_em": agora}) \
+      .eq("id", registro["id"]).execute()
+    try:
+        db.table("casos").update({"estado": "CONCLUIDO", "atualizado_em": agora}) \
+          .eq("id", caso_id).execute()
+    except Exception:
+        pass
+    try:
+        db.table("mensagens").insert({
+            "caso_id": caso_id, "canal": "PORTAL", "autor": "HUMANO",
+            "conteudo": f"📑 Prestação de contas do atendimento {num}.\n\n{mensagem}",
+        }).execute()
+    except Exception:
+        pass
+
+    registrar_evento(caso_id, "PRESTACAO_DE_CONTAS",
+                     {"prestacao_id": registro["id"], "repasse": repasse,
+                      "email": ok_mail, "whatsapp": ok_whats})
+    return {"ok": True, "prestacao_id": registro["id"], "repasse_cliente": repasse,
+            "enviado_email": ok_mail, "enviado_whatsapp": ok_whats,
+            "itens_historico": len(historico),
+            **({"erro_email": erro} if erro else {})}
 
 
 def dar_ciencia(aviso_id: str, canal: str = "PAINEL") -> dict:
