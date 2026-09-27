@@ -34,8 +34,19 @@ type Caso = {
   avisos_sem_ciencia?: number; documentos_pendentes?: number;
   criado_em?: string;
   mensagens?: Msg[]; solicitacoes?: Solicitacao[]; documentos?: Doc[]; avisos?: Aviso[];
+  assinaturas?: Assinatura[];
 };
-type Cadastro = { id: string; nome: string; email: string; cpf_cnpj: string | null; whatsapp: string | null };
+type Assinatura = {
+  id: string; tipo: string; titulo: string; status: string;
+  link_assinatura: string | null; enviado_em: string | null; assinado_em: string | null;
+};
+type Cadastro = {
+  id: string; nome: string; email: string; cpf_cnpj: string | null; whatsapp: string | null;
+  nacionalidade?: string | null; estado_civil?: string | null; profissao?: string | null;
+  rg?: string | null; endereco_rua?: string | null; endereco_numero?: string | null;
+  endereco_complemento?: string | null; endereco_bairro?: string | null;
+  endereco_cidade?: string | null; endereco_uf?: string | null; endereco_cep?: string | null;
+};
 type Vista = "home" | "casos" | "acompanhar" | "atendimento" | "contrato" | "cadastro";
 
 const WHATS_RO = "5569993225383";
@@ -307,6 +318,32 @@ export default function AreaCliente() {
             ? `Você tem ${casos.length} atendimentos conosco. Cada um tem o seu próprio número — é por ele que identificamos o seu caso.`
             : "Bem-vindo(a) à sua área. Como podemos te ajudar hoje?"}
         </p>
+
+        {/* Documentos aguardando a sua assinatura */}
+        {!carregando && (caso?.assinaturas || []).some((a) => a.status === "ENVIADO") && (
+          <div className="mb-6 rounded-2xl border border-forest/40 bg-forest/10 p-5">
+            <p className="text-sm font-bold text-navy">✍ Documento aguardando a sua assinatura</p>
+            <ul className="mt-3 space-y-2">
+              {(caso!.assinaturas || []).filter((a) => a.status === "ENVIADO").map((a) => (
+                <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-4 py-3">
+                  <span className="min-w-0">
+                    <span className="block font-semibold text-navy">{a.titulo}</span>
+                    <span className="block text-xs text-charcoal/50">Enviado em {dataHora(a.enviado_em)}</span>
+                  </span>
+                  {a.link_assinatura && (
+                    <a href={a.link_assinatura} target="_blank" rel="noreferrer"
+                      className="shrink-0 rounded-xl bg-forest px-5 py-2 text-sm font-bold text-white hover:opacity-90">
+                      Assinar agora →
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-charcoal/55">
+              A assinatura é digital e vale juridicamente. Abra o link, confira o documento e assine na própria tela.
+            </p>
+          </div>
+        )}
 
         {/* Avisos sem ciência — o que o escritório precisa que você veja */}
         {!carregando && avisosSemCiencia.length > 0 && vista !== "acompanhar" && (
@@ -604,9 +641,18 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
   cadastro: Cadastro | null; email: string; caso: Caso | null; token: string;
   onVoltar: () => void; onSalvo: (c: Cadastro) => void;
 }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<Record<string, string>>({
     nome: cadastro?.nome || "", cpf_cnpj: cadastro?.cpf_cnpj || "", whatsapp: cadastro?.whatsapp || "",
+    rg: cadastro?.rg || "", nacionalidade: cadastro?.nacionalidade || "brasileiro(a)",
+    estado_civil: cadastro?.estado_civil || "", profissao: cadastro?.profissao || "",
+    endereco_cep: cadastro?.endereco_cep || "", endereco_rua: cadastro?.endereco_rua || "",
+    endereco_numero: cadastro?.endereco_numero || "", endereco_complemento: cadastro?.endereco_complemento || "",
+    endereco_bairro: cadastro?.endereco_bairro || "", endereco_cidade: cadastro?.endereco_cidade || "",
+    endereco_uf: cadastro?.endereco_uf || "",
   });
+  const faltando = ["nome", "cpf_cnpj", "estado_civil", "profissao", "endereco_rua",
+    "endereco_numero", "endereco_bairro", "endereco_cidade", "endereco_uf", "endereco_cep"]
+    .filter((k) => !(form[k] || "").trim());
   const [salvando, setSalvando] = useState(false);
   const [aviso, setAviso] = useState("");
 
@@ -627,6 +673,7 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
   }
 
   const docs = caso?.documentos || [];
+  const assinados = (caso?.assinaturas || []).filter((a) => a.status === "ASSINADO");
   return (
     <section className="rounded-2xl border border-black/5 bg-white p-6 shadow-sm">
       <button onClick={onVoltar} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
@@ -652,7 +699,54 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
           <input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} inputMode="tel"
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
+        <label className="text-xs font-medium text-charcoal/60">RG
+          <input value={form.rg} onChange={(e) => setForm({ ...form, rg: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Estado civil
+          <input value={form.estado_civil} onChange={(e) => setForm({ ...form, estado_civil: e.target.value })}
+            placeholder="solteiro(a), casado(a)…" className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Profissão
+          <input value={form.profissao} onChange={(e) => setForm({ ...form, profissao: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">CEP
+          <input value={form.endereco_cep} onChange={(e) => setForm({ ...form, endereco_cep: e.target.value })} inputMode="numeric"
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60 sm:col-span-2">Endereço
+          <input value={form.endereco_rua} onChange={(e) => setForm({ ...form, endereco_rua: e.target.value })}
+            placeholder="Avenida Sete de Setembro" className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Número
+          <input value={form.endereco_numero} onChange={(e) => setForm({ ...form, endereco_numero: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Complemento
+          <input value={form.endereco_complemento} onChange={(e) => setForm({ ...form, endereco_complemento: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Bairro
+          <input value={form.endereco_bairro} onChange={(e) => setForm({ ...form, endereco_bairro: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Cidade
+          <input value={form.endereco_cidade} onChange={(e) => setForm({ ...form, endereco_cidade: e.target.value })}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Estado (UF)
+          <input value={form.endereco_uf} maxLength={2} onChange={(e) => setForm({ ...form, endereco_uf: e.target.value.toUpperCase() })}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+        </label>
       </div>
+      {faltando.length > 0 && (
+        <p className="mt-3 rounded-lg border border-amber/50 bg-amber/10 px-4 py-3 text-xs text-charcoal/75">
+          Faltam <b>{faltando.length}</b> {faltando.length === 1 ? "informação" : "informações"} para
+          completarmos a sua qualificação. Com o cadastro completo, conseguimos preparar
+          contrato, procuração e declaração sem precisar te pedir nada depois.
+        </p>
+      )}
       <div className="mt-3 flex items-center gap-3">
         <button onClick={salvar} disabled={salvando}
           className="rounded-xl bg-gold px-5 py-2 text-sm font-bold text-navy hover:bg-amber disabled:opacity-50">
@@ -660,6 +754,20 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
         </button>
         {aviso && <span className="text-xs text-charcoal/60">{aviso}</span>}
       </div>
+
+      {assinados.length > 0 && (
+        <div className="mt-8 border-t border-black/5 pt-5">
+          <h3 className="text-sm font-semibold text-navy">Documentos que você assinou</h3>
+          <ul className="mt-3 space-y-2">
+            {assinados.map((a) => (
+              <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-black/5 bg-ice px-3 py-2 text-sm">
+                <span className="truncate text-charcoal/80">✍ {a.titulo}</span>
+                <span className="shrink-0 text-xs text-forest">assinado em {dataHora(a.assinado_em)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-8 border-t border-black/5 pt-5">
         <h3 className="text-sm font-semibold text-navy">Documentos que você já enviou</h3>

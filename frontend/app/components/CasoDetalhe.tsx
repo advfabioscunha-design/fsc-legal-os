@@ -21,7 +21,14 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   // campos editáveis
   const [edit, setEdit] = useState({ relato_inicial: "", grupo: "", honorarios: "", numero_processo: "", titulo: "" });
   // cadastro do cliente (o e-mail é a chave do acesso dele à plataforma)
-  const [cli, setCli] = useState({ nome: "", email: "", cpf_cnpj: "", whatsapp: "" });
+  const CLI_VAZIO = {
+    nome: "", email: "", cpf_cnpj: "", whatsapp: "", nacionalidade: "", estado_civil: "",
+    profissao: "", rg: "", endereco_rua: "", endereco_numero: "", endereco_complemento: "",
+    endereco_bairro: "", endereco_cidade: "", endereco_uf: "", endereco_cep: "",
+  };
+  const [cli, setCli] = useState<Record<string, string>>(CLI_VAZIO);
+  const [gerando, setGerando] = useState("");
+  const [instrucaoDoc, setInstrucaoDoc] = useState("");
 
   async function carregar() {
     setCarregando(true);
@@ -34,10 +41,9 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
         honorarios: d.honorarios_valor || "", numero_processo: d.numero_processo || "",
         titulo: d.titulo || "",
       });
-      setCli({
-        nome: d.clientes?.nome || "", email: d.clientes?.email || "",
-        cpf_cnpj: d.clientes?.cpf_cnpj || "", whatsapp: d.clientes?.whatsapp || "",
-      });
+      const c: Record<string, string> = { ...CLI_VAZIO };
+      Object.keys(CLI_VAZIO).forEach((k) => { c[k] = d.clientes?.[k] || ""; });
+      setCli(c);
     } catch { setCaso(null); }
     finally { setCarregando(false); }
   }
@@ -150,6 +156,54 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       body: JSON.stringify({ solicitacao }),
     });
     setSolicitacao(""); carregar();
+  }
+
+  const DOCS_MENU = [
+    { tipo: "CONTRATO", nome: "Contrato de Honorários" },
+    { tipo: "PROCURACAO", nome: "Procuração ad judicia et extra" },
+    { tipo: "HIPOSSUFICIENCIA", nome: "Declaração de Hipossuficiência" },
+    { tipo: "OUTRO", nome: "Outros" },
+  ];
+  const ROTULO_DOC: Record<string, string> = Object.fromEntries(DOCS_MENU.map((d) => [d.tipo, d.nome]));
+
+  async function gerarDocumento(tipo: string) {
+    if (tipo === "OUTRO") {
+      alert("Para 'Outros', use o chat de Elaboração de Contratos e depois anexe o arquivo em Documentos e provas.");
+      return;
+    }
+    setGerando(tipo);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/documentos-assinatura`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo, instrucao: instrucaoDoc || null }),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { alert(d.detail || "Não foi possível gerar o documento."); return; }
+      if (d.ok === false) {
+        alert(`${d.mensagem}\n\nComplete o cadastro do cliente acima e salve antes de gerar.`);
+        return;
+      }
+      setInstrucaoDoc("");
+      if (d.resumo_ia) alert(`Documento gerado e aguardando sua revisão.\n\nO que o agente entendeu do caso:\n${d.resumo_ia}`);
+      carregar();
+    } catch { alert("Falha de conexão ao gerar o documento."); }
+    finally { setGerando(""); }
+  }
+
+  async function aprovarDocumento(id: string, enviarAgora: boolean) {
+    const r = await fetch(`${API}/api/v1/documentos-assinatura/${id}/aprovar?enviar=${enviarAgora}`, { method: "POST" });
+    const d = await r.json().catch(() => ({} as any));
+    if (!r.ok) { alert(d.detail || "Não foi possível aprovar."); return; }
+    if (enviarAgora && d.link_assinatura) {
+      alert(`Enviado para assinatura.\n\nO cliente recebeu o link por e-mail, WhatsApp e no painel:\n${d.link_assinatura}`);
+    }
+    carregar();
+  }
+
+  async function excluirDocumentoAssin(id: string) {
+    if (!window.confirm("Descartar este documento gerado?")) return;
+    await fetch(`${API}/api/v1/documentos-assinatura/${id}`, { method: "DELETE" });
+    carregar();
   }
 
   async function enviarAviso() {
@@ -277,6 +331,50 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                   <input value={cli.cpf_cnpj} onChange={(e) => setCli({ ...cli, cpf_cnpj: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
                 </label>
+                <label className="text-xs text-white/60">RG
+                  <input value={cli.rg} onChange={(e) => setCli({ ...cli, rg: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">Nacionalidade
+                  <input value={cli.nacionalidade} onChange={(e) => setCli({ ...cli, nacionalidade: e.target.value })}
+                    placeholder="brasileira" className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">Estado civil
+                  <input value={cli.estado_civil} onChange={(e) => setCli({ ...cli, estado_civil: e.target.value })}
+                    placeholder="casada" className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">Profissão
+                  <input value={cli.profissao} onChange={(e) => setCli({ ...cli, profissao: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">CEP
+                  <input value={cli.endereco_cep} onChange={(e) => setCli({ ...cli, endereco_cep: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60 sm:col-span-2">Logradouro
+                  <input value={cli.endereco_rua} onChange={(e) => setCli({ ...cli, endereco_rua: e.target.value })}
+                    placeholder="Avenida Sete de Setembro" className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">Número
+                  <input value={cli.endereco_numero} onChange={(e) => setCli({ ...cli, endereco_numero: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">Complemento
+                  <input value={cli.endereco_complemento} onChange={(e) => setCli({ ...cli, endereco_complemento: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">Bairro
+                  <input value={cli.endereco_bairro} onChange={(e) => setCli({ ...cli, endereco_bairro: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">Cidade <span className="text-white/35">(vira o local e o foro)</span>
+                  <input value={cli.endereco_cidade} onChange={(e) => setCli({ ...cli, endereco_cidade: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-white/60">UF
+                  <input value={cli.endereco_uf} maxLength={2} onChange={(e) => setCli({ ...cli, endereco_uf: e.target.value.toUpperCase() })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                </label>
               </div>
               {!cli.email && (
                 <p className="mb-3 rounded-lg border border-[#F39C12]/40 bg-[#F39C12]/10 px-3 py-2 text-xs text-[#F39C12]">
@@ -393,6 +491,74 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <textarea value={solicitacao} onChange={(e) => setSolicitacao(e.target.value)} rows={2} placeholder="Ex.: Enviar RG e comprovante de residência..."
                 className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
               <button onClick={acionarCliente} className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3]">Enviar ao cliente</button>
+            </section>
+
+            {/* Gerar documento a partir dos modelos do escritório */}
+            <section>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Gerar documento</h3>
+              <p className="mb-2 text-xs text-white/55">
+                O agente monta o documento a partir do <b className="text-white/75">modelo oficial do escritório</b>,
+                trocando só o que muda: qualificação, objeto conforme o relato, foro e local
+                (a cidade do cliente), data e assinatura. Nada vai para o cliente sem a sua aprovação.
+              </p>
+              <input value={instrucaoDoc} onChange={(e) => setInstrucaoDoc(e.target.value)}
+                placeholder="Orientação para o agente (opcional): ex. incluir pedido de tutela de urgência"
+                className="mb-2 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+              <div className="mb-3 flex flex-wrap gap-2">
+                {DOCS_MENU.map((m) => (
+                  <button key={m.tipo} onClick={() => gerarDocumento(m.tipo)} disabled={!!gerando}
+                    className="rounded-lg bg-[#C9A84C] px-3 py-2 text-xs font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
+                    {gerando === m.tipo ? "Gerando…" : `+ ${m.nome}`}
+                  </button>
+                ))}
+              </div>
+
+              <ul className="space-y-2">
+                {(caso.documentos_assinatura || []).map((x: any) => {
+                  const cor = x.status === "ASSINADO" ? "#1DB954"
+                    : x.status === "ENVIADO" ? "#2D7DD2"
+                    : x.status === "APROVADO" ? "#C9A84C" : "#F39C12";
+                  return (
+                    <li key={x.id} className="rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-white/85">{ROTULO_DOC[x.tipo] || x.tipo}</span>
+                          <span className="block text-xs text-white/45">
+                            {x.local_data}{x.foro ? ` · foro ${x.foro}` : ""}
+                          </span>
+                        </span>
+                        <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold"
+                          style={{ color: cor, backgroundColor: `${cor}26` }}>{x.status.replace("_", " ")}</span>
+                      </div>
+                      {x.tipo_acao && x.tipo === "PROCURACAO" && (
+                        <p className="mt-1 text-xs text-white/55">Ação: {x.tipo_acao}</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                        <a href={`${API}/api/v1/documentos-assinatura/${x.id}/baixar`} target="_blank" rel="noreferrer"
+                          className="text-[#C9A84C] hover:underline">baixar {x.assinado_url ? "assinado" : ".docx"}</a>
+                        {x.status === "EM_REVISAO" && (
+                          <>
+                            <button onClick={() => aprovarDocumento(x.id, false)} className="text-white/70 hover:text-white hover:underline">aprovar</button>
+                            <button onClick={() => aprovarDocumento(x.id, true)} className="font-bold text-[#1DB954] hover:underline">aprovar e enviar para assinatura</button>
+                          </>
+                        )}
+                        {x.status === "APROVADO" && (
+                          <button onClick={() => aprovarDocumento(x.id, true)} className="font-bold text-[#1DB954] hover:underline">enviar para assinatura</button>
+                        )}
+                        {x.link_assinatura && (
+                          <a href={x.link_assinatura} target="_blank" rel="noreferrer" className="text-[#2D7DD2] hover:underline">abrir link de assinatura</a>
+                        )}
+                        {x.status !== "ASSINADO" && (
+                          <button onClick={() => excluirDocumentoAssin(x.id)} className="ml-auto text-[#C0392B] hover:underline">descartar</button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+                {(caso.documentos_assinatura || []).length === 0 && (
+                  <li className="text-xs text-white/40">Nenhum documento gerado para este caso.</li>
+                )}
+              </ul>
             </section>
 
             {/* Avisar o cliente — audiência, prazo, movimentação */}

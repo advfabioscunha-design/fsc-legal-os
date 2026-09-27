@@ -160,6 +160,11 @@ def detalhe_caso(caso_id: str):
             .eq("caso_id", caso_id).order("criado_em", desc=True).limit(50).execute().data
     except Exception:
         caso["avisos"] = []
+    try:
+        caso["documentos_assinatura"] = db.table("documentos_assinatura").select("*") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        caso["documentos_assinatura"] = []
     return caso
 
 
@@ -168,6 +173,17 @@ class EditarCliente(BaseModel):
     email: str | None = None
     cpf_cnpj: str | None = None
     whatsapp: str | None = None
+    nacionalidade: str | None = None
+    estado_civil: str | None = None
+    profissao: str | None = None
+    rg: str | None = None
+    endereco_rua: str | None = None
+    endereco_numero: str | None = None
+    endereco_complemento: str | None = None
+    endereco_bairro: str | None = None
+    endereco_cidade: str | None = None
+    endereco_uf: str | None = None
+    endereco_cep: str | None = None
 
 
 @app.patch("/api/v1/clientes/{cliente_id}")
@@ -473,6 +489,155 @@ def url_documento(doc_id: str):
         return {"url": url}
     except Exception as e:
         raise HTTPException(500, f"Falha ao gerar link: {e}")
+
+
+# ================================================================
+#  DOCUMENTOS PARA ASSINATURA — gerar, revisar, aprovar, enviar
+#
+#  Caminho: CRM "Gerar documento" → agente monta o .docx a partir do
+#  modelo oficial → fica EM_REVISAO → advogado ajusta e APROVA →
+#  ENVIADO ao ZapSign → cliente assina por e-mail/WhatsApp/painel →
+#  webhook devolve ASSINADO e arquiva o PDF na pasta do caso.
+# ================================================================
+TIPOS_DOCUMENTO = ["CONTRATO", "PROCURACAO", "HIPOSSUFICIENCIA", "OUTRO"]
+
+
+class GerarDocumento(BaseModel):
+    tipo: str
+    titulo: str | None = None
+    instrucao: str | None = None     # orientação do advogado para o agente
+
+
+@app.get("/api/v1/documentos-assinatura/tipos")
+def tipos_documento():
+    """Opções do menu 'Gerar documento'."""
+    from .agentes.documentos import NOMES
+    return [{"tipo": t, "nome": NOMES.get(t, t)} for t in TIPOS_DOCUMENTO]
+
+
+@app.post("/api/v1/casos/{caso_id}/documentos-assinatura")
+def gerar_documento(caso_id: str, body: GerarDocumento):
+    """Gera o documento a partir do modelo do escritório. Nasce EM_REVISAO."""
+    from .agentes import documentos as redator
+    try:
+        return redator.gerar(caso_id, body.tipo, body.titulo, body.instrucao)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível gerar o documento: {e}")
+
+
+@app.get("/api/v1/casos/{caso_id}/documentos-assinatura")
+def listar_documentos_assinatura(caso_id: str):
+    try:
+        return get_db().table("documentos_assinatura").select("*") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        return []
+
+
+@app.get("/api/v1/casos/{caso_id}/qualificacao")
+def conferir_qualificacao(caso_id: str):
+    """Diz o que falta no cadastro para os documentos poderem ser gerados."""
+    from .agentes.documentos import campos_faltando, montar_qualificacao, comarca_do_cliente
+    caso = get_db().table("casos").select("clientes(*)").eq("id", caso_id) \
+             .single().execute().data
+    cli = caso.get("clientes") or {}
+    faltando = campos_faltando(cli)
+    return {"completo": not faltando, "faltando": faltando,
+            "qualificacao": montar_qualificacao(cli) if not faltando else None,
+            "foro": comarca_do_cliente(cli)}
+
+
+class AjusteDocumento(BaseModel):
+    titulo: str | None = None
+    qualificacao: str | None = None
+    objeto: dict | None = None
+    local_data: str | None = None
+    foro: str | None = None
+    tipo_acao: str | None = None
+    observacoes: str | None = None
+
+
+@app.patch("/api/v1/documentos-assinatura/{doc_id}")
+def ajustar_documento(doc_id: str, body: AjusteDocumento):
+    """Ajuste humano: refaz o .docx com o texto corrigido pelo advogado."""
+    from .agentes import documentos as redator
+    try:
+        return redator.regravar(doc_id, body.model_dump())
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível ajustar: {e}")
+
+
+@app.post("/api/v1/documentos-assinatura/{doc_id}/aprovar")
+def aprovar_documento(doc_id: str, enviar: bool = False):
+    """Advogado aprova. Com enviar=true já segue para assinatura."""
+    from .core.db import registrar_evento
+    db = get_db()
+    d = db.table("documentos_assinatura").select("*").eq("id", doc_id) \
+          .maybe_single().execute().data
+    if not d:
+        raise HTTPException(404, "Documento não encontrado.")
+    if d["status"] in ("ENVIADO", "ASSINADO"):
+        return {"ok": True, "info": f"Documento já está {d['status']}."}
+    agora = datetime.now(_tz.utc).isoformat()
+    db.table("documentos_assinatura").update({
+        "status": "APROVADO", "aprovado_por": get_settings().advogado,
+        "aprovado_em": agora, "atualizado_em": agora,
+    }).eq("id", doc_id).execute()
+    registrar_evento(d["caso_id"], "DOCUMENTO_APROVADO", {"documento_id": doc_id})
+    if enviar:
+        return enviar_documento_assinatura(doc_id)
+    return {"ok": True, "status": "APROVADO"}
+
+
+@app.post("/api/v1/documentos-assinatura/{doc_id}/enviar")
+def enviar_documento_assinatura(doc_id: str):
+    """Sobe o documento aprovado para o ZapSign e manda o link ao cliente
+    por e-mail, WhatsApp e pelo chat da plataforma."""
+    try:
+        return zapsign.enviar_documento(doc_id)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Falha ao enviar para assinatura: {e}")
+
+
+@app.get("/api/v1/documentos-assinatura/{doc_id}/baixar")
+def baixar_documento_assinatura(doc_id: str):
+    from fastapi.responses import Response, RedirectResponse
+    s = get_settings()
+    db = get_db()
+    d = db.table("documentos_assinatura").select("*").eq("id", doc_id) \
+          .maybe_single().execute().data
+    if not d:
+        raise HTTPException(404, "Documento não encontrado.")
+    if d.get("assinado_url"):                 # já assinado: PDF do assinador
+        return RedirectResponse(d["assinado_url"])
+    try:
+        conteudo = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível baixar: {e}")
+    import re as _re
+    nome = _re.sub(r'[\\/:*?"<>|]', "_", d["titulo"]) + ".docx"
+    return Response(
+        content=conteudo,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.delete("/api/v1/documentos-assinatura/{doc_id}")
+def cancelar_documento_assinatura(doc_id: str):
+    db = get_db()
+    d = db.table("documentos_assinatura").select("status").eq("id", doc_id) \
+          .maybe_single().execute().data
+    if d and d["status"] == "ASSINADO":
+        raise HTTPException(409, "Documento já assinado não pode ser excluído.")
+    db.table("documentos_assinatura").delete().eq("id", doc_id).execute()
+    return {"ok": True}
 
 
 def _nome_original(d: dict) -> str:
@@ -1575,6 +1740,17 @@ class CadastroCliente(BaseModel):
     nome: str | None = None
     cpf_cnpj: str | None = None
     whatsapp: str | None = None
+    nacionalidade: str | None = None
+    estado_civil: str | None = None
+    profissao: str | None = None
+    rg: str | None = None
+    endereco_rua: str | None = None
+    endereco_numero: str | None = None
+    endereco_complemento: str | None = None
+    endereco_bairro: str | None = None
+    endereco_cidade: str | None = None
+    endereco_uf: str | None = None
+    endereco_cep: str | None = None
 
 
 @app.patch("/api/v1/cliente/cadastro")
@@ -1623,7 +1799,15 @@ def cliente_caso(caso_id: str, authorization: str | None = Header(default=None))
             .eq("caso_id", caso_id).order("criado_em", desc=True).limit(50).execute().data
     except Exception:
         lista_avisos = []
+    try:
+        assinaturas = db.table("documentos_assinatura") \
+            .select("id,tipo,titulo,status,link_assinatura,enviado_em,assinado_em") \
+            .eq("caso_id", caso_id).in_("status", ["ENVIADO", "ASSINADO"]) \
+            .order("criado_em", desc=True).execute().data
+    except Exception:
+        assinaturas = []
     return {
+        "assinaturas": assinaturas,
         "id": caso["id"], "estado": caso["estado"], "grupo": caso.get("grupo"),
         "titulo": caso.get("titulo") or _nome_do_caso(caso.get("grupo")),
         "numero_atendimento": caso.get("numero_atendimento"),
