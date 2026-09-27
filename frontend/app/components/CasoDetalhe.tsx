@@ -29,6 +29,9 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const [cli, setCli] = useState<Record<string, string>>(CLI_VAZIO);
   const [gerando, setGerando] = useState("");
   const [cepStatus, setCepStatus] = useState("");
+  // guarda o último CEP já consultado: sem isso, cada vez que o campo perde o
+  // foco a busca roda de novo e sobrescreve o logradouro que o usuário editou
+  const ultimoCep = useRef("");
   const [instrucaoDoc, setInstrucaoDoc] = useState("");
 
   /* CEP → endereço. Preenche logradouro, bairro, cidade e UF; os campos
@@ -36,10 +39,16 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   async function buscarCep(valor: string) {
     const n = (valor || "").replace(/\D/g, "");
     if (n.length !== 8) { setCepStatus(""); return; }
+    if (n === ultimoCep.current) return;   // mesmo CEP: não mexe no que já está preenchido
+    ultimoCep.current = n;
     setCepStatus("buscando…");
     try {
       const r = await fetch(`${API}/api/v1/cep/${n}`);
-      if (!r.ok) { setCepStatus(r.status === 404 ? "CEP não encontrado" : "não foi possível buscar"); return; }
+      if (!r.ok) {
+        ultimoCep.current = "";            // deixa tentar de novo depois
+        setCepStatus(r.status === 404 ? "CEP não encontrado" : "não foi possível buscar");
+        return;
+      }
       const d = await r.json();
       setCli((c) => ({
         ...c,
@@ -51,7 +60,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       }));
       setCepStatus("endereço preenchido");
       setTimeout(() => setCepStatus(""), 4000);
-    } catch { setCepStatus("não foi possível buscar"); }
+    } catch { ultimoCep.current = ""; setCepStatus("não foi possível buscar"); }
   }
 
   async function carregar() {
@@ -68,6 +77,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       const c: Record<string, string> = { ...CLI_VAZIO };
       Object.keys(CLI_VAZIO).forEach((k) => { c[k] = d.clientes?.[k] || ""; });
       setCli(c);
+      ultimoCep.current = (c.endereco_cep || "").replace(/\D/g, "");
     } catch { setCaso(null); }
     finally { setCarregando(false); }
   }

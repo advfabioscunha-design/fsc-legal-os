@@ -656,15 +656,24 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
   const [salvando, setSalvando] = useState(false);
   const [aviso, setAviso] = useState("");
   const [cepStatus, setCepStatus] = useState("");
+  // o último CEP consultado impede que a busca rode de novo ao sair do campo
+  // e sobrescreva o endereço que a pessoa ajustou à mão
+  const ultimoCep = useRef((cadastro?.endereco_cep || "").replace(/\D/g, ""));
 
   /* Digitou o CEP, o endereço vem sozinho. Depois é só completar o número. */
   async function buscarCep(valor: string) {
     const n = (valor || "").replace(/\D/g, "");
     if (n.length !== 8) { setCepStatus(""); return; }
+    if (n === ultimoCep.current) return;   // mesmo CEP: não mexe no que já está preenchido
+    ultimoCep.current = n;
     setCepStatus("buscando seu endereço…");
     try {
       const r = await fetch(`${API}/api/v1/cep/${n}`);
-      if (!r.ok) { setCepStatus(r.status === 404 ? "CEP não encontrado" : "não consegui buscar agora"); return; }
+      if (!r.ok) {
+        ultimoCep.current = "";
+        setCepStatus(r.status === 404 ? "CEP não encontrado" : "não consegui buscar agora");
+        return;
+      }
       const d = await r.json();
       setForm((f) => ({
         ...f,
@@ -676,7 +685,7 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
       }));
       setCepStatus("endereço preenchido — confira o número");
       setTimeout(() => setCepStatus(""), 5000);
-    } catch { setCepStatus("não consegui buscar agora"); }
+    } catch { ultimoCep.current = ""; setCepStatus("não consegui buscar agora"); }
   }
 
   async function salvar() {
