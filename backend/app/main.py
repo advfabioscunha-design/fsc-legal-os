@@ -508,6 +508,36 @@ class GerarDocumento(BaseModel):
     instrucao: str | None = None     # orientação do advogado para o agente
 
 
+@app.get("/api/v1/cep/{cep}")
+def buscar_cep(cep: str):
+    """Preenchimento automático de endereço pelo CEP (ViaCEP).
+
+    Fica no backend, e não no navegador, por dois motivos: evita bloqueio de
+    CORS/adblock no computador do usuário e permite que os agentes de
+    atendimento também completem o endereço do cliente sozinhos.
+    """
+    import re as _re
+    numeros = _re.sub(r"\D", "", cep or "")
+    if len(numeros) != 8:
+        raise HTTPException(400, "CEP deve ter 8 dígitos.")
+    try:
+        r = httpx.get(f"https://viacep.com.br/ws/{numeros}/json/", timeout=10)
+        r.raise_for_status()
+        d = r.json()
+    except Exception:
+        raise HTTPException(503, "Serviço de CEP indisponível no momento.")
+    if d.get("erro"):
+        raise HTTPException(404, "CEP não encontrado.")
+    return {
+        "cep": f"{numeros[:5]}-{numeros[5:]}",
+        "endereco_rua": d.get("logradouro") or "",
+        "endereco_bairro": d.get("bairro") or "",
+        "endereco_cidade": d.get("localidade") or "",
+        "endereco_uf": (d.get("uf") or "").upper(),
+        "complemento_sugerido": d.get("complemento") or "",
+    }
+
+
 @app.get("/api/v1/documentos-assinatura/tipos")
 def tipos_documento():
     """Opções do menu 'Gerar documento'."""

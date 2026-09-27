@@ -655,6 +655,29 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
     .filter((k) => !(form[k] || "").trim());
   const [salvando, setSalvando] = useState(false);
   const [aviso, setAviso] = useState("");
+  const [cepStatus, setCepStatus] = useState("");
+
+  /* Digitou o CEP, o endereço vem sozinho. Depois é só completar o número. */
+  async function buscarCep(valor: string) {
+    const n = (valor || "").replace(/\D/g, "");
+    if (n.length !== 8) { setCepStatus(""); return; }
+    setCepStatus("buscando seu endereço…");
+    try {
+      const r = await fetch(`${API}/api/v1/cep/${n}`);
+      if (!r.ok) { setCepStatus(r.status === 404 ? "CEP não encontrado" : "não consegui buscar agora"); return; }
+      const d = await r.json();
+      setForm((f) => ({
+        ...f,
+        endereco_cep: d.cep,
+        endereco_rua: d.endereco_rua || f.endereco_rua,
+        endereco_bairro: d.endereco_bairro || f.endereco_bairro,
+        endereco_cidade: d.endereco_cidade || f.endereco_cidade,
+        endereco_uf: d.endereco_uf || f.endereco_uf,
+      }));
+      setCepStatus("endereço preenchido — confira o número");
+      setTimeout(() => setCepStatus(""), 5000);
+    } catch { setCepStatus("não consegui buscar agora"); }
+  }
 
   async function salvar() {
     setSalvando(true); setAviso("");
@@ -712,31 +735,35 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">CEP
-          <input value={form.endereco_cep} onChange={(e) => setForm({ ...form, endereco_cep: e.target.value })} inputMode="numeric"
+          <span className="ml-2 text-[10px] font-normal text-gold">{cepStatus}</span>
+          <input value={form.endereco_cep} inputMode="numeric" maxLength={9} placeholder="76801-100"
+            onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, endereco_cep: v })); buscarCep(v); }}
+            onBlur={(e) => buscarCep(e.target.value)}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60 sm:col-span-2">Endereço
-          <input value={form.endereco_rua} onChange={(e) => setForm({ ...form, endereco_rua: e.target.value })}
+          <input type="text" autoComplete="off" value={form.endereco_rua ?? ""}
+            onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, endereco_rua: v })); }}
             placeholder="Avenida Sete de Setembro" className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">Número
-          <input value={form.endereco_numero} onChange={(e) => setForm({ ...form, endereco_numero: e.target.value })}
+          <input value={form.endereco_numero} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, endereco_numero: v })); }}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">Complemento
-          <input value={form.endereco_complemento} onChange={(e) => setForm({ ...form, endereco_complemento: e.target.value })}
+          <input value={form.endereco_complemento} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, endereco_complemento: v })); }}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">Bairro
-          <input value={form.endereco_bairro} onChange={(e) => setForm({ ...form, endereco_bairro: e.target.value })}
+          <input value={form.endereco_bairro} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, endereco_bairro: v })); }}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">Cidade
-          <input value={form.endereco_cidade} onChange={(e) => setForm({ ...form, endereco_cidade: e.target.value })}
+          <input value={form.endereco_cidade} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, endereco_cidade: v })); }}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">Estado (UF)
-          <input value={form.endereco_uf} maxLength={2} onChange={(e) => setForm({ ...form, endereco_uf: e.target.value.toUpperCase() })}
+          <input value={form.endereco_uf} maxLength={2} onChange={(e) => { const v = e.target.value.toUpperCase(); setForm((f) => ({ ...f, endereco_uf: v })); }}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
       </div>

@@ -28,7 +28,31 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   };
   const [cli, setCli] = useState<Record<string, string>>(CLI_VAZIO);
   const [gerando, setGerando] = useState("");
+  const [cepStatus, setCepStatus] = useState("");
   const [instrucaoDoc, setInstrucaoDoc] = useState("");
+
+  /* CEP → endereço. Preenche logradouro, bairro, cidade e UF; os campos
+     continuam totalmente editáveis depois (o CEP é um atalho, não uma trava). */
+  async function buscarCep(valor: string) {
+    const n = (valor || "").replace(/\D/g, "");
+    if (n.length !== 8) { setCepStatus(""); return; }
+    setCepStatus("buscando…");
+    try {
+      const r = await fetch(`${API}/api/v1/cep/${n}`);
+      if (!r.ok) { setCepStatus(r.status === 404 ? "CEP não encontrado" : "não foi possível buscar"); return; }
+      const d = await r.json();
+      setCli((c) => ({
+        ...c,
+        endereco_cep: d.cep,
+        endereco_rua: d.endereco_rua || c.endereco_rua,
+        endereco_bairro: d.endereco_bairro || c.endereco_bairro,
+        endereco_cidade: d.endereco_cidade || c.endereco_cidade,
+        endereco_uf: d.endereco_uf || c.endereco_uf,
+      }));
+      setCepStatus("endereço preenchido");
+      setTimeout(() => setCepStatus(""), 4000);
+    } catch { setCepStatus("não foi possível buscar"); }
+  }
 
   async function carregar() {
     setCarregando(true);
@@ -348,12 +372,18 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
                 </label>
                 <label className="text-xs text-white/60">CEP
-                  <input value={cli.endereco_cep} onChange={(e) => setCli({ ...cli, endereco_cep: e.target.value })}
+                  <span className="ml-2 text-[10px] text-[#C9A84C]">{cepStatus}</span>
+                  <input value={cli.endereco_cep} inputMode="numeric" maxLength={9} placeholder="76801-100"
+                    onChange={(e) => { const v = e.target.value; setCli((c) => ({ ...c, endereco_cep: v })); buscarCep(v); }}
+                    onBlur={(e) => buscarCep(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
                 </label>
                 <label className="text-xs text-white/60 sm:col-span-2">Logradouro
-                  <input value={cli.endereco_rua} onChange={(e) => setCli({ ...cli, endereco_rua: e.target.value })}
-                    placeholder="Avenida Sete de Setembro" className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                  <input type="text" autoComplete="off" spellCheck={false}
+                    value={cli.endereco_rua ?? ""}
+                    onChange={(e) => { const v = e.target.value; setCli((c) => ({ ...c, endereco_rua: v })); }}
+                    placeholder="Avenida Sete de Setembro"
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm text-white" />
                 </label>
                 <label className="text-xs text-white/60">Número
                   <input value={cli.endereco_numero} onChange={(e) => setCli({ ...cli, endereco_numero: e.target.value })}
