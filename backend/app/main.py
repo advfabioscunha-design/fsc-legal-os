@@ -620,12 +620,10 @@ def baixar_documento_assinatura(doc_id: str):
         conteudo = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
     except Exception as e:
         raise HTTPException(500, f"Não foi possível baixar: {e}")
-    import re as _re
-    nome = _re.sub(r'[\\/:*?"<>|]', "_", d["titulo"]) + ".docx"
     return Response(
         content=conteudo,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+        headers={"Content-Disposition": _content_disposition(d["titulo"] + ".docx")},
     )
 
 
@@ -638,6 +636,21 @@ def cancelar_documento_assinatura(doc_id: str):
         raise HTTPException(409, "Documento já assinado não pode ser excluído.")
     db.table("documentos_assinatura").delete().eq("id", doc_id).execute()
     return {"ok": True}
+
+
+def _content_disposition(nome: str) -> str:
+    """Cabeçalho de download seguro: cabeçalhos HTTP só aceitam latin-1, e
+    nomes com travessão, emoji ou acento quebram a resposta. Enviamos uma
+    versão ASCII para compatibilidade e a versão UTF-8 (RFC 5987) para os
+    navegadores modernos, que é a que o usuário vê."""
+    import unicodedata
+    from urllib.parse import quote
+    limpo = re.sub(r'[\\/:*?"<>|]', "_", (nome or "arquivo")).strip() or "arquivo"
+    ascii_nome = (unicodedata.normalize("NFKD", limpo)
+                  .encode("ascii", "ignore").decode() or "arquivo")
+    ascii_nome = re.sub(r"\s+", " ", ascii_nome).strip() or "arquivo"
+    return (f'attachment; filename="{ascii_nome}"; '
+            f"filename*=UTF-8''{quote(limpo)}")
 
 
 def _nome_original(d: dict) -> str:
@@ -674,7 +687,7 @@ def baixar_documento(doc_id: str):
     tipo = mimetypes.guess_type(nome)[0] or "application/octet-stream"
     return Response(
         content=conteudo, media_type=tipo,
-        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+        headers={"Content-Disposition": _content_disposition(nome)},
     )
 
 
@@ -1516,7 +1529,7 @@ def baixar_dossie(caso_id: str):
     arquivo = f"{num}_{nome_cli}.zip" if num != "—" else f"processo_{nome_cli}.zip"
     return Response(
         content=zbuf.getvalue(), media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{arquivo}"'},
+        headers={"Content-Disposition": _content_disposition(arquivo)},
     )
 
 
