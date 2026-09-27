@@ -115,6 +115,10 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     carregar();
   }
 
+  function baixarDoc(id: string) {
+    window.open(`${API}/api/v1/documentos/${id}/baixar`, "_blank");
+  }
+
   async function abrirDoc(id: string) {
     try {
       const r = await fetch(`${API}/api/v1/documentos/${id}/url`);
@@ -331,7 +335,10 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                       <span className="flex shrink-0 items-center gap-3">
                         {url
                           ? <a href={url} target="_blank" rel="noreferrer" className="text-[#C9A84C] hover:underline">abrir</a>
-                          : <button onClick={() => abrirDoc(d.id)} className="text-[#C9A84C] hover:underline">abrir</button>}
+                          : <>
+                              <button onClick={() => abrirDoc(d.id)} className="text-[#C9A84C] hover:underline">abrir</button>
+                              <button onClick={() => baixarDoc(d.id)} className="text-white/70 hover:text-white hover:underline">baixar</button>
+                            </>}
                         <button onClick={() => excluirDoc(d.id)} className="text-[#C0392B] hover:underline">excluir</button>
                       </span>
                     </li>
@@ -472,7 +479,8 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
             {/* Ações */}
             <section className="border-t border-white/10 pt-4">
               <div className="mb-3 flex flex-wrap items-center gap-2">
-                <button onClick={baixar} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">⬇ Baixar processo (.zip / Word)</button>
+                <button onClick={baixar} title="Relatório de atendimento em Word + todos os documentos, inclusive os que o cliente enviou"
+                  className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">⬇ Baixar tudo (.zip com relatório + documentos)</button>
                 <select value={novaFase} onChange={(e) => setNovaFase(e.target.value)}
                   className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm">
                   <option value="">Mover para fase…</option>

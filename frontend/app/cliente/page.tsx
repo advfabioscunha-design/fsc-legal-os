@@ -672,8 +672,12 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
             {docs.map((d) => (
               <li key={d.id} className="flex items-center justify-between gap-3 rounded-lg border border-black/5 bg-ice px-3 py-2 text-sm">
                 <span className="truncate text-charcoal/80">📄 {d.observacao || d.tipo}</span>
-                <span className="shrink-0 text-xs text-charcoal/45">
-                  {d.enviado_por === "CLIENTE" ? "enviado por você" : "do escritório"}
+                <span className="flex shrink-0 items-center gap-3 text-xs">
+                  <span className="text-charcoal/45">
+                    {d.enviado_por === "CLIENTE" ? "enviado por você" : "do escritório"}
+                  </span>
+                  <a href={`${API}/api/v1/documentos/${d.id}/baixar`} target="_blank" rel="noreferrer"
+                    className="font-semibold text-gold hover:underline">baixar</a>
                 </span>
               </li>
             ))}

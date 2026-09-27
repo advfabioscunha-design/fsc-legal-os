@@ -475,6 +475,44 @@ def url_documento(doc_id: str):
         raise HTTPException(500, f"Falha ao gerar link: {e}")
 
 
+def _nome_original(d: dict) -> str:
+    """Nome de arquivo legível: prefere o que o cliente enviou; se não houver,
+    limpa o prefixo aleatório da chave do storage."""
+    import re
+    nome = (d.get("observacao") or "").strip()
+    if not nome or nome.startswith("http"):
+        bruto = (d.get("storage_path") or "arquivo").split("/")[-1]
+        nome = re.sub(r"^[0-9a-f]{32}_", "", bruto)   # remove o uuid do início
+    return re.sub(r'[\\/:*?"<>|]', "_", nome) or "documento"
+
+
+@app.get("/api/v1/documentos/{doc_id}/baixar")
+def baixar_documento(doc_id: str):
+    """Baixa o arquivo com o nome original, forçando o download (não abre
+    no navegador). Vale para o que o cliente enviou e para o que o
+    escritório subiu."""
+    from fastapi.responses import Response, RedirectResponse
+    import mimetypes
+    s = get_settings()
+    db = get_db()
+    d = db.table("documentos").select("*").eq("id", doc_id).maybe_single().execute().data
+    if not d:
+        raise HTTPException(404, "Documento não encontrado.")
+    sp = d.get("storage_path") or ""
+    if sp.startswith("http"):                 # link de nuvem — só redireciona
+        return RedirectResponse(sp)
+    try:
+        conteudo = db.storage.from_(s.bucket_documentos).download(sp)
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível baixar o arquivo: {e}")
+    nome = _nome_original(d)
+    tipo = mimetypes.guess_type(nome)[0] or "application/octet-stream"
+    return Response(
+        content=conteudo, media_type=tipo,
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
 @app.delete("/api/v1/documentos/{doc_id}")
 def excluir_documento(doc_id: str):
     """Remove o documento da pasta do cliente (storage) e do banco."""
@@ -1138,57 +1176,182 @@ def solicitar_ajuste(caso_id: str, body: AjusteBody):
     return {"ok": True}
 
 
+def _br(iso) -> str:
+    """Data/hora no formato brasileiro."""
+    if not iso:
+        return "—"
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")) \
+                       .strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return str(iso)[:16]
+
+
 @app.get("/api/v1/casos/{caso_id}/download")
 def baixar_dossie(caso_id: str):
-    """Baixa o processo zipado: dossiê em Word (.docx) + documentos do storage
-    + links de nuvem, para ação humana urgente."""
+    """Baixa o processo inteiro em um .zip:
+
+      RELATORIO_DE_ATENDIMENTO.docx   — dossiê completo do caso
+      documentos/enviados_pelo_cliente/…
+      documentos/do_escritorio/…
+      links_nuvem.txt                 — anexos que são link (Drive etc.)
+
+    Tudo o que o cliente mandou pelo chat entra aqui junto com o resto.
+    """
     import io, zipfile
     from fastapi.responses import Response
     from docx import Document
+    from docx.shared import Pt
     s = get_settings()
     db = get_db()
     caso = db.table("casos").select("*, clientes(*)").eq("id", caso_id).single().execute().data
-    msgs = db.table("mensagens").select("autor,conteudo,criado_em").eq("caso_id", caso_id).order("criado_em").execute().data
-    docs = db.table("documentos").select("*").eq("caso_id", caso_id).execute().data
+    msgs = db.table("mensagens").select("autor,conteudo,canal,criado_em") \
+             .eq("caso_id", caso_id).order("criado_em").execute().data
+    docs = db.table("documentos").select("*").eq("caso_id", caso_id) \
+             .order("criado_em").execute().data
+    try:
+        sols = db.table("solicitacoes").select("*").eq("caso_id", caso_id) \
+                 .order("criado_em").execute().data or []
+    except Exception:
+        sols = []
+    try:
+        avs = db.table("avisos").select("*").eq("caso_id", caso_id) \
+                .order("criado_em").execute().data or []
+    except Exception:
+        avs = []
     cli = caso.get("clientes") or {}
+    num = caso.get("numero_atendimento") or "—"
 
-    # Dossiê em Word
+    # ── Relatório de atendimento (Word) ──────────────────────────
     doc = Document()
-    doc.add_heading(f"Dossiê do Processo — {cli.get('nome', '')}", 0)
-    doc.add_paragraph(f"Estado: {caso.get('estado')}  |  Grupo: {caso.get('grupo')}  |  Situação: {caso.get('situacao', 'ATIVO')}")
-    doc.add_paragraph(f"Nº do processo: {caso.get('numero_processo') or '—'}")
-    doc.add_paragraph(f"Contato: {cli.get('email') or cli.get('whatsapp') or '—'}  |  CPF/CNPJ: {cli.get('cpf_cnpj') or '—'}")
-    doc.add_paragraph(f"Honorários: {caso.get('honorarios_valor') or '—'}")
-    doc.add_heading("Relato / Informações coletadas", level=1)
+    doc.add_heading(f"Relatório de Atendimento — {num}", 0)
+    if caso.get("titulo"):
+        doc.add_paragraph(caso["titulo"])
+    doc.add_paragraph(
+        f"{s.advogado} — {s.oab}\n"
+        f"Emitido em {datetime.now(_tz.utc).strftime('%d/%m/%Y %H:%M')} (UTC)"
+    )
+
+    doc.add_heading("1. Cliente", level=1)
+    for rot, val in [
+        ("Nome", cli.get("nome")), ("CPF/CNPJ", cli.get("cpf_cnpj")),
+        ("E-mail", cli.get("email")), ("WhatsApp", cli.get("whatsapp")),
+        ("Origem do cadastro", cli.get("origem")),
+    ]:
+        doc.add_paragraph(f"{rot}: {val or '—'}")
+
+    doc.add_heading("2. Caso", level=1)
+    for rot, val in [
+        ("Nº de atendimento", num), ("Nome do caso", caso.get("titulo")),
+        ("Fase atual", caso.get("estado")), ("Grupo", caso.get("grupo")),
+        ("Situação", caso.get("situacao", "ATIVO")),
+        ("Nº do processo", caso.get("numero_processo")),
+        ("Honorários", caso.get("honorarios_valor")),
+        ("Aberto em", _br(caso.get("criado_em"))),
+        ("Última atualização", _br(caso.get("atualizado_em"))),
+    ]:
+        doc.add_paragraph(f"{rot}: {val or '—'}")
+    if caso.get("aguardando_cliente"):
+        doc.add_paragraph(f"⚠ Fora da produção, aguardando o cliente: "
+                          f"{caso.get('aguardando_desc') or '—'}")
+
+    doc.add_heading("3. Relato e informações coletadas", level=1)
     doc.add_paragraph(caso.get("relato_inicial") or "—")
-    doc.add_heading("Histórico do atendimento", level=1)
+
+    doc.add_heading("4. Documentos do caso", level=1)
+    if docs:
+        t = doc.add_table(rows=1, cols=4)
+        t.style = "Light Grid Accent 1"
+        for i, cab in enumerate(["Arquivo", "Origem", "Situação", "Recebido em"]):
+            t.rows[0].cells[i].text = cab
+        for d in docs:
+            c = t.add_row().cells
+            c[0].text = _nome_original(d)
+            c[1].text = "Cliente" if d.get("enviado_por") == "CLIENTE" else "Escritório"
+            c[2].text = d.get("status") or "—"
+            c[3].text = _br(d.get("criado_em"))
+    else:
+        doc.add_paragraph("Nenhum documento anexado.")
+
+    doc.add_heading("5. Pedidos feitos ao cliente", level=1)
+    if sols:
+        for x in sols:
+            doc.add_paragraph(
+                f"[{x.get('status')}] {x.get('descricao')}\n"
+                f"    Pedido em {_br(x.get('criado_em'))}"
+                + (f" · Atendido em {_br(x.get('atendida_em'))}" if x.get("atendida_em") else "")
+            )
+    else:
+        doc.add_paragraph("Nenhum pedido registrado.")
+
+    doc.add_heading("6. Comunicações e ciência do cliente", level=1)
+    if avs:
+        for a in avs:
+            canais = []
+            if a.get("enviado_email"):
+                canais.append("e-mail")
+            if a.get("enviado_whatsapp"):
+                canais.append(f"WhatsApp {a.get('numero_origem') or ''}".strip())
+            ciencia = (f"CIENTE em {_br(a.get('ciencia_em'))} ({a.get('ciencia_canal')})"
+                       if a.get("ciencia_em") else "SEM CIÊNCIA")
+            doc.add_paragraph(
+                f"{_br(a.get('criado_em'))} — {a.get('titulo')}\n"
+                f"    Enviado por: {', '.join(canais) or 'não enviado'} · {ciencia}"
+                + (f" · {a.get('lembretes')} lembrete(s)" if a.get("lembretes") else "")
+            )
+            doc.add_paragraph(f"    {a.get('mensagem')}")
+    else:
+        doc.add_paragraph("Nenhuma comunicação registrada.")
+
+    doc.add_heading("7. Histórico do atendimento", level=1)
     for m in msgs:
-        doc.add_paragraph(f"[{m.get('autor')}] {m.get('conteudo')}")
+        p = doc.add_paragraph()
+        r = p.add_run(f"[{_br(m.get('criado_em'))}] {m.get('autor')} "
+                      f"({m.get('canal') or '—'})")
+        r.bold = True
+        r.font.size = Pt(9)
+        doc.add_paragraph(m.get("conteudo") or "")
+
     buf = io.BytesIO()
     doc.save(buf)
-    docx_bytes = buf.getvalue()
+    relatorio = buf.getvalue()
 
-    # Zip com dossiê + documentos + links
+    # ── Zip: relatório + todos os documentos ─────────────────────
     zbuf = io.BytesIO()
+    usados: dict[str, int] = {}
     with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("dossie.docx", docx_bytes)
-        links = []
+        z.writestr("RELATORIO_DE_ATENDIMENTO.docx", relatorio)
+        links, falhas = [], []
         for d in docs:
             sp = d.get("storage_path") or ""
+            rotulo = _nome_original(d)
             if sp.startswith("http"):
-                links.append(f"{d.get('observacao') or d.get('tipo')}: {sp}")
+                links.append(f"{rotulo}: {sp}")
+                continue
+            pasta = ("documentos/enviados_pelo_cliente"
+                     if d.get("enviado_por") == "CLIENTE" else "documentos/do_escritorio")
+            chave = f"{pasta}/{rotulo}"
+            if chave in usados:                       # dois arquivos com o mesmo nome
+                usados[chave] += 1
+                raiz, _, ext = rotulo.rpartition(".")
+                chave = (f"{pasta}/{raiz} ({usados[chave]}).{ext}" if raiz
+                         else f"{pasta}/{rotulo} ({usados[chave]})")
             else:
-                try:
-                    data = db.storage.from_(s.bucket_documentos).download(sp)
-                    z.writestr(f"documentos/{sp.split('/')[-1]}", data)
-                except Exception:
-                    pass
+                usados[chave] = 1
+            try:
+                z.writestr(chave, db.storage.from_(s.bucket_documentos).download(sp))
+            except Exception as e:
+                falhas.append(f"{rotulo}: {e}")
         if links:
             z.writestr("links_nuvem.txt", "\n".join(links))
-    nome = (cli.get("nome") or "processo").replace(" ", "_")[:40]
+        if falhas:
+            z.writestr("_arquivos_nao_baixados.txt", "\n".join(falhas))
+
+    nome_cli = (cli.get("nome") or "processo").replace(" ", "_")[:40]
+    arquivo = f"{num}_{nome_cli}.zip" if num != "—" else f"processo_{nome_cli}.zip"
     return Response(
         content=zbuf.getvalue(), media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="processo_{nome}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="{arquivo}"'},
     )
 
 
