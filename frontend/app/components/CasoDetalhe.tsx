@@ -241,7 +241,8 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     const d = await r.json().catch(() => ({} as any));
     if (!r.ok) { alert(d.detail || "Não foi possível enviar."); return; }
     const canais = [d.enviado_email ? "e-mail" : null, d.enviado_whatsapp ? "WhatsApp" : null].filter(Boolean).join(" e ");
-    alert(`Enviado ao cliente em PDF, pelo chat da plataforma${canais ? ` e por ${canais}` : ""}.`
+    alert(`Enviado ao cliente em PDF (anexo no e-mail), pelo chat da plataforma${canais ? ` e por ${canais}` : ""}.`
+      + `\n\nEle pode devolver a via assinada respondendo o e-mail ou pelo painel — nos dois casos o arquivo entra na pasta do caso.`
       + (d.pdf === false ? `\n\nATENÇÃO: não foi possível gerar o PDF (${d.pdf_erro || "erro"}). O cliente vai receber o arquivo Word.` : ""));
     carregar();
   }
@@ -559,7 +560,9 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                 trocando só o que muda: qualificação, objeto conforme o relato, foro e local
                 (a cidade do cliente), data e assinatura. O documento <b className="text-white/75">abre
                 em outra aba</b> para o senhor ajustar; de lá é só baixar ou enviar ao cliente.
-                O cliente recebe <b className="text-white/75">em PDF</b>, assina e devolve pelo próprio chat.
+                O cliente recebe <b className="text-white/75">o PDF anexo ao e-mail</b> e devolve
+                a via assinada como preferir: respondendo o próprio e-mail ou pelo painel.
+                Nos dois casos o arquivo cai aqui, na pasta do caso.
               </p>
               <input value={instrucaoDoc} onChange={(e) => setInstrucaoDoc(e.target.value)}
                 placeholder="Orientação para o agente (opcional): ex. incluir pedido de tutela de urgência"

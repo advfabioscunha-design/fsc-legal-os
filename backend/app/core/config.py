@@ -48,6 +48,13 @@ class Settings(BaseModel):
     smtp_usuario: str = os.getenv("SMTP_USUARIO", "")
     smtp_senha: str = os.getenv("SMTP_SENHA", "")          # senha de app do Google
     smtp_remetente: str = os.getenv("SMTP_REMETENTE", "FC Advocacia")
+    # Leitura da caixa de entrada: é assim que a via assinada devolvida por
+    # e-mail entra na pasta do cliente, sem ninguém precisar salvar à mão.
+    imap_host: str = os.getenv("IMAP_HOST", "imap.gmail.com")
+    imap_porta: int = int(os.getenv("IMAP_PORTA", "993"))
+    imap_pasta: str = os.getenv("IMAP_PASTA", "INBOX")
+    imap_auto: bool = os.getenv("IMAP_AUTO", "true").lower() == "true"
+    imap_minutos: int = int(os.getenv("IMAP_MINUTOS", "10"))
 
     # Endereço do painel do cliente (usado nos links dos avisos)
     app_url: str = os.getenv("APP_URL", "https://app.fscadvocaciadigital.com.br")

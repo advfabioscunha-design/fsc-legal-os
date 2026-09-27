@@ -392,6 +392,8 @@ export default function AreaCliente() {
             </ul>
             <p className="mt-3 text-[11px] text-charcoal/55">
               Pode enviar em PDF, Word ou até uma foto do documento assinado — o que for mais fácil para você.
+              Se preferir, <b>responda o e-mail</b> que enviamos com o arquivo assinado em anexo:
+              funciona do mesmo jeito e chega direto no seu processo.
             </p>
           </div>
         )}

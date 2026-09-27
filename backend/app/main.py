@@ -8,7 +8,7 @@ from .core.config import get_settings
 from .core.db import get_db
 from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
-from .integracoes import asaas, zapsign, whatsapp, avisos
+from .integracoes import asaas, zapsign, whatsapp, avisos, email_entrada
 
 app = FastAPI(title="FC Legal OS", version="4.0")
 app.add_middleware(
@@ -53,6 +53,17 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[lembretes] job não agendado: {e}")
+        # Caixa de entrada: recebe a via assinada devolvida por e-mail
+        try:
+            if s.imap_auto:
+                from apscheduler.triggers.interval import IntervalTrigger
+                sched.add_job(
+                    email_entrada.ler_respostas,
+                    IntervalTrigger(minutes=s.imap_minutos),
+                    id="ler_respostas_email", replace_existing=True, max_instances=1,
+                )
+        except Exception as e:
+            print(f"[caixa de entrada] job não agendado: {e}")
         sched.start()
         app.state.scheduler = sched
     except Exception as e:  # API sobe mesmo sem o scheduler
@@ -520,6 +531,13 @@ class GerarDocumento(BaseModel):
     instrucao: str | None = None     # orientação do advogado para o agente
 
 
+@app.post("/api/v1/email/ler-respostas")
+def ler_respostas_email():
+    """Lê a caixa do escritório agora e arquiva as vias assinadas que
+    chegaram por e-mail (roda sozinha a cada 10 minutos)."""
+    return email_entrada.ler_respostas()
+
+
 @app.get("/api/v1/cep/{cep}")
 def buscar_cep(cep: str):
     """Preenchimento automático de endereço pelo CEP (ViaCEP).
@@ -691,12 +709,25 @@ def enviar_documento_ao_cliente(doc_id: str):
 
     # o cliente recebe em PDF: preserva a formatação e não se altera sem rastro
     from .agentes import documentos as redator
-    pdf_ok, pdf_erro = False, None
+    pdf_ok, pdf_erro, anexo = False, None, None
     try:
-        redator.gerar_pdf_do_documento(doc_id)
+        r = redator.gerar_pdf_do_documento(doc_id)
         pdf_ok = True
+        conteudo = db.storage.from_(get_settings().bucket_documentos) \
+                     .download(r["pdf_path"])
+        import re as _re2
+        nome_pdf = _re2.sub(r'[\\/:*?"<>|]', "_", d["titulo"]) + ".pdf"
+        anexo = [(nome_pdf, conteudo, "application/pdf")]
     except Exception as e:
         pdf_erro = str(e)
+
+    # referência que viaja no assunto e permite devolver por e-mail
+    token = d.get("email_token") or email_entrada.novo_token()
+    try:
+        db.table("documentos_assinatura").update({"email_token": token}) \
+          .eq("id", doc_id).execute()
+    except Exception:
+        token = None
 
     agora = datetime.now(_tz.utc).isoformat()
     db.table("documentos_assinatura").update({
@@ -705,13 +736,16 @@ def enviar_documento_ao_cliente(doc_id: str):
     }).eq("id", doc_id).execute()
 
     instrucao = (
-        f"Preparamos o seu {d['titulo']}.\n\n"
-        "Como assinar, em 3 passos:\n"
-        "1. Toque em BAIXAR e abra o arquivo;\n"
-        "2. Assine — pode imprimir e assinar à caneta, ou assinar digitalmente "
-        "no próprio celular;\n"
-        "3. Volte aqui e use ENVIAR ASSINADO para nos devolver o documento.\n\n"
-        "Assim que recebermos, seguimos com o seu processo."
+        f"Preparamos o seu {d['titulo']}. O documento vai em PDF, anexo a este "
+        f"e-mail, e também está disponível no seu painel.\n\n"
+        "Assine e devolva do jeito que for mais fácil para você:\n\n"
+        "• PELO E-MAIL — basta RESPONDER esta mensagem com o documento "
+        "assinado em anexo (pode ser PDF, Word ou foto). Não apague o assunto: "
+        "é por ele que identificamos o seu processo.\n\n"
+        "• PELA PLATAFORMA — entre no seu painel, toque em BAIXAR DOCUMENTO, "
+        "assine e use ENVIAR ASSINADO.\n\n"
+        "Pode imprimir e assinar à caneta ou assinar digitalmente no próprio "
+        "celular. Assim que recebermos, seguimos com o seu processo."
     )
     # entra na conversa do cliente
     try:
@@ -724,8 +758,11 @@ def enviar_documento_ao_cliente(doc_id: str):
     # e sai por e-mail/WhatsApp com o link do painel
     envio = {}
     try:
-        envio = avisos.notificar(d["caso_id"], "CONTRATO",
-                                 f"{d['titulo']} para assinatura", instrucao)
+        envio = avisos.notificar(
+            d["caso_id"], "CONTRATO", f"{d['titulo']} para assinatura", instrucao,
+            anexos=anexo,
+            assunto_extra=f" (ref. {email_entrada.referencia(token)})" if token else "",
+        )
     except Exception as e:
         envio = {"erros": [str(e)]}
 

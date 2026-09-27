@@ -94,7 +94,10 @@ def enviar_whatsapp(destino: str, texto: str, phone_id: str) -> None:
     r.raise_for_status()
 
 
-def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str) -> None:
+def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str,
+                 anexos: list[tuple[str, bytes, str]] | None = None) -> None:
+    """Envia o e-mail. `anexos` é uma lista de (nome, conteúdo, mime) — é por
+    aí que o documento para assinatura vai junto da mensagem."""
     s = get_settings()
     if not (s.smtp_usuario and s.smtp_senha and destino):
         raise RuntimeError("E-mail não configurado")
@@ -105,6 +108,11 @@ def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str) 
     msg["Reply-To"] = s.email_escritorio
     msg.set_content(corpo_texto)
     msg.add_alternative(corpo_html, subtype="html")
+
+    for nome, dados, mime in (anexos or []):
+        tipo, _, sub = (mime or "application/octet-stream").partition("/")
+        msg.add_attachment(dados, maintype=tipo or "application",
+                           subtype=sub or "octet-stream", filename=nome)
 
     ctx = ssl.create_default_context()
     if s.smtp_porta == 465:
@@ -182,8 +190,11 @@ def _html_email(nome: str, num_atend: str, titulo: str, mensagem: str,
 
 # ── Função principal ─────────────────────────────────────────────
 def notificar(caso_id: str, tipo: str, titulo: str, mensagem: str,
-              solicitacao_id: str | None = None) -> dict:
-    """Registra e dispara um aviso ao cliente por e-mail e WhatsApp."""
+              solicitacao_id: str | None = None,
+              anexos: list[tuple[str, bytes, str]] | None = None,
+              assunto_extra: str = "") -> dict:
+    """Registra e dispara um aviso ao cliente por e-mail e WhatsApp.
+    `anexos` vai junto do e-mail (ex.: o PDF para assinatura)."""
     db = get_db()
     caso = db.table("casos").select(
         "id,numero_atendimento,titulo,clientes(nome,email,whatsapp)"
@@ -225,8 +236,8 @@ def notificar(caso_id: str, tipo: str, titulo: str, mensagem: str,
             link, numero_publico(ddd_origem),
         )
         enviar_email(cli.get("email") or "",
-                     f"[{num_atend}] {titulo} — FC Advocacia",
-                     corpo_txt, corpo_html)
+                     f"[{num_atend}] {titulo} — FC Advocacia{assunto_extra}",
+                     corpo_txt, corpo_html, anexos=anexos)
         ok_mail = True
     except Exception as e:
         erros.append(f"email: {e}")
