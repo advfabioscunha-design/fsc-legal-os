@@ -204,12 +204,24 @@ def editar_cliente(cliente_id: str, body: EditarCliente):
         if len(so_num) == 11 and not cpf_valido(so_num):
             raise HTTPException(400, "CPF inválido — confira os números.")
         campos["cpf_cnpj"] = so_num
+    db = get_db()
+    antes = db.table("clientes").select("*").eq("id", cliente_id) \
+              .maybe_single().execute().data or {}
     if campos:
         try:
-            get_db().table("clientes").update(campos).eq("id", cliente_id).execute()
+            db.table("clientes").update(campos).eq("id", cliente_id).execute()
         except Exception as e:
             raise HTTPException(400, f"Não foi possível salvar: {e}")
-    return {"ok": True}
+
+    # trocou e-mail ou WhatsApp? a plataforma passa a falar no endereço novo
+    troca = {}
+    if _mudou_contato(antes, campos):
+        try:
+            troca = avisos.avisar_troca_de_contato(
+                cliente_id, antes, {**antes, **campos}, quem="ESCRITORIO")
+        except Exception as e:
+            troca = {"erro": str(e)}
+    return {"ok": True, **({"contato": troca} if troca else {})}
 
 
 @app.post("/api/v1/casos/{caso_id}/aprovar-protocolar")
@@ -1647,6 +1659,14 @@ NOME_POR_GRUPO = {
 }
 
 
+def _mudou_contato(antes: dict, campos: dict) -> bool:
+    """Diz se o e-mail ou o WhatsApp mudaram de fato nesta gravação."""
+    for c in ("email", "whatsapp"):
+        if c in campos and (campos.get(c) or "") != (antes.get(c) or ""):
+            return True
+    return False
+
+
 def _nome_do_caso(grupo: str | None) -> str:
     return NOME_POR_GRUPO.get(grupo or "", "Atendimento jurídico")
 
@@ -1668,7 +1688,25 @@ def _clientes_do_token(authorization: str | None) -> tuple[dict, list[str]]:
         raise HTTPException(400, "Conta sem e-mail — não é possível localizar o cadastro.")
     db = get_db()
 
-    achados = db.table("clientes").select("*").ilike("email", email).execute().data or []
+    # 1) vínculo forte: o cadastro já amarrado a este login. É ele que faz o
+    #    acesso do cliente sobreviver a uma troca de e-mail feita no CRM.
+    achados: list[dict] = []
+    try:
+        achados = db.table("clientes").select("*") \
+                    .eq("auth_user_id", user["id"]).execute().data or []
+    except Exception:
+        achados = []
+
+    # 2) vínculo por e-mail (primeiro acesso, ou cadastro criado pelo escritório)
+    try:
+        por_email = db.table("clientes").select("*").ilike("email", email) \
+                      .execute().data or []
+    except Exception:
+        por_email = []
+    for c in por_email:
+        if c["id"] not in {x["id"] for x in achados}:
+            achados.append(c)
+
     if not achados:
         nome = (user.get("user_metadata") or {}).get("nome") or email.split("@")[0]
         achados = [db.table("clientes").insert(
@@ -1707,6 +1745,15 @@ def _clientes_do_token(authorization: str | None) -> tuple[dict, list[str]]:
           .eq("id", user["id"]).execute()
     except Exception:
         pass
+    # amarra o cadastro ao login: a partir daqui, trocar o e-mail de contato
+    # não tira o acesso do cliente à própria área
+    if not principal.get("auth_user_id"):
+        try:
+            db.table("clientes").update({"auth_user_id": user["id"]}) \
+              .eq("id", principal["id"]).execute()
+            principal["auth_user_id"] = user["id"]
+        except Exception:
+            pass
     return principal, ids
 
 
@@ -1781,6 +1828,7 @@ def cliente_cadastro(authorization: str | None = Header(default=None)):
 
 class CadastroCliente(BaseModel):
     nome: str | None = None
+    email: str | None = None          # e-mail de contato (o login não muda)
     cpf_cnpj: str | None = None
     whatsapp: str | None = None
     nacionalidade: str | None = None
@@ -1799,8 +1847,13 @@ class CadastroCliente(BaseModel):
 @app.patch("/api/v1/cliente/cadastro")
 def cliente_atualizar_cadastro(body: CadastroCliente,
                                authorization: str | None = Header(default=None)):
-    """O próprio cliente completa o cadastro. O e-mail não muda aqui:
-    ele é a chave do login e do vínculo com os casos."""
+    """O próprio cliente atualiza o cadastro, inclusive o e-mail e o WhatsApp
+    de contato. A partir da troca, os avisos passam a sair no endereço novo —
+    e o que estava pendente é reenviado para lá.
+
+    O LOGIN continua sendo o e-mail com que ele entrou: o vínculo do cadastro
+    com a conta é feito pelo identificador do usuário, não pelo e-mail, então
+    trocar o e-mail de contato não tira o acesso dele à própria área."""
     cli = _cliente_do_token(authorization)
     campos = {k: v for k, v in body.model_dump().items() if v}
     if campos.get("cpf_cnpj"):
@@ -1809,9 +1862,21 @@ def cliente_atualizar_cadastro(body: CadastroCliente,
             raise HTTPException(400, "CPF inválido — confira os números.")
     if campos.get("whatsapp"):
         campos["whatsapp"] = "".join(c for c in campos["whatsapp"] if c.isdigit())
+    if campos.get("email"):
+        campos["email"] = campos["email"].strip().lower()
+        if "@" not in campos["email"]:
+            raise HTTPException(400, "E-mail inválido.")
     if campos:
         get_db().table("clientes").update(campos).eq("id", cli["id"]).execute()
-    return {"ok": True}
+
+    troca = {}
+    if _mudou_contato(cli, campos):
+        try:
+            troca = avisos.avisar_troca_de_contato(
+                cli["id"], cli, {**cli, **campos}, quem="CLIENTE")
+        except Exception as e:
+            troca = {"erro": str(e)}
+    return {"ok": True, **({"contato": troca} if troca else {})}
 
 
 @app.get("/api/v1/cliente/caso/{caso_id}")

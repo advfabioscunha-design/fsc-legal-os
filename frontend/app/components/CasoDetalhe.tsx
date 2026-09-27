@@ -95,9 +95,15 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(cli),
         });
+        const dcli = await r.json().catch(() => ({} as any));
         if (!r.ok) {
-          const e = await r.json().catch(() => ({} as any));
-          alert(e.detail || "Caso salvo, mas o cadastro do cliente não pôde ser atualizado.");
+          alert(dcli.detail || "Caso salvo, mas o cadastro do cliente não pôde ser atualizado.");
+        } else if (dcli?.contato?.campos?.length) {
+          const nomes = dcli.contato.campos.map((c: string) => (c === "email" ? "e-mail" : "WhatsApp")).join(" e ");
+          const n = dcli.contato.avisos_reenviados || 0;
+          alert(`Contato atualizado.\n\nA plataforma já passou a falar no novo ${nomes}: `
+            + `enviamos a confirmação para lá e um comunicado de segurança para o endereço antigo.`
+            + (n ? `\n\n${n} aviso(s) que estavam sem ciência foram reenviados para o contato novo.` : ""));
         }
       }
       await carregar(); onMudou();
@@ -422,6 +428,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                   pedidos nem enviar documentos. Preencha e salve.
                 </p>
               )}
+
+              <p className="mb-4 text-[11px] text-white/45">
+                Ao trocar o e-mail ou o WhatsApp aqui, a plataforma passa a falar no
+                endereço novo na hora: confirma no contato novo, comunica o antigo por
+                segurança e reenvia para lá tudo o que ainda estava sem ciência.
+              </p>
 
               <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Informações do caso</h3>
               <label className="mb-3 block text-xs text-white/60">Nome do caso <span className="text-white/40">(é o que o cliente vê junto do nº de atendimento)</span>

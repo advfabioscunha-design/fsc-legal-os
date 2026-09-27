@@ -308,6 +308,145 @@ def reenviar_pendentes() -> dict:
     return {"reenviados": reenviados, "sem_reenvio": ignorados}
 
 
+# ── Troca de contato: passa a falar no endereço novo ─────────────
+ROTULO_CONTATO = {"email": "e-mail", "whatsapp": "WhatsApp"}
+
+
+def avisar_troca_de_contato(cliente_id: str, antes: dict, depois: dict,
+                            quem: str = "ESCRITORIO") -> dict:
+    """Quando o e-mail ou o WhatsApp do cliente muda, a plataforma passa a
+    falar no endereço novo imediatamente — e confirma isso nos dois lados:
+
+      · no endereço NOVO: confirmação de que os avisos vêm para cá;
+      · no endereço ANTIGO: comunicado de segurança, para o cliente
+        perceber na hora se a troca não partiu dele.
+
+    Em seguida, tudo o que ainda estava pendente de ciência é reenviado
+    para o contato novo — nada se perde na troca.
+    """
+    db = get_db()
+    cli = db.table("clientes").select("*").eq("id", cliente_id).single().execute().data
+    mudou = [c for c in ("email", "whatsapp")
+             if (antes.get(c) or "") != (depois.get(c) or "") and depois.get(c)]
+    if not mudou:
+        return {"ok": True, "sem_mudanca": True}
+
+    nome = (cli.get("nome") or "").split(" ")[0]
+    lista = " e ".join(ROTULO_CONTATO[c] for c in mudou)
+    por_quem = ("Você atualizou" if quem == "CLIENTE"
+                else "Atualizamos, a seu pedido,")
+
+    # 1) confirmação no endereço NOVO
+    corpo_novo = (
+        f"{por_quem} o seu {lista} de contato.\n\n"
+        f"A partir de agora, todo aviso sobre o seu processo — pedido de "
+        f"documento, audiência, prazo e movimentação — chega neste endereço.\n\n"
+        + "\n".join(f"Novo {ROTULO_CONTATO[c]}: {depois.get(c)}" for c in mudou)
+    )
+    phone_id, ddd = escolher_origem(depois.get("whatsapp") or cli.get("whatsapp"))
+    link = f"{get_settings().app_url}/cliente"
+    enviados = {"novo_email": False, "novo_whatsapp": False, "antigo_email": False}
+
+    if "email" in mudou or depois.get("email"):
+        try:
+            txt, html = _html_email(nome, "—", "Contato atualizado",
+                                    corpo_novo, link, numero_publico(ddd))
+            enviar_email(depois.get("email") or cli.get("email"),
+                         "Contato atualizado — FC Advocacia", txt, html)
+            enviados["novo_email"] = True
+        except Exception:
+            pass
+    if depois.get("whatsapp"):
+        try:
+            enviar_whatsapp(depois["whatsapp"],
+                            _texto_whatsapp(nome, "—", "Contato atualizado",
+                                            corpo_novo, link, ddd), phone_id)
+            enviados["novo_whatsapp"] = True
+        except Exception:
+            pass
+
+    # 2) comunicado de segurança no endereço ANTIGO
+    if "email" in mudou and antes.get("email"):
+        aviso_seguranca = (
+            f"O {lista} de contato da sua conta na plataforma da FC Advocacia "
+            f"acaba de ser alterado.\n\n"
+            f"Se foi você (ou se pediu isso ao escritório), não precisa fazer "
+            f"nada — os próximos avisos já vão para o endereço novo.\n\n"
+            f"**Se não foi você, fale conosco imediatamente.** Este é o último "
+            f"aviso que enviamos para este endereço."
+        )
+        try:
+            txt, html = _html_email(nome, "—", "Alteração de contato na sua conta",
+                                    aviso_seguranca, link, numero_publico(ddd))
+            enviar_email(antes["email"],
+                         "Alteração de contato na sua conta — FC Advocacia", txt, html)
+            enviados["antigo_email"] = True
+        except Exception:
+            pass
+
+    # 3) o que estava pendente vai de novo, agora para o endereço certo
+    reenviados = reenviar_pendentes_do_cliente(cliente_id)
+
+    try:
+        casos = db.table("casos").select("id").eq("cliente_id", cliente_id) \
+                  .limit(1).execute().data
+        if casos:
+            registrar_evento(casos[0]["id"], "CONTATO_ATUALIZADO",
+                             {"campos": mudou, "por": quem, "envios": enviados,
+                              "avisos_reenviados": reenviados})
+    except Exception:
+        pass
+    return {"ok": True, "campos": mudou, "envios": enviados,
+            "avisos_reenviados": reenviados}
+
+
+def reenviar_pendentes_do_cliente(cliente_id: str) -> int:
+    """Reenvia, para o contato ATUAL, os avisos deste cliente que ainda não
+    receberam ciência. Usado depois de uma troca de e-mail ou WhatsApp."""
+    db = get_db()
+    try:
+        casos = db.table("casos").select("id").eq("cliente_id", cliente_id) \
+                  .execute().data or []
+        ids = [c["id"] for c in casos]
+        if not ids:
+            return 0
+        pend = db.table("avisos").select("*").in_("caso_id", ids) \
+                 .is_("ciencia_em", "null").order("criado_em").execute().data or []
+    except Exception:
+        return 0
+
+    n = 0
+    for a in pend:
+        try:
+            caso = db.table("casos").select(
+                "numero_atendimento, clientes(nome,email,whatsapp)"
+            ).eq("id", a["caso_id"]).single().execute().data
+            cli = caso.get("clientes") or {}
+            phone_id, ddd = escolher_origem(cli.get("whatsapp"))
+            link = _link_caso(a["caso_id"])
+            num = caso.get("numero_atendimento") or "—"
+            try:
+                enviar_whatsapp(cli.get("whatsapp") or "",
+                                _texto_whatsapp(cli.get("nome") or "", num, a["titulo"],
+                                                a["mensagem"], link, ddd), phone_id)
+            except Exception:
+                pass
+            try:
+                txt, html = _html_email(cli.get("nome") or "", num, a["titulo"],
+                                        a["mensagem"], link, numero_publico(ddd))
+                enviar_email(cli.get("email") or "",
+                             f"[{num}] {a['titulo']} — FC Advocacia", txt, html)
+            except Exception:
+                pass
+            db.table("avisos").update({
+                "ultimo_lembrete": datetime.now(_tz.utc).isoformat(),
+            }).eq("id", a["id"]).execute()
+            n += 1
+        except Exception:
+            continue
+    return n
+
+
 def dar_ciencia(aviso_id: str, canal: str = "PAINEL") -> dict:
     db = get_db()
     agora = datetime.now(_tz.utc).isoformat()

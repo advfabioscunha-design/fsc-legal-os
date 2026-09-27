@@ -643,6 +643,7 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
 }) {
   const [form, setForm] = useState<Record<string, string>>({
     nome: cadastro?.nome || "", cpf_cnpj: cadastro?.cpf_cnpj || "", whatsapp: cadastro?.whatsapp || "",
+    email: cadastro?.email || email,
     rg: cadastro?.rg || "", nacionalidade: cadastro?.nacionalidade || "brasileiro(a)",
     estado_civil: cadastro?.estado_civil || "", profissao: cadastro?.profissao || "",
     endereco_cep: cadastro?.endereco_cep || "", endereco_rua: cadastro?.endereco_rua || "",
@@ -698,7 +699,15 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
       });
       const d = await r.json().catch(() => ({} as any));
       if (!r.ok) { setAviso(d.detail || "Não foi possível salvar."); return; }
-      setAviso("Cadastro atualizado.");
+      const campos: string[] = d?.contato?.campos || [];
+      if (campos.length) {
+        const nomes = campos.map((c) => (c === "email" ? "e-mail" : "WhatsApp")).join(" e ");
+        const n = d?.contato?.avisos_reenviados || 0;
+        setAviso(`Cadastro atualizado. A partir de agora os avisos do seu processo vão para o novo ${nomes}.`
+          + (n ? ` Reenviamos ${n} aviso(s) que estavam pendentes.` : ""));
+      } else {
+        setAviso("Cadastro atualizado.");
+      }
       if (cadastro) onSalvo({ ...cadastro, ...form });
     } catch { setAviso("Falha de conexão."); }
     finally { setSalvando(false); }
@@ -719,9 +728,14 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
           <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
-        <label className="text-xs font-medium text-charcoal/60">E-mail (seu acesso)
-          <input disabled value={cadastro?.email || email}
-            className="mt-1 w-full rounded-lg border border-black/10 bg-ice px-3 py-2 text-sm text-charcoal/60" />
+        <label className="text-xs font-medium text-charcoal/60">E-mail de contato
+          <input type="email" value={form.email ?? ""}
+            onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, email: v })); }}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+          <span className="mt-1 block text-[10px] font-normal text-charcoal/45">
+            É para cá que enviamos os avisos do seu processo. Seu login continua
+            sendo {email}.
+          </span>
         </label>
         <label className="text-xs font-medium text-charcoal/60">CPF / CNPJ
           <input value={form.cpf_cnpj} onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} inputMode="numeric"
