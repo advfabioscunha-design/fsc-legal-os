@@ -166,37 +166,173 @@ def _por_numero_atendimento(alvo: str) -> list[dict]:
         return []
 
 
-def _por_remetente(de: str) -> list[dict]:
-    """Último recurso: e-mail de cliente cadastrado que tem documento
-    aguardando assinatura. Só vale quando houver exatamente um caso
-    pendente — havendo dois, mandamos conferir em vez de adivinhar."""
+def _casos_do_remetente(de: str) -> list[str]:
+    """Casos abertos do cliente dono deste endereço de e-mail."""
     db = get_db()
     try:
         cli = db.table("clientes").select("id").ilike("email", de).execute().data or []
         if not cli:
             return []
-        ids = [c["id"] for c in cli]
-        casos = db.table("casos").select("id").in_("cliente_id", ids).execute().data or []
-        if not casos:
-            return []
-        docs = db.table("documentos_assinatura").select("*") \
-                 .in_("caso_id", [c["id"] for c in casos]) \
-                 .eq("status", "ENVIADO").execute().data or []
-        if len({d["caso_id"] for d in docs}) != 1:
-            return []
-        return docs
+        casos = db.table("casos").select("id,estado,atualizado_em") \
+                  .in_("cliente_id", [c["id"] for c in cli]) \
+                  .order("atualizado_em", desc=True).execute().data or []
+        abertos = [c["id"] for c in casos
+                   if (c.get("estado") or "") not in ("CONCLUIDO", "ARQUIVADO",
+                                                      "CANCELADO", "PERDIDO")]
+        return abertos or [c["id"] for c in casos]
     except Exception:
         return []
 
 
-def _identificar(msg, alvo: str, de: str) -> tuple[list[dict], str]:
+def _por_remetente(de: str) -> list[dict]:
+    """Último recurso: e-mail de cliente cadastrado que tem documento
+    aguardando assinatura. Só vale quando houver exatamente um caso
+    pendente — havendo dois, mandamos conferir em vez de adivinhar."""
+    casos = _casos_do_remetente(de)
+    if not casos:
+        return []
+    try:
+        docs = get_db().table("documentos_assinatura").select("*") \
+                 .in_("caso_id", casos).eq("status", "ENVIADO").execute().data or []
+    except Exception:
+        return []
+    if len({d["caso_id"] for d in docs}) != 1:
+        return []
+    return docs
+
+
+def _identificar(msg, alvo: str, de: str) -> tuple[list[dict], str | None, str]:
+    """Devolve (documentos pendentes, caso_id, como reconhecemos).
+
+    O caso pode ser identificado mesmo sem documento nenhum em jogo: é o
+    caso da resposta em que o cliente só manda a informação pedida."""
     for achar, como in ((lambda: _por_referencia(alvo), "referência"),
                         (lambda: _por_numero_atendimento(alvo), "nº de atendimento"),
                         (lambda: _por_remetente(de), "remetente cadastrado")):
         docs = achar()
         if docs:
-            return docs, como
-    return [], ""
+            return docs, docs[0]["caso_id"], como
+
+    # nenhum documento em jogo — ainda assim pode ser resposta a um pedido
+    m = PADRAO_ATENDIMENTO.search(alvo)
+    if m:
+        try:
+            caso = get_db().table("casos").select("id") \
+                     .eq("numero_atendimento", m.group(0).upper()) \
+                     .limit(1).execute().data
+            if caso:
+                return [], caso[0]["id"], "nº de atendimento"
+        except Exception:
+            pass
+    casos = _casos_do_remetente(de)
+    if len(casos) == 1:
+        return [], casos[0], "remetente cadastrado"
+    return [], None, ""
+
+
+# ── A resposta escrita pelo cliente ─────────────────────────────
+# Linhas que abrem a citação do e-mail anterior. Tudo daí para baixo é
+# repetição do que já está na plataforma e não entra na conversa.
+CORTES = (
+    re.compile(r"^\s*(>|\|)", re.M),
+    re.compile(r"^\s*Em .{0,80}escreveu\s*:", re.M | re.I),
+    re.compile(r"^\s*On .{0,80}wrote\s*:", re.M | re.I),
+    re.compile(r"^\s*-{2,}\s*(Mensagem original|Original Message|"
+               r"Encaminhada|Forwarded message)", re.M | re.I),
+    re.compile(r"^\s*De\s*:\s*.+\n\s*Enviad[ao]\s*:", re.M | re.I),
+    re.compile(r"^\s*From\s*:\s*.+\n\s*Sent\s*:", re.M | re.I),
+    re.compile(r"\[FSC-\d{4}-\d{3,6}\]", re.I),
+)
+# rodapés de celular que não são conteúdo
+ASSINATURAS = re.compile(
+    r"^\s*(Enviado d[eo] meu .*|Sent from my .*|Obtenha o Outlook.*)$",
+    re.M | re.I)
+
+
+def texto_da_resposta(msg) -> str:
+    """O que o cliente realmente escreveu, sem o histórico citado."""
+    bruto = _corpo_texto(msg)
+    corte = len(bruto)
+    for padrao in CORTES:
+        m = padrao.search(bruto)
+        if m:
+            corte = min(corte, m.start())
+    limpo = ASSINATURAS.sub("", bruto[:corte])
+    # tira linhas em branco repetidas e espaços das pontas
+    linhas = [l.rstrip() for l in limpo.splitlines()]
+    saida, vazia = [], False
+    for l in linhas:
+        if not l.strip():
+            if vazia:
+                continue
+            vazia = True
+        else:
+            vazia = False
+        saida.append(l)
+    return "\n".join(saida).strip()
+
+
+def _registrar_resposta(caso_id: str, texto: str, anexos: list[str]) -> None:
+    """Põe a resposta do cliente na conversa do painel, exatamente como se
+    ele tivesse escrito por lá. O histórico fica num lugar só."""
+    partes = []
+    if texto:
+        partes.append(texto)
+    if anexos:
+        partes.append("📎 " + ", ".join(anexos))
+    if not partes:
+        return
+    try:
+        get_db().table("mensagens").insert({
+            "caso_id": caso_id, "canal": "EMAIL", "autor": "CLIENTE",
+            "conteudo": "\n\n".join(partes),
+        }).execute()
+    except Exception:
+        # instalações antigas podem restringir o canal
+        try:
+            get_db().table("mensagens").insert({
+                "caso_id": caso_id, "canal": "PORTAL", "autor": "CLIENTE",
+                "conteudo": "(respondido por e-mail)\n\n" + "\n\n".join(partes),
+            }).execute()
+        except Exception:
+            pass
+
+
+def _dar_ciencia_por_email(caso_id: str) -> int:
+    """Responder o e-mail é ciência: o cliente leu e se manifestou. Baixa
+    todos os avisos do caso que ainda aguardavam confirmação, para ele não
+    continuar recebendo lembrete do que já respondeu."""
+    db = get_db()
+    agora = datetime.now(_tz.utc).isoformat()
+    try:
+        pend = db.table("avisos").select("id,titulo").eq("caso_id", caso_id) \
+                 .is_("ciencia_em", "null").execute().data or []
+    except Exception:
+        return 0
+    for a in pend:
+        try:
+            db.table("avisos").update({
+                "ciencia_em": agora, "ciencia_canal": "EMAIL",
+            }).eq("id", a["id"]).is_("ciencia_em", "null").execute()
+            registrar_evento(caso_id, "CIENCIA_CLIENTE",
+                             {"aviso_id": a["id"], "canal": "EMAIL",
+                              "titulo": a.get("titulo")})
+        except Exception:
+            pass
+    return len(pend)
+
+
+def _reabrir_para_a_esteira(caso_id: str, tem_anexo: bool) -> None:
+    """Cliente respondeu: o caso volta para a fila de trabalho do escritório
+    e some o 'aguardando cliente' do painel."""
+    db = get_db()
+    try:
+        db.table("casos").update({
+            "aguardando_cliente": False, "aguardando_desc": None,
+            "atualizado_em": datetime.now(_tz.utc).isoformat(),
+        }).eq("id", caso_id).execute()
+    except Exception:
+        pass
 
 
 # ── Arquivamento ────────────────────────────────────────────────
@@ -211,9 +347,16 @@ def _guardar(doc: dict, nome: str, dados: bytes, mime: str, remetente: str,
         path, dados, {"content-type": mime or "application/octet-stream",
                       "upsert": "true"},
     )
-    obs = (f"{doc['titulo']} (assinado, recebido por e-mail)" if conferido
-           else f"{doc['titulo']} (recebido por e-mail de {remetente} — CONFERIR REMETENTE)")
-    linha = {"caso_id": doc["caso_id"], "tipo": f"ASSINADO_{doc['tipo']}",
+    avulso = not doc.get("id")        # documento solto, sem assinatura em jogo
+    if avulso:
+        obs = (f"{nome} (recebido por e-mail)" if conferido
+               else f"{nome} (recebido por e-mail de {remetente} — CONFERIR REMETENTE)")
+        tipo = "CLIENTE"
+    else:
+        obs = (f"{doc['titulo']} (assinado, recebido por e-mail)" if conferido
+               else f"{doc['titulo']} (recebido por e-mail de {remetente} — CONFERIR REMETENTE)")
+        tipo = f"ASSINADO_{doc['tipo']}"
+    linha = {"caso_id": doc["caso_id"], "tipo": tipo,
              "storage_path": path, "status": "RECEBIDO", "observacao": obs}
     try:
         linha["enviado_por"] = "CLIENTE"
@@ -295,8 +438,8 @@ def ler_respostas(limite: int = 60, dias: int = 21) -> dict:
         return {"ok": False, "motivo": "e-mail não configurado"}
 
     db = get_db()
-    resultado = {"lidas": 0, "arquivadas": 0, "a_conferir": 0,
-                 "sem_referencia": 0, "ignoradas": 0, "erros": []}
+    resultado = {"lidas": 0, "arquivadas": 0, "a_conferir": 0, "respostas": 0,
+                 "ciencias": 0, "sem_referencia": 0, "ignoradas": 0, "erros": []}
     try:
         M = imaplib.IMAP4_SSL(s.imap_host, s.imap_porta, timeout=40)
         M.login(s.smtp_usuario, s.smtp_senha)
@@ -324,45 +467,68 @@ def ler_respostas(limite: int = 60, dias: int = 21) -> dict:
                     continue
 
                 anexos = _anexos(msg)
-                if not anexos:
-                    continue          # sem arquivo não há o que arquivar
+                escrito = texto_da_resposta(msg)
+                if not anexos and not escrito:
+                    continue          # e-mail vazio: nada a registrar
 
                 alvo = f"{_texto(msg.get('Subject'))}\n{_corpo_texto(msg)}"
-                docs, como = _identificar(msg, alvo, de)
-                if not docs:
+                docs, caso_id, como = _identificar(msg, alvo, de)
+                if not caso_id:
                     resultado["sem_referencia"] += 1
                     continue
-
-                pendentes = [d for d in docs if d["status"] != "ASSINADO"] or docs
-                caso_id = pendentes[0]["caso_id"]
 
                 caso = db.table("casos").select("clientes(email)") \
                          .eq("id", caso_id).single().execute().data
                 email_cli = ((caso.get("clientes") or {}).get("email") or "").lower()
                 conferido = bool(email_cli) and de == email_cli
 
+                pendentes = [d for d in docs if d["status"] != "ASSINADO"]
                 caminhos, nomes = [], []
-                for nome, conteudo, mime in anexos:
-                    caminhos.append(_guardar(pendentes[0], nome, conteudo, mime,
-                                             de, conferido))
-                    nomes.append(nome)
+                completo = False
 
-                completo = conferido and len(anexos) >= len(pendentes)
-                if completo:
-                    _marcar_assinados(pendentes, caminhos)
-                    _liberar_producao(caso_id)
-                    resultado["arquivadas"] += 1
-                else:
-                    resultado["a_conferir"] += 1
+                if anexos and pendentes:
+                    # anexo vindo em resposta a documento aguardando assinatura
+                    for nome, conteudo, mime in anexos:
+                        caminhos.append(_guardar(pendentes[0], nome, conteudo,
+                                                 mime, de, conferido))
+                        nomes.append(nome)
+                    completo = conferido and len(anexos) >= len(pendentes)
+                    if completo:
+                        _marcar_assinados(pendentes, caminhos)
+                        _liberar_producao(caso_id)
+                        resultado["arquivadas"] += 1
+                    else:
+                        resultado["a_conferir"] += 1
+                    _avisar_chat(caso_id, [d["titulo"] for d in pendentes],
+                                 conferido, de, nomes, completo,
+                                 max(len(pendentes) - len(anexos), 0))
+                elif anexos:
+                    # documento que o cliente mandou por conta própria
+                    # (RG, comprovante, o que o escritório pediu no chat)
+                    avulso = {"id": None, "caso_id": caso_id, "tipo": "CLIENTE",
+                              "titulo": "Documento enviado pelo cliente"}
+                    for nome, conteudo, mime in anexos:
+                        caminhos.append(_guardar(avulso, nome, conteudo, mime,
+                                                 de, conferido))
+                        nomes.append(nome)
+                    resultado["arquivadas" if conferido else "a_conferir"] += 1
 
-                _avisar_chat(caso_id, [d["titulo"] for d in pendentes], conferido,
-                             de, nomes, completo,
-                             max(len(pendentes) - len(anexos), 0))
+                # a resposta escrita entra na conversa do painel do cliente
+                _registrar_resposta(caso_id, escrito, nomes)
+                resultado["respostas"] += 1 if escrito else 0
 
-                registrar_evento(caso_id, "ASSINADO_RECEBIDO_EMAIL",
+                # responder já é ciência, e o caso volta para a esteira
+                cientes = _dar_ciencia_por_email(caso_id)
+                resultado["ciencias"] += cientes
+                if conferido:
+                    _reabrir_para_a_esteira(caso_id, bool(anexos))
+
+                registrar_evento(caso_id, "RESPOSTA_CLIENTE_EMAIL",
                                  {"de": de, "reconhecido_por": como,
                                   "conferido": conferido, "completo": completo,
-                                  "pendentes": len(pendentes), "arquivos": nomes})
+                                  "avisos_com_ciencia": cientes,
+                                  "arquivos": nomes,
+                                  "texto": (escrito or "")[:500]})
                 _marcar_processado(mid, caso_id,
                                    f"{como}: {len(nomes)} anexo(s) de {de}")
                 M.store(num, "+FLAGS", "\\Seen")

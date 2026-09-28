@@ -889,7 +889,10 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <div className="max-h-60 space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-[#0A1628]/40 p-3">
                 {(caso.mensagens || []).map((m: any) => (
                   <div key={m.id} className="text-sm">
-                    <span className={`text-[10px] uppercase ${m.autor === "CLIENTE" ? "text-[#2D7DD2]" : m.autor === "HUMANO" ? "text-[#C9A84C]" : "text-white/40"}`}>{m.autor}</span>
+                    <span className={`text-[10px] uppercase ${m.autor === "CLIENTE" ? "text-[#2D7DD2]" : m.autor === "HUMANO" ? "text-[#C9A84C]" : "text-white/40"}`}>
+                      {m.autor}
+                      {m.canal === "EMAIL" && <span className="ml-1 text-white/40">✉ por e-mail</span>}
+                    </span>
                     <p className="whitespace-pre-wrap text-white/80">{m.conteudo}</p>
                   </div>
                 ))}

@@ -19,7 +19,8 @@ const ESTEIRA = [
 ];
 const PRE_CONTRATO = ["LEAD", "QUALIFICACAO", "PROPOSTA"];
 
-type Msg = { id?: number; autor: "CLIENTE" | "AGENTE" | "HUMANO"; conteudo: string; criado_em?: string };
+type Msg = { id?: number; autor: "CLIENTE" | "AGENTE" | "HUMANO"; conteudo: string;
+             criado_em?: string; canal?: string | null };
 type Solicitacao = { id: string; descricao: string; status: string; criado_em: string };
 type Doc = { id: string; observacao: string | null; tipo: string; status: string; enviado_por?: string; criado_em: string };
 type Aviso = {
@@ -626,11 +627,17 @@ export default function AreaCliente() {
               {msgs.map((m, i) => {
                 const meu = m.autor === "CLIENTE";
                 const texto = (m.conteudo || "").replace("[SOLICITAÇÃO AO CLIENTE] ", "");
+                // resposta que chegou por e-mail entra na mesma conversa,
+                // com uma etiqueta para o cliente reconhecer de onde veio
+                const porEmail = m.canal === "EMAIL";
                 return (
-                  <div key={m.id ?? i} className={`flex ${meu ? "justify-end" : "justify-start"}`}>
+                  <div key={m.id ?? i} className={`flex flex-col ${meu ? "items-end" : "items-start"}`}>
                     <div className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                       meu ? "rounded-br-md bg-navy text-white" : "rounded-bl-md bg-ice text-charcoal"
                     }`}>{texto}</div>
+                    {porEmail && (
+                      <span className="mt-0.5 px-1 text-[10px] text-charcoal/45">✉ respondido por e-mail</span>
+                    )}
                   </div>
                 );
               })}
