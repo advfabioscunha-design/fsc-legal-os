@@ -157,6 +157,68 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     } finally { setAtualizando(false); }
   }
 
+  /* ── Peticionamento e precedentes ────────────────────────────────
+     Duas etapas separadas de propósito: quem redige a minuta não cita
+     jurisprudência (deixa tags), e quem preenche as tags não escreve
+     ementa — só escolhe entre julgados reais do banco. É essa divisão
+     que impede citação inventada na peça. */
+  const [pet, setPet] = useState<any>(null);
+  const [petBase, setPetBase] = useState("");
+  const [petTribunal, setPetTribunal] = useState("");
+  const [petInstrucao, setPetInstrucao] = useState("");
+  const [petOcupado, setPetOcupado] = useState("");
+
+  async function carregarPeticoes() {
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/peticoes`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setPet(Array.isArray(d) && d.length ? d[0] : null);
+    } catch { /* painel opcional */ }
+  }
+
+  async function criarPeticao(colada: boolean) {
+    setPetOcupado(colada ? "colar" : "redigir");
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/peticoes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          markdown: colada ? petBase : null,
+          tribunal: petTribunal || null,
+          instrucao: colada ? null : (petInstrucao || null),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.detail || "Não foi possível criar a minuta."); return; }
+      setPet(d.peticao);
+      setPetBase("");
+      if (!(d.tags || []).length)
+        alert("A minuta entrou, mas não tem nenhuma tag [INSERIR_JURISPRUDENCIA_TEMA: \"…\"]. Sem tag, não há onde inserir precedente.");
+    } finally { setPetOcupado(""); }
+  }
+
+  async function rodarPrecedentes() {
+    if (!pet) return;
+    setPetOcupado("precedentes");
+    try {
+      const r = await fetch(`${API}/api/v1/peticoes/${pet.id}/precedentes`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { alert(d.detail || "Não foi possível injetar os precedentes."); return; }
+      if (d.ok === false) { alert(d.mensagem); return; }
+      await carregarPeticoes();
+    } finally { setPetOcupado(""); }
+  }
+
+  async function sincronizarBanco() {
+    setPetOcupado("sinc");
+    try {
+      const r = await fetch(`${API}/api/v1/precedentes/sincronizar`, { method: "POST" });
+      const d = await r.json();
+      alert(r.ok ? `Banco de precedentes: ${d.total_no_banco} ementa(s) disponíveis para citação.`
+                 : (d.detail || "Falha ao sincronizar."));
+    } finally { setPetOcupado(""); }
+  }
+
   function aplicarSugestao() {
     if (!sugestaoHon) return;
     const campos = ["hon_percentual", "hon_salarios_minimos", "hon_valor_fixo",
@@ -215,7 +277,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     } catch { setCaso(null); }
     finally { setCarregando(false); }
   }
-  useEffect(() => { carregar(); carregarHonorarios(); /* eslint-disable-next-line */ }, [casoId]);
+  useEffect(() => { carregar(); carregarHonorarios(); carregarPeticoes(); /* eslint-disable-next-line */ }, [casoId]);
 
   async function salvarCampos() {
     setSalvando(true);
@@ -765,6 +827,105 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <textarea value={solicitacao} onChange={(e) => setSolicitacao(e.target.value)} rows={2} placeholder="Ex.: Enviar RG e comprovante de residência..."
                 className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
               <button onClick={acionarCliente} className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3]">Enviar ao cliente</button>
+            </section>
+
+            {/* Peticionamento: minuta com tags → precedentes reais */}
+            <section>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Peça inicial e precedentes</h3>
+              <p className="mb-2 text-xs text-white/55">
+                A minuta sai <b className="text-white/75">sem jurisprudência</b>, marcando com
+                <code className="mx-1 rounded bg-white/10 px-1">[INSERIR_JURISPRUDENCIA_TEMA: "tema"]</code>
+                os pontos que precisam de precedente. Depois o agente troca cada marcação por
+                julgado <b className="text-white/75">real do banco</b>, com prioridade para o tribunal
+                do protocolo, e escreve o paralelo com o caso. Tema sem julgado aderente tem a
+                marcação removida — a peça nunca sai com citação inventada.
+              </p>
+
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <select value={petTribunal} onChange={(e) => setPetTribunal(e.target.value)}
+                  className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-xs">
+                  <option value="">Tribunal do protocolo…</option>
+                  <option value="TJRO">TJRO</option>
+                  <option value="TJSC">TJSC</option>
+                </select>
+                <button onClick={sincronizarBanco} disabled={!!petOcupado}
+                  className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white/70 hover:text-white disabled:opacity-50">
+                  {petOcupado === "sinc" ? "…" : "Atualizar banco de precedentes"}
+                </button>
+              </div>
+
+              {!pet ? (
+                <>
+                  <textarea value={petBase} onChange={(e) => setPetBase(e.target.value)} rows={5}
+                    placeholder='Cole aqui a minuta em Markdown, com as marcações [INSERIR_JURISPRUDENCIA_TEMA: "…"]'
+                    className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button onClick={() => criarPeticao(true)} disabled={!petBase.trim() || !!petOcupado}
+                      className="rounded-lg bg-[#C9A84C] px-4 py-2 text-xs font-bold text-[#0A1628] disabled:opacity-50">
+                      {petOcupado === "colar" ? "…" : "Usar esta minuta"}
+                    </button>
+                    <span className="text-xs text-white/35">ou</span>
+                    <input value={petInstrucao} onChange={(e) => setPetInstrucao(e.target.value)}
+                      placeholder="Orientação para o redator (opcional)"
+                      className="min-w-[220px] flex-1 rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-xs" />
+                    <button onClick={() => criarPeticao(false)} disabled={!!petOcupado}
+                      className="rounded-lg border border-[#2D7DD2]/50 bg-[#2D7DD2]/15 px-4 py-2 text-xs font-bold text-[#2D7DD2] disabled:opacity-50">
+                      {petOcupado === "redigir" ? "Redigindo…" : "Redigir a minuta"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg border border-white/10 bg-[#0A1628]/50 p-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm font-semibold text-white/85">{pet.titulo}</span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-white/60">
+                      {pet.origem === "REDIGIDA" ? "redigida pela plataforma" : "colada pelo advogado"}
+                      {pet.tribunal ? ` · ${pet.tribunal}` : ""}
+                    </span>
+                    <button onClick={rodarPrecedentes} disabled={!!petOcupado}
+                      className="ml-auto rounded-lg bg-[#1DB954] px-4 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                      {petOcupado === "precedentes" ? "Pesquisando…"
+                        : pet.markdown_final ? "Rodar precedentes de novo" : "Inserir precedentes"}
+                    </button>
+                    <button onClick={() => setPet(null)}
+                      className="text-xs text-white/40 hover:text-white hover:underline">nova minuta</button>
+                  </div>
+
+                  {pet.relatorio && (
+                    <div className="mt-3 text-xs">
+                      <p className="text-white/70">
+                        {pet.relatorio.preenchidas} de {pet.relatorio.tags} marcações preenchidas
+                        {pet.relatorio.removidas > 0 && (
+                          <span className="text-[#E5A44C]"> · {pet.relatorio.removidas} removida(s) por falta de julgado aderente</span>
+                        )}
+                      </p>
+                      <ul className="mt-1 space-y-1">
+                        {(pet.relatorio.detalhe || []).map((d: any, i: number) => (
+                          <li key={i} className={d.usado ? "text-white/65" : "text-white/40"}>
+                            {d.usado ? "✓" : "—"} <b>{d.tema}</b>
+                            {d.usado ? (
+                              <span> · {(d.julgados || []).map((j: any) => `${j.tribunal} ${j.numero || ""}`.trim()).join("; ")}
+                                {d.do_tribunal_do_protocolo && <span className="text-[#1DB954]"> (tribunal do protocolo)</span>}
+                              </span>
+                            ) : <span> · {d.motivo}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {pet.markdown_final && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-[11px] text-white/45 hover:text-white/70">
+                        ver a peça com os precedentes
+                      </summary>
+                      <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap rounded bg-[#060D18] p-3 text-[11px] leading-relaxed text-white/75">
+                        {pet.markdown_final}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
             </section>
 
             {/* Honorários combinados — é daqui que sai a cláusula 4 do contrato */}

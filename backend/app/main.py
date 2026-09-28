@@ -863,6 +863,94 @@ def gravar_honorarios(caso_id: str, body: HonorariosEntrada):
             "documentos": caso.get("_refeitos") or {}}
 
 
+# ── Peticionamento: minuta com tags + injeção de precedentes ─────
+class PeticaoEntrada(BaseModel):
+    markdown: str | None = None
+    titulo: str | None = None
+    tribunal: str | None = None          # TJRO | TJSC — define a prioridade
+    instrucao: str | None = None         # usada quando a plataforma redige
+
+
+@app.post("/api/v1/casos/{caso_id}/peticoes")
+def criar_peticao(caso_id: str, body: PeticaoEntrada):
+    """Entra na esteira de peticionamento por dois caminhos: o advogado cola
+    a minuta pronta (com as tags) ou pede que a plataforma redija."""
+    from .agentes import redator_peticao
+    db = get_db()
+    if body.markdown and body.markdown.strip():
+        base, origem = body.markdown, "COLADA"
+    else:
+        try:
+            base = redator_peticao.redigir(caso_id, body.instrucao)
+            origem = "REDIGIDA"
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"Não foi possível redigir a minuta: {e}")
+
+    linha = db.table("peticoes").insert({
+        "caso_id": caso_id, "titulo": body.titulo or "Petição inicial",
+        "tribunal": (body.tribunal or "").upper() or None,
+        "markdown_base": base, "origem": origem,
+    }).execute().data[0]
+    registrar_evento(caso_id, "PETICAO_CRIADA",
+                     {"peticao_id": linha["id"], "origem": origem})
+    from .agentes import precedentes
+    return {"ok": True, "peticao": linha,
+            "tags": precedentes.varrer_tags(base)}
+
+
+@app.get("/api/v1/casos/{caso_id}/peticoes")
+def listar_peticoes(caso_id: str):
+    try:
+        return get_db().table("peticoes").select("*").eq("caso_id", caso_id) \
+            .order("criado_em", desc=True).execute().data
+    except Exception:
+        return []
+
+
+@app.post("/api/v1/peticoes/{peticao_id}/precedentes")
+def injetar_precedentes(peticao_id: str):
+    """Troca cada tag por julgado real do banco. Tag sem julgado aderente é
+    removida — a peça nunca sai com citação inventada."""
+    from .agentes import precedentes
+    try:
+        return precedentes.injetar(peticao_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível injetar os precedentes: {e}")
+
+
+@app.post("/api/v1/precedentes/sincronizar")
+def sincronizar_precedentes():
+    """Achata as ementas do banco de teses na tabela de busca por tema."""
+    from .agentes import precedentes
+    try:
+        return precedentes.sincronizar_do_banco_de_teses()
+    except Exception as e:
+        raise HTTPException(500, f"Falha ao sincronizar: {e}")
+
+
+@app.get("/api/v1/precedentes")
+def listar_precedentes(tribunal: str | None = None, grupo: str | None = None,
+                       tema: str | None = None, limite: int = 20):
+    from .integracoes import jurisprudencia_api
+    if tema:
+        return jurisprudencia_api.buscar(tema, tribunal, grupo, limite)
+    db = get_db()
+    q = db.table("precedentes").select(
+        "id,tribunal,tipo,numero,relator,data_julgamento,tema,grupo,fonte,url")
+    if tribunal:
+        q = q.eq("tribunal", tribunal.upper())
+    if grupo:
+        q = q.eq("grupo", grupo)
+    try:
+        return q.order("criado_em", desc=True).limit(limite).execute().data
+    except Exception:
+        return []
+
+
 class PrazoFatal(BaseModel):
     prazo_fatal: str | None = None
     prazo_descricao: str | None = None

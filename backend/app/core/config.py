@@ -65,6 +65,12 @@ class Settings(BaseModel):
     # Escavador — monitoramento de processos e intimações
     escavador_api_token: str = os.getenv("ESCAVADOR_API_TOKEN", "")
     escavador_base_url: str = os.getenv("ESCAVADOR_BASE_URL", "https://api.escavador.com")
+    # ── Pesquisa de jurisprudência (ementas para a petição) ──────
+    # O DataJud do CNJ não devolve ementa; para o agente de precedentes
+    # citar julgado real é preciso um provedor de pesquisa contratado.
+    # Vazio = usa só o banco interno do escritório (acórdãos em PDF).
+    jurisprudencia_provedor: str = os.getenv("JURISPRUDENCIA_PROVEDOR", "")
+    jusbrasil_api_token: str = os.getenv("JUSBRASIL_API_TOKEN", "")
     escavador_webhook_token: str = os.getenv("ESCAVADOR_WEBHOOK_TOKEN", "fc-legal-os")
 
     # Fila / RPA
