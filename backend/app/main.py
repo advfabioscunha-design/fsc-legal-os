@@ -3160,27 +3160,36 @@ def cobertura_tribunais():
 
     Serve para não descobrir num caso real que o canal estava fora.
     Roda no servidor porque o DataJud recusa chamada de navegador."""
+    from concurrent.futures import ThreadPoolExecutor
     from .core.tribunais import TRIBUNAIS
     from .integracoes import datajud
-    saida = []
-    for sigla, t in TRIBUNAIS.items():
+
+    def testar(item):
+        sigla, t = item
         alias = t.get("datajud")
         if not alias:
-            saida.append({"sigla": sigla, "nome": t["nome"], "datajud": None,
-                          "ok": False, "detalhe": t.get("observacao")})
-            continue
+            return {"sigla": sigla, "nome": t["nome"], "datajud": None,
+                    "ok": False, "detalhe": t.get("observacao")}
         try:
             r = httpx.post(datajud.BASE.format(alias=alias),
                            headers=datajud._headers(),
-                           json={"size": 1, "query": {"match_all": {}}}, timeout=30)
+                           json={"size": 1, "query": {"match_all": {}}}, timeout=12)
             ok = r.status_code < 300
             total = (((r.json().get("hits") or {}).get("total") or {}).get("value")
                      if ok else None)
-            saida.append({"sigla": sigla, "nome": t["nome"], "datajud": alias,
-                          "ok": ok, "http": r.status_code, "processos_no_indice": total})
+            return {"sigla": sigla, "nome": t["nome"], "datajud": alias,
+                    "ok": ok, "http": r.status_code, "processos_no_indice": total}
         except Exception as e:
-            saida.append({"sigla": sigla, "nome": t["nome"], "datajud": alias,
-                          "ok": False, "detalhe": str(e)[:150]})
+            return {"sigla": sigla, "nome": t["nome"], "datajud": alias,
+                    "ok": False, "detalhe": str(e)[:150]}
+
+    # Um diagnóstico que demora minutos não é consultado. Onze chamadas
+    # em sequência, com 30s de espera cada, chegavam a cinco minutos e a
+    # tela desistia antes da resposta: agora vão juntas, com 12s de
+    # paciência — tempo de sobra para um índice que costuma responder
+    # em menos de três.
+    with ThreadPoolExecutor(max_workers=11) as pool:
+        saida = list(pool.map(testar, TRIBUNAIS.items()))
     return {"tribunais": saida,
             "publicacoes": "DJEN/Comunica CNJ — nacional, cobre todos, "
                            "menos o SEEU"}

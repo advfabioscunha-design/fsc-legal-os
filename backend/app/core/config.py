@@ -94,18 +94,20 @@ class Settings(BaseModel):
     rpa_headless: bool = os.getenv("RPA_HEADLESS", "true").lower() == "true"
 
     # DataJud CNJ — Radar Jurimétrico (chave pública oficial; troca rara)
-    datajud_api_key: str = os.getenv(
-        "DATAJUD_API_KEY",
-        "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==",
+    # `or` e não o segundo argumento do getenv: a variável existe no
+    # .env do servidor, porém VAZIA, e o getenv devolve a string vazia
+    # em vez do padrão. O resultado era um cabeçalho "APIKey " sem
+    # chave, que o httpx recusa — e o radar semanal parou sem avisar.
+    datajud_api_key: str = os.getenv("DATAJUD_API_KEY") or (
+        "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw=="
     )
     # Os tribunais onde o escritório atua (ver core/tribunais.py).
     # O radar e a consulta por número usam esta lista.
     datajud_tribunais: list[str] = [
         a.strip()
-        for a in os.getenv(
-            "DATAJUD_TRIBUNAIS",
-            "tjro,tjsc,tjrs,tjpr,tjmt,tjba,tjsp,trt12,trt14,trf1,trf4",
-        ).split(",")
+        for a in (os.getenv("DATAJUD_TRIBUNAIS")
+                  or "tjro,tjsc,tjrs,tjpr,tjmt,tjba,tjsp,trt12,trt14,trf1,trf4"
+                  ).split(",")
         if a.strip()
     ]
     # Agendamento semanal do radar (scheduler embutido no container da API)
