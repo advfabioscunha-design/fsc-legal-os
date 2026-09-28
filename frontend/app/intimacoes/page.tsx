@@ -85,7 +85,7 @@ export default function Intimacoes() {
     const partes: string[] = [];
     try {
       try {
-        const comunicacoes = await porOab(OAB_PADRAO.numero, OAB_PADRAO.uf, 15);
+        const { itens: comunicacoes } = await porOab(OAB_PADRAO.numero, OAB_PADRAO.uf, 15);
         const rs = await fetch(`${API}/api/v1/controladoria/sincronizar`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ comunicacoes }),

@@ -35,11 +35,18 @@ export type Comunicacao = {
 
 export class FonteOcupada extends Error {}
 
-async function pedir(params: Record<string, string | number>, tentativas = 3): Promise<any> {
+/* "O sistema está muito ocupado. Tente novamente mais tarde." é resposta
+   do PRÓPRIO CNJ — vem no campo `message` do JSON dele, com HTTP 200, e
+   aparece até numa consulta de um único item. Medido: a mesma consulta
+   que falha volta a funcionar segundos depois. Então insistir com uma
+   pausa crescente resolve a maioria dos casos; desistir na primeira
+   negativa seria transformar soluço da fonte em erro nosso. */
+async function pedir(params: Record<string, string | number>, tentativas = 4): Promise<any> {
   const url = new URL(BASE);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   let ultimo = "";
   for (let i = 0; i < tentativas; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 900 * i));   // 0,9s, 1,8s, 2,7s
     try {
       const r = await fetch(url.toString());
       const d = await r.json();
@@ -117,23 +124,67 @@ function isoMenosDias(dias: number): string {
 }
 
 export async function porOab(
-  numero: string, uf: string, dias = 60, paginas = 10, porPagina = 100,
-): Promise<Comunicacao[]> {
+  numero: string, uf: string, dias = 60,
+  opcoes: {
+    porPagina?: number;
+    paginasMax?: number;
+    onProgresso?: (lidas: number, total: number) => void;
+  } = {},
+): Promise<{
+  itens: Comunicacao[];
+  falhas: { pagina: number; erro: string }[];
+  total: number;
+}> {
+  const porPagina = opcoes.porPagina ?? 100;
+  const paginasMax = opcoes.paginasMax ?? 60;   // 6.000 publicações
+
+  /* Cinco anos cabem numa consulta só — medido: a OAB 10.849/RO tem
+     1.161 publicações em 5 anos, e o CNJ devolve a contagem em menos de
+     três segundos. O que a fonte faz, de vez em quando, é responder
+     "sistema está muito ocupado" mesmo numa consulta mínima. Isso é
+     instabilidade dela, não tamanho de janela — por isso a estratégia
+     aqui é PAGINAR com poucas requisições e insistir em cada página,
+     em vez de fatiar o período em muitos pedaços (mais pedaços = mais
+     requisições = mais chances de topar com a fonte ocupada).
+
+     Uma página que não vem nem depois das tentativas entra em `falhas`
+     e a busca CONTINUA: melhor trazer 90% do acervo e dizer o que
+     faltou do que voltar de mãos vazias. */
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  const inicio = isoMenosDias(dias);
+  const base = {
+    numeroOab: numero.replace(/\D/g, ""),
+    ufOab: uf.toUpperCase(),
+    dataDisponibilizacaoInicio: inicio,
+    dataDisponibilizacaoFim: hoje,
+    itensPorPagina: porPagina,
+  };
+
+  const vistos = new Set<string>();
   const saida: Comunicacao[] = [];
-  for (let pagina = 1; pagina <= paginas; pagina++) {
-    const d = await pedir({
-      numeroOab: numero.replace(/\D/g, ""),
-      ufOab: uf.toUpperCase(),
-      dataDisponibilizacaoInicio: isoMenosDias(dias),
-      dataDisponibilizacaoFim: new Date().toISOString().slice(0, 10),
-      itensPorPagina: porPagina,
-      pagina,
-    });
-    const itens = d.items || [];
-    saida.push(...itens.map(normalizar));
+  const falhas: { pagina: number; erro: string }[] = [];
+  let total: number | null = null;
+
+  for (let pagina = 1; pagina <= paginasMax; pagina++) {
+    let dados: any;
+    try {
+      dados = await pedir({ ...base, pagina });
+    } catch (e: any) {
+      falhas.push({ pagina, erro: e?.message || "falhou" });
+      if (pagina === 1) throw e;          // nem a primeira veio: não há o que salvar
+      continue;
+    }
+    if (total === null) total = dados.count ?? null;
+    const itens = dados.items || [];
+    for (const i of itens) {
+      const c = normalizar(i);
+      if (!vistos.has(c.evento_id)) { vistos.add(c.evento_id); saida.push(c); }
+    }
+    opcoes.onProgresso?.(saida.length, total ?? saida.length);
     if (itens.length < porPagina) break;
   }
-  return saida;
+  return { itens: saida, falhas, total: total ?? saida.length };
 }
 
 export async function porProcesso(numero: string, porPagina = 100): Promise<Comunicacao[]> {

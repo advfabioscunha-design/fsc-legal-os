@@ -47,6 +47,27 @@ PRAZO_PADRAO: dict[str, int] = {
 SEM_PRAZO = ("pauta de julgamento", "certidão", "certidao", "ato ordinatório",
              "ato ordinatorio", "publicação de acórdão", "edital")
 
+# ── Processo vivo ou processo encerrado ─────────────────────────
+# O Diário não traz um campo "situação": quem diz que o processo
+# acabou é o texto do último ato. Estes são os finais de linha.
+_RE_ARQUIVADO = re.compile(
+    r"arquiv(?:e[\-\s]?se|em[\-\s]?se|ado[s]?\b|amento)|"
+    r"baixa\s+definitiva|baixados?\s+os\s+autos|"
+    r"remetam[\-\s]?se\s+os\s+autos\s+ao\s+arquivo|ao\s+arquivo\b|"
+    r"julgo\s+extint[ao]|extinta?\s+a\s+execu[çc][ãa]o|"
+    r"extin[çc][ãa]o\s+do\s+processo",
+    re.I)
+# ...e estes desmentem o encerramento, mesmo quando a palavra
+# "arquivamento" aparece no meio do texto (é comum numa sentença que
+# determina o arquivamento APÓS o trânsito, com recurso ainda cabível).
+_RE_VIVO = re.compile(
+    r"cumprimento\s+de\s+senten[çc]a|penhora|bloqueio|"
+    r"designad[ao]\s+(?:a\s+)?audi[êe]ncia|per[íi]cia\s+designada|"
+    r"intime[\-\s]?se\s+para|abra[\-\s]?se\s+vista|manifeste[\-\s]?se|"
+    r"alvar[áa]|precat[óo]rio|RPV|recurso\s+recebido|"
+    r"suspens[ãa]o\s+do\s+processo",
+    re.I)
+
 _RE_TRANSITO = re.compile(
     r"tr[âa]nsit(?:o|ou)\s+em\s+julgado|certid[ãa]o\s+de\s+tr[âa]nsito", re.I)
 _RE_CUMPRIMENTO = re.compile(
@@ -92,12 +113,65 @@ def _casos_por_numero(numeros: list[str]) -> dict[str, dict]:
     return achados
 
 
+MESES_DE_SILENCIO = 18
+# Arquivamento recém-publicado NÃO é processo morto: é o dia em que se
+# decide recorrer. Testado no acervo real — três processos com sentença
+# de extinção publicada há 3, 13 e 19 dias seriam descartados por uma
+# regra que só olhasse o texto, e com eles o prazo de apelação.
+DIAS_PARA_ACEITAR_ARQUIVAMENTO = 30
+
+
+def situacao(comunicacoes: list[dict]) -> tuple[bool, str | None]:
+    """O processo ainda anda? Devolve (arquivado, motivo).
+
+    Duas leituras, nesta ordem:
+
+    1. O que diz o ÚLTIMO ato. Arquivamento, baixa definitiva ou
+       extinção encerram — a menos que o mesmo texto traga sinal de
+       vida (penhora, audiência designada, alvará, recurso recebido),
+       o que acontece bastante: a sentença manda arquivar *depois* do
+       trânsito, e o processo segue vivo até lá.
+
+    2. O SILÊNCIO. Sem nenhuma publicação há mais de 18 meses, o
+       processo está parado o bastante para não entrar na esteira de
+       trabalho sem alguém olhar.
+
+    Nada disso é certidão de situação — o Diário não tem esse campo.
+    Por isso a tela mostra o motivo e deixa o advogado marcar assim
+    mesmo, em vez de sumir com o processo.
+    """
+    if not comunicacoes:
+        return True, "sem publicações"
+    ultima = comunicacoes[-1]
+    texto = ultima.get("texto") or ""
+
+    try:
+        parada = date.fromisoformat((ultima.get("data") or "")[:10])
+    except ValueError:
+        return False, None
+    dias = (date.today() - parada).days
+
+    if _RE_ARQUIVADO.search(texto) and not _RE_VIVO.search(texto):
+        if dias > DIAS_PARA_ACEITAR_ARQUIVAMENTO:
+            return True, "o último ato determina arquivamento ou extinção"
+        # arquivamento fresco = prazo de recurso correndo: é trabalho,
+        # não acervo morto
+        return False, None
+
+    if dias / 30.4 >= MESES_DE_SILENCIO:
+        return True, f"sem publicação há {int(dias / 30.4)} meses"
+    return False, None
+
+
 def _resumir(numero: str, comunicacoes: list[dict], existente: dict | None) -> dict:
     ultima = comunicacoes[-1]
     cliente = next((c.get("cliente_provavel") for c in reversed(comunicacoes)
                     if c.get("cliente_provavel")), None)
     texto_todo = "\n".join(c.get("texto") or "" for c in comunicacoes)
+    arquivado, motivo = situacao(comunicacoes)
     return {
+        "arquivado": arquivado,
+        "motivo_arquivado": motivo,
         "numero_processo": numero,
         "tribunal": ultima.get("tribunal"),
         "orgao": ultima.get("orgao"),
@@ -135,11 +209,14 @@ def previa_por_oab(numero: str | None = None, uf: str | None = None,
     existentes = _casos_por_numero(list(grupos))
     processos = [_resumir(n, c, existentes.get(n)) for n, c in grupos.items()]
     processos.sort(key=lambda p: p.get("ultima_data") or "", reverse=True)
+    ativos = [p for p in processos if not p["arquivado"]]
     return {
         "oab": f"OAB/{uf.upper()} {numero}", "dias": dias,
         "publicacoes": len(comunicacoes),
         "processos": len(processos),
-        "novos": sum(1 for p in processos if not p["ja_na_plataforma"]),
+        "ativos": len(ativos),
+        "arquivados": len(processos) - len(ativos),
+        "novos": sum(1 for p in ativos if not p["ja_na_plataforma"]),
         "itens": processos,
     }
 
@@ -162,10 +239,13 @@ def previa_de_comunicacoes(itens: list[dict]) -> dict:
     existentes = _casos_por_numero(list(grupos))
     processos = [_resumir(n, c, existentes.get(n)) for n, c in grupos.items()]
     processos.sort(key=lambda p: p.get("ultima_data") or "", reverse=True)
+    ativos = [p for p in processos if not p["arquivado"]]
     return {
         "publicacoes": len(itens or []),
         "processos": len(processos),
-        "novos": sum(1 for p in processos if not p["ja_na_plataforma"]),
+        "ativos": len(ativos),
+        "arquivados": len(processos) - len(ativos),
+        "novos": sum(1 for p in ativos if not p["ja_na_plataforma"]),
         "itens": processos,
     }
 

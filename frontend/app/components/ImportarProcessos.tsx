@@ -27,15 +27,27 @@ type Item = {
   ultimo_ato?: string; ultima_data?: string; publicacoes?: number;
   cliente_provavel?: string | null; cliente_cadastrado?: string | null;
   transitou?: boolean; fase_sugerida?: string;
+  arquivado?: boolean; motivo_arquivado?: string | null;
   ja_na_plataforma?: boolean; caso_id?: string | null;
   comunicacoes?: any[];
 };
+
+/* Períodos. Cinco anos cabem numa consulta só: medido na OAB do
+   escritório, 1.161 publicações em 5 anos, resposta em segundos. */
+const PERIODOS = [
+  { d: 30, l: "30 dias" }, { d: 90, l: "3 meses" }, { d: 180, l: "6 meses" },
+  { d: 365, l: "1 ano" }, { d: 730, l: "2 anos" }, { d: 1095, l: "3 anos" },
+  { d: 1825, l: "5 anos" },
+];
 
 export default function ImportarProcessos({
   fase, onFechar, onPronto,
 }: { fase: "JUDICIAL" | "RECEBIMENTO"; onFechar: () => void; onPronto: () => void }) {
   const [modo, setModo] = useState<"oab" | "numero">("oab");
-  const [dias, setDias] = useState(60);
+  const [dias, setDias] = useState(1825);
+  const [mostrarArquivados, setMostrarArquivados] = useState(false);
+  const [progresso, setProgresso] = useState<{lidas:number;total:number}|null>(null);
+  const [resumo, setResumo] = useState<any>(null);
   const [numero, setNumero] = useState("");
   const [oab, setOab] = useState("");
   const [uf, setUf] = useState("");
@@ -49,12 +61,23 @@ export default function ImportarProcessos({
 
   async function buscar() {
     setBuscando(true); setErro(""); setItens([]); setResultado(null);
+    setProgresso(null); setResumo(null);
+    let aviso = "";
     try {
       /* A consulta ao CNJ sai deste navegador (ver lib/cnj.ts): o
          servidor do escritório fica fora do Brasil e o CNJ recusa. */
-      const comunicacoes = modo === "oab"
-        ? await porOab(oab || OAB_PADRAO.numero, uf || OAB_PADRAO.uf, dias)
-        : await porProcesso(numero);
+      let comunicacoes: any[];
+      if (modo === "oab") {
+        const r = await porOab(oab || OAB_PADRAO.numero, uf || OAB_PADRAO.uf, dias,
+          { onProgresso: (lidas, total) => setProgresso({ lidas, total }) });
+        comunicacoes = r.itens;
+        if (r.falhas.length) {
+          aviso = `O Diário não devolveu ${r.falhas.length} página(s) desta consulta — ` +
+                  `o que veio está aqui, mas pode faltar processo. Vale repetir a busca.`;
+        }
+      } else {
+        comunicacoes = await porProcesso(numero);
+      }
       if (!comunicacoes.length) {
         setErro(modo === "oab"
           ? "Nada publicado para esta OAB no período escolhido."
@@ -69,16 +92,21 @@ export default function ImportarProcessos({
       if (!r.ok) { setErro(d.detail || `Erro ${r.status}`); return; }
       const lista: Item[] = d.itens || [];
       setItens(lista);
-      // por padrão marca só o que ainda não está na plataforma
+      setResumo(d);
+      /* Marcado por padrão: só o que está ATIVO e ainda não está aqui.
+         Processo arquivado não entra na esteira sem alguém dizer que
+         deve entrar — encher a tela de trabalho com processo morto é o
+         jeito mais rápido de fazer a equipe parar de olhar a tela. */
       const m: Record<string, boolean> = {};
-      lista.forEach((i) => { m[i.numero_processo] = !i.ja_na_plataforma; });
+      lista.forEach((i) => { m[i.numero_processo] = !i.ja_na_plataforma && !i.arquivado; });
       setMarcados(m);
-      if (d.aviso) setErro(d.aviso);
+      if (d.aviso) aviso = d.aviso;
+      if (aviso) setErro(aviso);
     } catch (e: any) {
       setErro(e instanceof FonteOcupada
         ? `O Diário do CNJ não respondeu agora (${e.message}). É instabilidade comum da fonte — tente de novo em alguns minutos.`
         : "Não foi possível concluir a consulta.");
-    } finally { setBuscando(false); }
+    } finally { setBuscando(false); setProgresso(null); }
   }
 
   async function importar() {
@@ -107,6 +135,7 @@ export default function ImportarProcessos({
     } finally { setGravando(false); }
   }
 
+  const visiveis = mostrarArquivados ? itens : itens.filter((i) => !i.arquivado);
   const marcadosN = itens.filter((i) => marcados[i.numero_processo]).length;
 
   return (
@@ -150,10 +179,10 @@ export default function ImportarProcessos({
                   className="mt-1 block w-16 rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" />
               </label>
               <label className="text-xs text-white/50">
-                Últimos dias
+                Período
                 <select value={dias} onChange={(e) => setDias(Number(e.target.value))}
                   className="mt-1 block rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]">
-                  {[7, 30, 60, 90, 180, 365].map((d) => <option key={d} value={d}>{d} dias</option>)}
+                  {PERIODOS.map((p) => <option key={p.d} value={p.d}>{p.l}</option>)}
                 </select>
               </label>
             </>
@@ -169,6 +198,11 @@ export default function ImportarProcessos({
             className="rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#3a8ae0] disabled:opacity-50">
             {buscando ? "Consultando o CNJ…" : "Buscar"}
           </button>
+          {progresso && (
+            <span className="text-xs text-white/55">
+              {progresso.lidas} de {progresso.total} publicações lidas…
+            </span>
+          )}
         </div>
 
         {erro && (
@@ -191,16 +225,26 @@ export default function ImportarProcessos({
         {/* O que foi encontrado */}
         {itens.length > 0 && (
           <>
-            <div className="mt-4 flex items-center justify-between text-xs text-white/55">
-              <span>{itens.length} processo(s) encontrado(s) · {marcadosN} marcado(s)</span>
-              <div className="flex gap-2">
-                <button onClick={() => setMarcados(Object.fromEntries(itens.map((i) => [i.numero_processo, true])))}
-                  className="hover:text-white">marcar todos</button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-white/55">
+              <span>
+                {itens.length} processo(s) — <b className="text-white/80">{resumo?.ativos ?? itens.length} ativo(s)</b>
+                {resumo?.arquivados ? `, ${resumo.arquivados} arquivado(s)` : ""} · {marcadosN} marcado(s)
+              </span>
+              <div className="flex items-center gap-3">
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" checked={mostrarArquivados}
+                    onChange={(e) => setMostrarArquivados(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[#C9A84C]" />
+                  mostrar arquivados
+                </label>
+                <button onClick={() => setMarcados(Object.fromEntries(
+                  visiveis.filter((i) => !i.arquivado).map((i) => [i.numero_processo, true])))}
+                  className="hover:text-white">marcar os ativos</button>
                 <button onClick={() => setMarcados({})} className="hover:text-white">limpar</button>
               </div>
             </div>
             <div className="mt-2 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
-              {itens.map((i) => (
+              {visiveis.map((i) => (
                 <label key={i.numero_processo}
                   className={`flex cursor-pointer gap-3 rounded-lg border p-3 transition ${
                     marcados[i.numero_processo] ? "border-[#C9A84C]/50 bg-[#C9A84C]/5"
@@ -222,9 +266,15 @@ export default function ImportarProcessos({
                           trânsito em julgado
                         </span>
                       )}
-                      {i.fase_sugerida === "RECEBIMENTO" && (
+                      {i.fase_sugerida === "RECEBIMENTO" && !i.arquivado && (
                         <span className="rounded bg-[#1DB954]/20 px-1.5 py-0.5 text-[10px] text-[#1DB954]">
                           entra em execução
+                        </span>
+                      )}
+                      {i.arquivado && (
+                        <span className="rounded bg-[#5A6B7C]/30 px-1.5 py-0.5 text-[10px] text-white/60"
+                          title={i.motivo_arquivado || ""}>
+                          arquivado — {i.motivo_arquivado}
                         </span>
                       )}
                     </div>
