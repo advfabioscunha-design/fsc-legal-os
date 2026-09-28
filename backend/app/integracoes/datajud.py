@@ -163,6 +163,76 @@ def _parse_data(valor: str | None) -> datetime | None:
     return None
 
 
+def por_numero(numero: str, alias: str | None = None) -> dict | None:
+    """Metadados e movimentos de UM processo, pelo número.
+
+    É o segundo canal do acompanhamento: o DJEN diz o que foi publicado,
+    o DataJud diz como o processo está — classe, órgão, assuntos e a
+    lista de movimentos com data. Sem ele, a plataforma sabe do ato mas
+    não sabe se o processo ainda anda.
+
+    Quando o alias não vem, é deduzido do próprio número (segmento da
+    Justiça + código do tribunal, Resolução CNJ 65/2008).
+    """
+    import re
+    from ..core.tribunais import TRIBUNAIS, do_numero
+
+    digitos = re.sub(r"\D", "", numero or "")
+    if len(digitos) != 20:
+        return None
+    if not alias:
+        sigla = do_numero(digitos)
+        alias = (TRIBUNAIS.get(sigla or "", {}) or {}).get("datajud")
+    if not alias:
+        return None
+
+    corpo = {"size": 1, "query": {"match": {"numeroProcesso": digitos}}}
+    try:
+        r = httpx.post(BASE.format(alias=alias), headers=_headers(),
+                       json=corpo, timeout=45)
+        r.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    hits = (r.json().get("hits") or {}).get("hits") or []
+    if not hits:
+        return None
+    src = hits[0].get("_source") or {}
+    movs = sorted(
+        ({"codigo": m.get("codigo"), "nome": m.get("nome"),
+          "data": (m.get("dataHora") or "")[:10]} for m in (src.get("movimentos") or [])),
+        key=lambda m: m["data"] or "",
+    )
+    return {
+        "numero": src.get("numeroProcesso"),
+        "tribunal": alias.upper(),
+        "classe": (src.get("classe") or {}).get("nome"),
+        "orgao": (src.get("orgaoJulgador") or {}).get("nome"),
+        "grau": src.get("grau"),
+        "ajuizamento": (src.get("dataAjuizamento") or "")[:10],
+        "assuntos": [a.get("nome") for a in (src.get("assuntos") or []) if a.get("nome")],
+        "movimentos": movs,
+        "ultimo_movimento": movs[-1] if movs else None,
+    }
+
+
+# Códigos da Tabela Processual Unificada do CNJ que encerram o processo.
+# Ler o código é melhor que caçar palavra no texto: "arquivamento
+# definitivo" é o código 22, em qualquer tribunal e qualquer sistema.
+CODIGOS_ARQUIVAMENTO = {22, 246, 848, 12025}
+
+
+def arquivado_no_datajud(numero: str) -> tuple[bool | None, str | None]:
+    """(arquivado, motivo). None = o DataJud não sabe — não confunda
+    ausência de resposta com processo ativo."""
+    dados = por_numero(numero)
+    if not dados or not dados.get("ultimo_movimento"):
+        return None, None
+    ult = dados["ultimo_movimento"]
+    if ult.get("codigo") in CODIGOS_ARQUIVAMENTO:
+        return True, f"último movimento: {ult.get('nome')} ({ult.get('data')})"
+    return False, None
+
+
 def varrer_grupo(grupo: str, dias: int = 7) -> list[dict]:
     """Roda todos os assuntos do grupo em todos os tribunais configurados,
     deduplicando por número de processo."""

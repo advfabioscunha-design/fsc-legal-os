@@ -3142,6 +3142,61 @@ def previa_numero(numero: str):
 
 class ComunicacoesLidas(BaseModel):
     comunicacoes: list[dict]
+    confirmar_no_datajud: bool = False
+
+
+@app.get("/api/v1/tribunais")
+def listar_tribunais():
+    """Os tribunais onde o escritório atua e por qual canal se chega a
+    cada um. e-SAJ, eproc, PJe e Projudi são sistemas, não fontes: a
+    publicação de todos sai no mesmo Diário Nacional."""
+    from .core.tribunais import resumo
+    return resumo()
+
+
+@app.get("/api/v1/tribunais/cobertura")
+def cobertura_tribunais():
+    """Testa, um a um, se o DataJud responde por aquele tribunal.
+
+    Serve para não descobrir num caso real que o canal estava fora.
+    Roda no servidor porque o DataJud recusa chamada de navegador."""
+    from .core.tribunais import TRIBUNAIS
+    from .integracoes import datajud
+    saida = []
+    for sigla, t in TRIBUNAIS.items():
+        alias = t.get("datajud")
+        if not alias:
+            saida.append({"sigla": sigla, "nome": t["nome"], "datajud": None,
+                          "ok": False, "detalhe": t.get("observacao")})
+            continue
+        try:
+            r = httpx.post(datajud.BASE.format(alias=alias),
+                           headers=datajud._headers(),
+                           json={"size": 1, "query": {"match_all": {}}}, timeout=30)
+            ok = r.status_code < 300
+            total = (((r.json().get("hits") or {}).get("total") or {}).get("value")
+                     if ok else None)
+            saida.append({"sigla": sigla, "nome": t["nome"], "datajud": alias,
+                          "ok": ok, "http": r.status_code, "processos_no_indice": total})
+        except Exception as e:
+            saida.append({"sigla": sigla, "nome": t["nome"], "datajud": alias,
+                          "ok": False, "detalhe": str(e)[:150]})
+    return {"tribunais": saida,
+            "publicacoes": "DJEN/Comunica CNJ — nacional, cobre todos, "
+                           "menos o SEEU"}
+
+
+@app.get("/api/v1/processos/datajud")
+def processo_no_datajud(numero: str):
+    """Metadados e movimentos de um processo — o canal que diz se ele
+    ainda anda."""
+    from .integracoes import datajud
+    d = datajud.por_numero(numero)
+    if not d:
+        raise HTTPException(404, "Processo não encontrado no DataJud para este "
+                                 "tribunal. Pode ser segredo de justiça, número "
+                                 "incorreto ou tribunal fora da base.")
+    return d
 
 
 @app.get("/api/v1/processos/diagnostico-cnj")
@@ -3178,9 +3233,14 @@ def diagnostico_cnj():
 @app.post("/api/v1/processos/previa-do-navegador")
 def previa_do_navegador(body: ComunicacoesLidas):
     """O navegador do escritório consulta o CNJ (que recusa o nosso
-    servidor, por estar fora do Brasil) e manda o resultado para cá."""
+    servidor, por estar fora do Brasil) e manda o resultado para cá.
+
+    Com `confirmar_no_datajud`, cada processo que o texto marcou como
+    arquivado é conferido no DataJud pelo código do movimento — mais
+    lento, uma chamada por processo, e por isso não é o padrão."""
     from .agentes import importador
-    return importador.previa_de_comunicacoes(body.comunicacoes)
+    return importador.previa_de_comunicacoes(body.comunicacoes,
+                                             body.confirmar_no_datajud)
 
 
 @app.post("/api/v1/controladoria/sincronizar")

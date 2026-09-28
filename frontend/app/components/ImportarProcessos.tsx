@@ -46,6 +46,8 @@ export default function ImportarProcessos({
   const [modo, setModo] = useState<"oab" | "numero">("oab");
   const [dias, setDias] = useState(1825);
   const [mostrarArquivados, setMostrarArquivados] = useState(false);
+  const [confirmarDatajud, setConfirmarDatajud] = useState(false);
+  const [tribunal, setTribunal] = useState("");
   const [progresso, setProgresso] = useState<{lidas:number;total:number}|null>(null);
   const [resumo, setResumo] = useState<any>(null);
   const [numero, setNumero] = useState("");
@@ -86,7 +88,7 @@ export default function ImportarProcessos({
       }
       const r = await fetch(`${API}/api/v1/processos/previa-do-navegador`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comunicacoes }),
+        body: JSON.stringify({ comunicacoes, confirmar_no_datajud: confirmarDatajud }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErro(d.detail || `Erro ${r.status}`); return; }
@@ -135,7 +137,13 @@ export default function ImportarProcessos({
     } finally { setGravando(false); }
   }
 
-  const visiveis = mostrarArquivados ? itens : itens.filter((i) => !i.arquivado);
+  /* Filtro por tribunal: o escritório atua em onze, de e-SAJ a eproc,
+     e a lista de 5 anos vem misturada. A lista de siglas sai do próprio
+     resultado — nada de combo fixo que envelhece. */
+  const tribunais = Array.from(new Set(itens.map((i) => i.tribunal).filter(Boolean))).sort();
+  const visiveis = itens
+    .filter((i) => mostrarArquivados || !i.arquivado)
+    .filter((i) => !tribunal || i.tribunal === tribunal);
   const marcadosN = itens.filter((i) => marcados[i.numero_processo]).length;
 
   return (
@@ -203,6 +211,13 @@ export default function ImportarProcessos({
               {progresso.lidas} de {progresso.total} publicações lidas…
             </span>
           )}
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-white/55"
+            title="Confere no DataJud, pelo código do movimento, cada processo que o texto marcou como arquivado. Uma consulta por processo — mais devagar, e mais seguro.">
+            <input type="checkbox" checked={confirmarDatajud}
+              onChange={(e) => setConfirmarDatajud(e.target.checked)}
+              className="h-3.5 w-3.5 accent-[#C9A84C]" />
+            conferir arquivados no DataJud
+          </label>
         </div>
 
         {erro && (
@@ -231,6 +246,11 @@ export default function ImportarProcessos({
                 {resumo?.arquivados ? `, ${resumo.arquivados} arquivado(s)` : ""} · {marcadosN} marcado(s)
               </span>
               <div className="flex items-center gap-3">
+                <select value={tribunal} onChange={(e) => setTribunal(e.target.value)}
+                  className="rounded border border-white/15 bg-[#0A1628] px-2 py-1 text-xs outline-none focus:border-[#C9A84C]">
+                  <option value="">todos os tribunais</option>
+                  {tribunais.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
                 <label className="flex cursor-pointer items-center gap-1.5">
                   <input type="checkbox" checked={mostrarArquivados}
                     onChange={(e) => setMostrarArquivados(e.target.checked)}

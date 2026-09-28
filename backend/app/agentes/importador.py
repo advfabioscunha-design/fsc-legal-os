@@ -163,12 +163,55 @@ def situacao(comunicacoes: list[dict]) -> tuple[bool, str | None]:
     return False, None
 
 
-def _resumir(numero: str, comunicacoes: list[dict], existente: dict | None) -> dict:
+def situacao_confirmada(numero: str, comunicacoes: list[dict]) -> tuple[bool, str | None]:
+    """A leitura do texto, confirmada pelo DataJud quando ele responde.
+
+    O DataJud traz o código do movimento pela Tabela Processual
+    Unificada: "arquivamento definitivo" é o código 22 em qualquer
+    tribunal e qualquer sistema. Isso é melhor que caçar palavra em
+    texto de sentença, que varia por juízo e por redator.
+
+    Ordem de autoridade: se o DataJud responde, ele decide; se não
+    responde (segredo de justiça, tribunal fora da base, fonte fora do
+    ar), vale a leitura do texto. A regra dos 30 dias continua valendo
+    por cima de tudo — arquivamento recém-publicado é prazo correndo.
+    """
+    arquivado, motivo = situacao(comunicacoes)
+    ultima = comunicacoes[-1] if comunicacoes else {}
+    try:
+        dias = (date.today() - date.fromisoformat((ultima.get("data") or "")[:10])).days
+    except ValueError:
+        dias = 999
+    if dias <= DIAS_PARA_ACEITAR_ARQUIVAMENTO:
+        return False, None
+
+    try:
+        from ..integracoes import datajud
+        dj, motivo_dj = datajud.arquivado_no_datajud(numero)
+    except Exception:
+        dj, motivo_dj = None, None
+    if dj is True:
+        return True, motivo_dj or "arquivado (DataJud)"
+    if dj is False and motivo and motivo.startswith("o último ato"):
+        # o texto dizia arquivar, o tribunal diz que o processo anda
+        return False, None
+    return arquivado, motivo
+
+
+def _resumir(numero: str, comunicacoes: list[dict], existente: dict | None,
+             confirmar: bool = False) -> dict:
     ultima = comunicacoes[-1]
     cliente = next((c.get("cliente_provavel") for c in reversed(comunicacoes)
                     if c.get("cliente_provavel")), None)
     texto_todo = "\n".join(c.get("texto") or "" for c in comunicacoes)
     arquivado, motivo = situacao(comunicacoes)
+    # A conferência no DataJud é uma chamada de rede por processo: num
+    # acervo de 5 anos seriam centenas, e a tela ficaria minutos parada.
+    # Por isso só roda quando pedida, e só sobre o que o texto marcou
+    # como arquivado — errar para "arquivado" custa um processo fora da
+    # esteira; errar para "ativo" custa uma linha a mais para conferir.
+    if confirmar and arquivado:
+        arquivado, motivo = situacao_confirmada(numero, comunicacoes)
     return {
         "arquivado": arquivado,
         "motivo_arquivado": motivo,
@@ -221,7 +264,7 @@ def previa_por_oab(numero: str | None = None, uf: str | None = None,
     }
 
 
-def previa_de_comunicacoes(itens: list[dict]) -> dict:
+def previa_de_comunicacoes(itens: list[dict], confirmar: bool = False) -> dict:
     """Mesma prévia, mas a partir de publicações que o NAVEGADOR leu.
 
     O Comunica CNJ recusa requisição vinda de fora do Brasil, e o nosso
@@ -237,7 +280,8 @@ def previa_de_comunicacoes(itens: list[dict]) -> dict:
     for lista in grupos.values():
         lista.sort(key=lambda i: i.get("data") or "")
     existentes = _casos_por_numero(list(grupos))
-    processos = [_resumir(n, c, existentes.get(n)) for n, c in grupos.items()]
+    processos = [_resumir(n, c, existentes.get(n), confirmar)
+                 for n, c in grupos.items()]
     processos.sort(key=lambda p: p.get("ultima_data") or "", reverse=True)
     ativos = [p for p in processos if not p["arquivado"]]
     return {

@@ -98,9 +98,14 @@ class Settings(BaseModel):
         "DATAJUD_API_KEY",
         "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==",
     )
+    # Os tribunais onde o escritório atua (ver core/tribunais.py).
+    # O radar e a consulta por número usam esta lista.
     datajud_tribunais: list[str] = [
         a.strip()
-        for a in os.getenv("DATAJUD_TRIBUNAIS", "tjro,trt14").split(",")
+        for a in os.getenv(
+            "DATAJUD_TRIBUNAIS",
+            "tjro,tjsc,tjrs,tjpr,tjmt,tjba,tjsp,trt12,trt14,trf1,trf4",
+        ).split(",")
         if a.strip()
     ]
     # Agendamento semanal do radar (scheduler embutido no container da API)
