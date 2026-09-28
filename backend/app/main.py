@@ -698,9 +698,20 @@ def enviar_lote_ao_cliente(caso_id: str, body: LoteEnvio):
 
     s = get_settings()
     anexos, falhas, titulos = [], [], []
+    usados: dict[str, int] = {}
     for d in docs:
         try:
-            anexos.append(redator.preparar_anexo(d))
+            nome, conteudo, mime = redator.preparar_anexo(d)
+            # dois documentos com o mesmo nome se atropelam na pasta de
+            # downloads do cliente — numeramos o repetido
+            chave = nome.lower()
+            if chave in usados:
+                usados[chave] += 1
+                raiz, _, ext = nome.rpartition(".")
+                nome = f"{raiz} ({usados[chave]}).{ext}"
+            else:
+                usados[chave] = 1
+            anexos.append((nome, conteudo, mime))
             titulos.append(d["titulo"])
         except Exception as e:
             falhas.append(f"{d['titulo']}: {e}")
