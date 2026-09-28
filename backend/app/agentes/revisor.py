@@ -240,7 +240,10 @@ def revisar(documento_id: str) -> dict:
     leitura = ler_com_a_conversa(doc, paragrafos)
 
     fora = [c for c in conferencia if not c["ok"]]
-    graves = [d for d in (leitura.get("divergencias") or [])
+    # risco grave pesa tanto quanto divergência grave: um contrato que expõe
+    # o escritório não deve receber sinal verde só porque bate com a conversa
+    graves = [d for d in ((leitura.get("divergencias") or [])
+                          + (leitura.get("riscos") or []))
               if d.get("gravidade") == "ALTA"]
     pode_enviar = not fora and not graves
 

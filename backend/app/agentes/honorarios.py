@@ -35,8 +35,9 @@ CAMPOS = ("hon_percentual", "hon_salarios_minimos", "hon_valor_fixo",
 UNIDADES = ("zero", "um", "dois", "três", "quatro", "cinco", "seis", "sete",
             "oito", "nove", "dez", "onze", "doze", "treze", "catorze", "quinze",
             "dezesseis", "dezessete", "dezoito", "dezenove", "vinte")
-DEZENAS = {30: "trinta", 40: "quarenta", 50: "cinquenta", 60: "sessenta",
-           70: "setenta", 80: "oitenta", 90: "noventa", 100: "cem"}
+DEZENAS = {20: "vinte", 30: "trinta", 40: "quarenta", 50: "cinquenta",
+           60: "sessenta", 70: "setenta", 80: "oitenta", 90: "noventa",
+           100: "cem"}
 
 
 def por_extenso(n: float) -> str:
