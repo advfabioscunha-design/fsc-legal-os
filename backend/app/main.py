@@ -875,6 +875,7 @@ class PeticaoEntrada(BaseModel):
 def criar_peticao(caso_id: str, body: PeticaoEntrada):
     """Entra na esteira de peticionamento por dois caminhos: o advogado cola
     a minuta pronta (com as tags) ou pede que a plataforma redija."""
+    from .core.db import registrar_evento
     from .agentes import redator_peticao
     db = get_db()
     if body.markdown and body.markdown.strip():
@@ -963,6 +964,7 @@ def gravar_prazo(caso_id: str, body: PrazoFatal):
     É o que autoriza a cobrança do dia 7 a falar em risco ao direito. Sem
     prazo cadastrado, a cobrança usa urgência operacional — não afirma ao
     cliente algo que não está acontecendo."""
+    from .core.db import registrar_evento
     try:
         get_db().table("casos").update({
             "prazo_fatal": body.prazo_fatal or None,
