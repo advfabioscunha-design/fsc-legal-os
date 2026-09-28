@@ -165,6 +165,14 @@ def mover_fase(caso_id: str, destino: str, motivo: str = "") -> dict:
     if destino in ("JUDICIAL", "RECEBIMENTO") and not caso.get("numero_processo"):
         raise ValueError("Informe o número do processo antes de mover a fase — "
                          "sem ele não há como acompanhar as publicações.")
+    # A máquina de estados continua mandando: mover à mão não é motivo
+    # para um caso pular da proposta direto para o recebimento.
+    from .orquestrador import TRANSICOES
+    atual = caso.get("estado")
+    if destino not in TRANSICOES.get(atual, []):
+        raise ValueError(f"Não dá para ir de {atual} para {destino}. "
+                         f"Deste ponto o caso só pode seguir para: "
+                         f"{', '.join(TRANSICOES.get(atual, [])) or 'nenhum estado'}.")
     campos = {"estado": destino, "atualizado_em": _agora()}
     campos["judicial_em" if destino == "JUDICIAL" else "recebimento_em"] = _agora()
     db.table("casos").update(campos).eq("id", caso_id).execute()

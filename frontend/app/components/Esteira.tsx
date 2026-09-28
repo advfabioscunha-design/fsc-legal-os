@@ -48,7 +48,9 @@ const COLUNAS_PRODUCAO = [
   { id: "PETICAO",        label: "Peticionamento",     cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/10" },
   { id: "REVISAO",        label: "Revisão",            cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/10" },
   { id: "PROTOCOLO_RPA",  label: "Protocolo",          cor: "border-[#1DB954]", hdr: "bg-[#1DB954]/10" },
-  { id: "PROTOCOLADO",    label: "Protocolado",        cor: "border-[#1DB954]", hdr: "bg-[#1DB954]/10" },
+  // Protocolado não fica aqui: protocolar é o fim da produção e o
+  // começo do judicial. O card aparece na primeira coluna daquela tela
+  // — em duas esteiras ao mesmo tempo, ninguém sabe de quem é a vez.
 ];
 
 const FASES_FORM = [

@@ -23,9 +23,21 @@ TRANSICOES = {
     "REVISAO":         ["APROVADO", "PETICAO", "ESCALADO_HUMANO"],   # advogado pode devolver p/ reescrita
     "APROVADO":        ["PROTOCOLO_RPA", "ESCALADO_HUMANO"],
     "PROTOCOLO_RPA":   ["PROTOCOLADO", "ESCALADO_HUMANO"],
-    "PROTOCOLADO":     ["CONCLUIDO", "ESCALADO_HUMANO"],
+    # Do protocolo em diante o caso sai da produção e entra nas fases
+    # processuais, cada uma com a sua tela:
+    #   PROTOCOLADO → JUDICIAL → TRANSITO_JULGADO → RECEBIMENTO
+    # Quem empurra é o fato, não a vontade: o número do processo leva
+    # para o judicial, a certidão de trânsito leva para o recebimento
+    # (ver agentes/controladoria.avancar_fases). O caminho de volta
+    # RECEBIMENTO → JUDICIAL existe porque acontece: execução que vira
+    # nova discussão, embargos, recurso admitido depois do trânsito.
+    "PROTOCOLADO":     ["JUDICIAL", "CONCLUIDO", "ESCALADO_HUMANO"],
+    "JUDICIAL":        ["TRANSITO_JULGADO", "RECEBIMENTO", "CONCLUIDO", "ESCALADO_HUMANO"],
+    "TRANSITO_JULGADO": ["RECEBIMENTO", "JUDICIAL", "CONCLUIDO", "ESCALADO_HUMANO"],
+    "RECEBIMENTO":     ["CONCLUIDO", "JUDICIAL", "ESCALADO_HUMANO"],
     "ESCALADO_HUMANO": ["QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO",
-                        "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "AGENDADO", "CANCELADO"],
+                        "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "AGENDADO",
+                        "JUDICIAL", "RECEBIMENTO", "CANCELADO"],
     "AGENDADO":        ["QUALIFICACAO", "COLETA_DOCS", "CANCELADO"],
 }
 
