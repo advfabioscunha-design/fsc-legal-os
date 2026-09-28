@@ -699,28 +699,21 @@ def enviar_lote_ao_cliente(caso_id: str, body: LoteEnvio):
     s = get_settings()
     anexos, falhas, titulos = [], [], []
     for d in docs:
-        caminho = d.get("pdf_path")
-        if not caminho:
-            try:
-                caminho = redator.gerar_pdf_do_documento(d["id"])["pdf_path"]
-            except Exception as e:
-                falhas.append(f"{d['titulo']}: {e}")
-                caminho = d["storage_path"]
         try:
-            conteudo = db.storage.from_(s.bucket_documentos).download(caminho)
+            anexos.append(redator.preparar_anexo(d))
+            titulos.append(d["titulo"])
         except Exception as e:
             falhas.append(f"{d['titulo']}: {e}")
-            continue
-        ext = ".pdf" if caminho.lower().endswith(".pdf") else _sufixo(caminho)
-        import re as _re2
-        nome = _re2.sub(r'[\\/:*?"<>|]', "_", d["titulo"]) + ext
-        mime = "application/pdf" if ext == ".pdf" else "application/octet-stream"
-        anexos.append((nome, conteudo, mime))
-        titulos.append(d["titulo"])
 
     if not anexos:
         raise HTTPException(500, "Nenhum documento pôde ser preparado: "
                                  + "; ".join(falhas))
+    # não deixamos sair um envio incompleto sem o escritório saber
+    if falhas:
+        raise HTTPException(
+            409, "Estes documentos não puderam ser preparados: "
+                 + "; ".join(falhas)
+                 + ". Corrija ou desmarque para enviar os demais.")
 
     # uma referência só para o lote inteiro
     token = email_entrada.novo_token()
@@ -893,19 +886,18 @@ def enviar_documento_ao_cliente(doc_id: str):
     if d["status"] == "ASSINADO":
         return {"ok": True, "info": "Documento já assinado."}
 
-    # o cliente recebe em PDF: preserva a formatação e não se altera sem rastro
+    # o cliente recebe em PDF sempre que possível: preserva a formatação e
+    # não se altera sem rastro. Documento anexado em 'Outros' (que já pode
+    # vir em PDF, Word ou foto) segue pelo mesmo caminho.
     from .agentes import documentos as redator
-    pdf_ok, pdf_erro, anexo = False, None, None
     try:
-        r = redator.gerar_pdf_do_documento(doc_id)
-        pdf_ok = True
-        conteudo = db.storage.from_(get_settings().bucket_documentos) \
-                     .download(r["pdf_path"])
-        import re as _re2
-        nome_pdf = _re2.sub(r'[\\/:*?"<>|]', "_", d["titulo"]) + ".pdf"
-        anexo = [(nome_pdf, conteudo, "application/pdf")]
+        preparado = redator.preparar_anexo(d)
     except Exception as e:
-        pdf_erro = str(e)
+        # sem anexo o e-mail não cumpre a função: o cliente não teria o que
+        # baixar, assinar e devolver. Melhor falhar aqui do que enviar vazio.
+        raise HTTPException(500, f"Não foi possível preparar o documento: {e}")
+    anexo = [preparado]
+    pdf_ok = preparado[0].lower().endswith(".pdf")
 
     # referência que viaja no assunto e permite devolver por e-mail
     token = d.get("email_token") or email_entrada.novo_token()
@@ -955,7 +947,7 @@ def enviar_documento_ao_cliente(doc_id: str):
     registrar_evento(d["caso_id"], "DOCUMENTO_ENVIADO_CLIENTE",
                      {"documento_id": doc_id, "tipo": d["tipo"], "pdf": pdf_ok})
     return {"ok": True, "status": "ENVIADO", "pdf": pdf_ok,
-            **({"pdf_erro": pdf_erro} if pdf_erro else {}), **envio}
+            "anexo": preparado[0], **envio}
 
 
 @app.get("/api/v1/documentos-assinatura/{doc_id}/baixar")

@@ -507,6 +507,52 @@ def gerar_pdf_do_documento(documento_id: str) -> dict:
     return {"ok": True, "pdf_path": path, "tamanho": len(pdf)}
 
 
+MIMES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".heic": "image/heic", ".txt": "text/plain",
+}
+
+
+def preparar_anexo(doc: dict) -> tuple[str, bytes, str]:
+    """Devolve (nome, conteúdo, mime) do documento pronto para ir por e-mail.
+
+    Vale tanto para o que a plataforma redigiu quanto para o que foi anexado
+    em 'Outros'. A ordem é: PDF já convertido → arquivo que já é PDF →
+    converter o .docx agora → e, se nada disso couber (uma foto, por
+    exemplo), mandar o arquivo como está. Nunca devolve vazio: se não houver
+    como preparar, levanta erro, porque e-mail de assinatura sem o documento
+    anexo não serve para nada.
+    """
+    s = get_settings()
+    db = get_db()
+
+    origem = doc.get("storage_path") or ""
+    caminho = doc.get("pdf_path") or ""
+
+    if not caminho and origem.lower().endswith(".pdf"):
+        caminho = origem
+    if not caminho and origem.lower().endswith((".docx", ".doc", ".odt", ".rtf")):
+        try:
+            caminho = gerar_pdf_do_documento(doc["id"])["pdf_path"]
+        except Exception:
+            caminho = origem          # não converteu: vai em Word mesmo
+    if not caminho:
+        caminho = origem
+    if not caminho:
+        raise RuntimeError(f"{doc.get('titulo') or 'documento'}: sem arquivo salvo")
+
+    conteudo = db.storage.from_(s.bucket_documentos).download(caminho)
+    if not conteudo:
+        raise RuntimeError(f"{doc.get('titulo') or 'documento'}: arquivo vazio")
+
+    ext = os.path.splitext(caminho)[1].lower() or ".pdf"
+    base = re.sub(r'[\\/:*?"<>|]', "_", (doc.get("titulo") or "documento")).strip()
+    return f"{base}{ext}", conteudo, MIMES.get(ext, "application/octet-stream")
+
+
 ESTILOS_TITULO = ("Title", "Heading")
 
 

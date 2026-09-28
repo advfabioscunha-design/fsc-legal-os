@@ -116,9 +116,13 @@ def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str,
     msg["Reply-To"] = s.email_escritorio
     meu_id = make_msgid(domain="fscadvocaciadigital.com.br")
     msg["Message-ID"] = meu_id
-    if responder_a:
-        msg["In-Reply-To"] = responder_a
-        msg["References"] = responder_a
+    # `responder_a` pode trazer mais de um id (o âncora do caso e o último
+    # e-mail enviado). O In-Reply-To aponta para o mais recente; o References
+    # leva todos, e é ele que mantém tudo numa conversa só no Gmail.
+    fios = [x for x in (responder_a or "").split() if x.startswith("<")]
+    if fios:
+        msg["In-Reply-To"] = fios[-1]
+        msg["References"] = " ".join(fios)
     msg.set_content(corpo_texto)
     msg.add_alternative(corpo_html, subtype="html")
 
@@ -140,14 +144,29 @@ def enviar_email(destino: str, assunto: str, corpo_texto: str, corpo_html: str,
     return meu_id
 
 
-def fio_do_caso(caso_id: str) -> str | None:
-    """Message-ID do primeiro e-mail deste atendimento."""
+def ancora_do_caso(caso_id: str) -> str:
+    """Identificador FIXO do atendimento, derivado do próprio id do caso.
+
+    Serve de âncora da conversa: como ele nunca muda, todo e-mail do caso
+    carrega o mesmo References e o Gmail agrupa tudo num fio só — inclusive
+    nos atendimentos que já existiam antes de guardarmos o Message-ID do
+    primeiro e-mail. Sem isso, cada aviso abria uma conversa nova."""
+    return f"<atendimento-{caso_id}@fscadvocaciadigital.com.br>"
+
+
+def fio_do_caso(caso_id: str) -> str:
+    """Cadeia de References deste atendimento: a âncora fixa e, quando já
+    houver, o Message-ID do primeiro e-mail realmente enviado."""
+    ancora = ancora_do_caso(caso_id)
     try:
         c = get_db().table("casos").select("email_thread_id").eq("id", caso_id) \
               .maybe_single().execute().data
-        return (c or {}).get("email_thread_id")
+        primeiro = (c or {}).get("email_thread_id")
     except Exception:
-        return None
+        primeiro = None
+    if primeiro and primeiro != ancora:
+        return f"{ancora} {primeiro}"
+    return ancora
 
 
 def guardar_fio(caso_id: str, message_id: str) -> None:
@@ -229,7 +248,7 @@ def notificar(caso_id: str, tipo: str, titulo: str, mensagem: str,
     `anexos` vai junto do e-mail (ex.: o PDF para assinatura)."""
     db = get_db()
     caso = db.table("casos").select(
-        "id,numero_atendimento,titulo,clientes(nome,email,whatsapp)"
+        "id,numero_atendimento,titulo,email_thread_id,clientes(nome,email,whatsapp)"
     ).eq("id", caso_id).single().execute().data
     cli = caso.get("clientes") or {}
     num_atend = caso.get("numero_atendimento") or "—"
@@ -268,12 +287,16 @@ def notificar(caso_id: str, tipo: str, titulo: str, mensagem: str,
             link, numero_publico(ddd_origem),
         )
         fio = fio_do_caso(caso_id)
+        # ASSUNTO FIXO do atendimento: o que muda a cada aviso fica no corpo.
+        # Assunto estável + References estável = uma conversa só, do primeiro
+        # contato à prestação de contas.
+        assunto_caso = (caso.get("titulo") or "Atendimento").strip()
         novo_id = enviar_email(
             cli.get("email") or "",
-            f"[{num_atend}] {titulo} — FC Advocacia{assunto_extra}",
+            f"[{num_atend}] {assunto_caso} — FC Advocacia{assunto_extra}",
             corpo_txt, corpo_html, anexos=anexos, responder_a=fio,
         )
-        if not fio and novo_id:
+        if novo_id and not (caso or {}).get("email_thread_id"):
             guardar_fio(caso_id, novo_id)   # este vira o fio do atendimento
         ok_mail = True
     except Exception as e:
