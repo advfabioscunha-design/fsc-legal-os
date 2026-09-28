@@ -1007,6 +1007,8 @@ def tela_de_entrada(atendimento_id: str):
 class EntrarNaSala(BaseModel):
     nome: str | None = None
     aceita_gravacao: bool = False
+    # verdadeiro só quando o termo foi aberto, rolado até o fim e aceito
+    leu_termo: bool = False
 
 
 @app.post("/api/v1/atendimentos/{atendimento_id}/entrar")
@@ -1020,7 +1022,8 @@ def entrar_na_sala(atendimento_id: str, body: EntrarNaSala, request: Request):
         or (request.client.host if request.client else None)
     try:
         return atendimento.entrar(atendimento_id, body.nome or "Cliente",
-                                  bool(body.aceita_gravacao), ip)
+                                  bool(body.aceita_gravacao), ip,
+                                  bool(body.leu_termo))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except DailyIndisponivel as e:

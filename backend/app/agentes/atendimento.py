@@ -27,48 +27,104 @@ from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..integracoes import daily
 
-VERSAO_CONSENTIMENTO = "2026-09-v2"
+VERSAO_CONSENTIMENTO = "2026-09-v3"
 
-# O texto abaixo é o que o cliente lê antes de entrar. Ele foi reescrito
-# para descrever as proteções que de fato existem, em vez de abrir com um
-# aviso de transferência internacional que assustava sem informar.
-#
-# O que este texto NÃO afirma: que os dados ficam "no escritório" ou "no
-# Brasil". Não ficam — a infraestrutura está nos Estados Unidos, e um
-# consentimento que descreve errado onde o dado é tratado é consentimento
-# viciado (LGPD, arts. 9º e 33), com o ônus recaindo sobre o advogado.
-#
-# A localização também não aparece aqui, por decisão do escritório: um
-# aviso de transferência internacional no meio do termo de gravação
-# assusta sem informar. Ela está na POLÍTICA DE PRIVACIDADE (/privacidade),
-# que é o documento próprio para isso e para onde o contrato remete. A
-# informação não pode simplesmente deixar de existir: sem ela em lugar
-# algum, o consentimento não alcança a transferência.
-TEXTO_CONSENTIMENTO = (
-    "Este atendimento é feito por vídeo, ao vivo. Para que o escritório "
-    "tenha registro fiel do que foi conversado, **somente o áudio** é "
-    "gravado — a sua imagem não é gravada nem armazenada em momento algum.\n\n"
-
-    "COMO O SEU ATENDIMENTO É PROTEGIDO\n"
-    "• A gravação e a transcrição ficam em **banco de dados exclusivo deste "
-    "escritório**, com armazenamento criptografado e acesso por chave de "
-    "segurança — não são compartilhadas com nenhum outro escritório, "
-    "empresa ou plataforma de terceiros.\n"
-    "• O acesso é **individual e identificado**: cada integrante da equipe "
-    "entra com a própria credencial, e todo acesso fica registrado.\n"
-    "• A sua área de cliente é isolada por controle técnico: **você enxerga "
-    "apenas o seu processo**, e nenhum outro cliente enxerga o seu.\n"
-    "• A conexão é criptografada de ponta a ponta do seu navegador até o "
-    "sistema.\n"
-    "• Assim que a gravação é arquivada no seu processo, a **cópia no "
-    "serviço de videochamada é apagada** — o áudio não fica com o "
-    "fornecedor.\n"
-    "• Tudo está coberto pelo **sigilo profissional do advogado** (art. 34, "
-    "VII, da Lei 8.906/94), que é dever legal e não mera política interna.\n\n"
-
-    "Você pode recusar: o atendimento acontece do mesmo jeito, apenas sem "
-    "gravação. E pode pedir a exclusão do áudio a qualquer momento."
+# CHAMADA — o que aparece na tela de entrada, antes do termo.
+# Curta de propósito: o texto que vale é o termo completo, e um resumo
+# comprido na tela faz o cliente achar que já leu tudo e pular o link.
+RESUMO_CONSENTIMENTO = (
+    "Este atendimento é por vídeo, ao vivo. Se você autorizar, **somente o "
+    "áudio** será gravado — a sua imagem não é gravada em momento algum.\n\n"
+    "Para prosseguir, é preciso **abrir o Termo de Consentimento**, ler até o "
+    "final e confirmar a ciência dentro dele."
 )
+
+# TERMO COMPLETO — é este texto que fica guardado como prova do que o
+# cliente leu. Por isso ele é salvo por inteiro no banco, junto com a
+# versão, a data, a hora e o IP: se um dia se discutir o que foi
+# autorizado, a resposta é o documento, não a lembrança de alguém.
+TERMO_COMPLETO = """TERMO DE CONSENTIMENTO PARA GRAVAÇÃO DE ÁUDIO EM ATENDIMENTO POR VIDEOCONFERÊNCIA E PARA O TRATAMENTO DE DADOS PESSOAIS
+
+FC ADVOCACIA — Fábio Silva Cunha, advogado inscrito na OAB/RO sob o nº 10.849
+
+1. OBJETO DESTE TERMO
+
+Este documento explica, de forma clara, o que acontece quando você participa de um atendimento por videoconferência na plataforma deste escritório: o que é gravado, o que não é gravado, para que serve o registro, como ele é protegido, por quanto tempo é guardado e quais são os seus direitos. Ao confirmar a ciência ao final, você autoriza a gravação nos termos aqui descritos.
+
+2. O QUE É GRAVADO — E O QUE NÃO É
+
+2.1. O atendimento acontece por vídeo, ao vivo, para que a conversa seja humana e você possa ver e ser visto pelo advogado.
+
+2.2. É gravado SOMENTE O ÁUDIO da conversa. A sua imagem NÃO é gravada, NÃO é armazenada e NÃO é compartilhada em momento algum. Não existe arquivo de vídeo deste atendimento.
+
+2.3. A gravação de áudio gera, além do arquivo sonoro, uma transcrição em texto, que é anexada ao seu processo.
+
+2.4. A gravação só começa depois da sua autorização, e apenas o advogado pode iniciá-la. A permissão para gravar não é concedida a você nem a terceiros que eventualmente participem da sala.
+
+3. PARA QUE SERVE O REGISTRO
+
+3.1. O áudio e a transcrição destinam-se exclusivamente a manter registro fiel do que foi conversado, permitindo ao escritório retomar com precisão o que você relatou, conferir informações e conduzir o seu caso com segurança.
+
+3.2. O registro NÃO é utilizado para publicidade, não é cedido ou vendido a terceiros e não alimenta nenhuma finalidade estranha ao seu atendimento.
+
+4. SIGILO PROFISSIONAL E BASE LEGAL
+
+4.1. Tudo o que você disser está protegido pelo sigilo profissional do advogado, dever legal previsto no art. 34, VII, da Lei nº 8.906/94 (Estatuto da Advocacia) e no Código de Ética e Disciplina da OAB. Sigilo profissional não é política interna do escritório: é obrigação legal, cujo descumprimento sujeita o advogado a sanção.
+
+4.2. O tratamento dos seus dados pessoais observa a Lei nº 13.709/2018 (Lei Geral de Proteção de Dados). A gravação do áudio tem como base legal o SEU CONSENTIMENTO, manifestado neste termo. Os demais dados necessários ao seu atendimento são tratados com base na execução do contrato e no exercício regular de direitos em processo judicial ou administrativo (art. 7º, V e VI, da LGPD).
+
+5. COMO O SEU ATENDIMENTO É PROTEGIDO
+
+5.1. Banco de dados exclusivo deste escritório. As gravações, transcrições e documentos ficam em base de dados própria da FC Advocacia, não compartilhada com outros escritórios, empresas ou plataformas.
+
+5.2. Armazenamento criptografado e acesso protegido por chave de segurança.
+
+5.3. Acesso individual e identificado. Cada integrante da equipe acessa o sistema com credencial própria, e os acessos ficam registrados.
+
+5.4. Isolamento entre clientes. Existe controle técnico que garante que cada cliente acesse apenas o seu próprio processo. Nenhum outro cliente tem acesso ao que é seu.
+
+5.5. Conexão criptografada entre o seu navegador e o sistema, durante todo o atendimento.
+
+5.6. Descarte da cópia no serviço de videochamada. Assim que a gravação é arquivada no seu processo, a cópia existente no serviço de videoconferência é apagada, de modo que o áudio não permanece com o fornecedor.
+
+6. COM QUEM O REGISTRO PODE SER COMPARTILHADO
+
+6.1. Com ninguém, como regra.
+
+6.2. Excepcionalmente, o conteúdo poderá ser utilizado ou compartilhado quando isso for indispensável ao cumprimento do mandato que você outorgou — por exemplo, na instrução do seu próprio processo — ou quando houver determinação legal ou ordem judicial, hipóteses em que o escritório fará o que estiver ao seu alcance para preservar o sigilo.
+
+6.3. O escritório utiliza fornecedores de tecnologia para hospedagem do sistema, envio de mensagens e realização da videochamada. Esses fornecedores atuam como operadores e só podem tratar os dados conforme as instruções do escritório. As condições dessa contratação, inclusive quanto à infraestrutura utilizada, constam da Política de Privacidade, disponível na plataforma.
+
+7. POR QUANTO TEMPO FICA GUARDADO
+
+7.1. O áudio e a transcrição são guardados enquanto durar o seu caso e pelos prazos legais de guarda aplicáveis à atividade advocatícia, inclusive para eventual defesa de direitos após o encerramento.
+
+7.2. Você pode solicitar a exclusão do áudio antes desses prazos, a qualquer momento, e o escritório atenderá salvo se houver dever legal de conservação.
+
+8. OS SEUS DIREITOS
+
+8.1. Você tem direito a confirmar a existência do tratamento, acessar os dados, corrigir dados incompletos ou desatualizados, solicitar anonimização ou eliminação, obter informação sobre compartilhamentos e revogar este consentimento (arts. 18 e 19 da LGPD).
+
+8.2. A revogação pode ser feita a qualquer tempo, pelo painel do cliente ou pelos canais oficiais do escritório, e produz efeitos a partir do pedido, sem afetar a legalidade do tratamento realizado antes dela.
+
+9. SE VOCÊ NÃO AUTORIZAR
+
+9.1. A recusa NÃO impede o atendimento. A sessão acontece normalmente, apenas sem gravação de áudio.
+
+9.2. A recusa não prejudica em nada a condução do seu caso, nem altera honorários, prazos ou a qualidade do serviço.
+
+10. CANAL PARA DÚVIDAS E PEDIDOS
+
+Assuntos relativos a privacidade, gravações e exercício de direitos podem ser tratados pelo e-mail adv.fabios.cunha@gmail.com, pelo painel do cliente ou pelos telefones oficiais do escritório.
+
+11. CIÊNCIA E AUTORIZAÇÃO
+
+Declaro que li este termo até o final, que compreendi o seu conteúdo, que tive a oportunidade de esclarecer dúvidas e que AUTORIZO a gravação do áudio do atendimento por videoconferência, nos exatos termos aqui descritos.
+
+O registro desta ciência é feito com data, hora e endereço de IP, e a versão deste termo fica arquivada junto ao seu processo."""
+
+# mantido pelo nome antigo para não quebrar quem já importava
+TEXTO_CONSENTIMENTO = TERMO_COMPLETO
 
 
 def _agora():
@@ -159,16 +215,22 @@ def para_o_cliente(atendimento_id: str) -> dict:
     return {"ok": True, "atendimento_id": a["id"], "status": a["status"],
             "expirado": expirado,
             "ja_consentiu": bool(a.get("consentimento_em")),
-            "texto_consentimento": TEXTO_CONSENTIMENTO,
+            "resumo": RESUMO_CONSENTIMENTO,
+            "termo": TERMO_COMPLETO,
             "versao_consentimento": VERSAO_CONSENTIMENTO}
 
 
 def entrar(atendimento_id: str, nome: str, aceita_gravacao: bool,
-           ip: str | None = None) -> dict:
+           ip: str | None = None, leu_termo: bool = False) -> dict:
     """Registra a decisão do cliente e devolve o token de entrada.
 
     Recusar não impede o atendimento. O que muda é que a sala segue sem
-    gravação — e isso fica registrado, com hora e IP."""
+    gravação — e isso fica registrado, com hora e IP.
+
+    `leu_termo` só é verdadeiro quando a pessoa rolou o termo até o fim e
+    confirmou dentro dele. A tela já bloqueia o botão antes disso, mas a
+    conferência é repetida aqui: consentimento colhido sem exibição do
+    texto é consentimento frágil, e a tela é a parte fácil de burlar."""
     db = get_db()
     a = db.table("atendimentos").select("*").eq("id", atendimento_id) \
           .single().execute().data
@@ -187,6 +249,12 @@ def entrar(atendimento_id: str, nome: str, aceita_gravacao: bool,
         except Exception:
             pass
 
+    if aceita_gravacao and not leu_termo:
+        raise ValueError(
+            "Para autorizar a gravação é preciso abrir o Termo de "
+            "Consentimento, ler até o final e confirmar a ciência dentro "
+            "dele.")
+
     mudanca = {"status": "EM_ANDAMENTO", "atualizado_em": _iso(agora)}
     if not a.get("iniciado_em"):
         mudanca["iniciado_em"] = _iso(agora)
@@ -194,7 +262,7 @@ def entrar(atendimento_id: str, nome: str, aceita_gravacao: bool,
         mudanca.update({
             "consentimento_em": _iso(agora),
             "consentimento_ip": (ip or "")[:60] or None,
-            "consentimento_texto": TEXTO_CONSENTIMENTO,
+            "consentimento_texto": TERMO_COMPLETO,
             "consentimento_versao": VERSAO_CONSENTIMENTO,
         })
     db.table("atendimentos").update(mudanca).eq("id", atendimento_id).execute()

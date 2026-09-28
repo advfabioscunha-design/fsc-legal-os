@@ -7,20 +7,25 @@ const API = process.env.NEXT_PUBLIC_API_URL || "https://api.fscadvocaciadigital.
 
 /* ATENDIMENTO POR VÍDEO — a tela do cliente.
 
-   O caminho é curto de propósito: ele abre o link, diz o nome, decide sobre
-   a gravação e entra. Sem instalar nada, sem criar conta, sem senha.
+   O consentimento não é um checkbox ao lado de um parágrafo. Ele exige
+   abrir o Termo, ROLAR ATÉ O FINAL e confirmar a ciência lá dentro: o
+   botão de concordar só destrava quando o texto acabou de ser percorrido.
 
-   O aceite da gravação vem ANTES da sala, e não é pró-forma: o texto diz o
-   que é gravado (só o áudio), por quê, onde fica e que os servidores estão
-   fora do Brasil. Recusar é uma opção de verdade — o atendimento acontece
-   igual, apenas sem gravar. */
+   Isso muda o valor probatório da coisa. Um aceite marcado sem que o
+   texto tenha sido exibido é fácil de contestar; um aceite dado ao fim do
+   documento, com data, hora, IP e a versão do termo guardada por inteiro,
+   é outra conversa.
+
+   Quem tentar entrar autorizando sem ter lido recebe orientação, e o
+   servidor recusa de qualquer forma — a tela é a parte fácil de burlar. */
 
 type Entrada = {
   ok: boolean;
   status: string;
   expirado: boolean;
   ja_consentiu: boolean;
-  texto_consentimento: string;
+  resumo: string;
+  termo: string;
   versao_consentimento: string;
 };
 
@@ -28,11 +33,16 @@ export default function Atendimento() {
   const { id } = useParams<{ id: string }>();
   const [dados, setDados] = useState<Entrada | null>(null);
   const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
   const [nome, setNome] = useState("");
-  const [aceita, setAceita] = useState(true);
   const [entrando, setEntrando] = useState(false);
   const [sala, setSala] = useState<{ url: string; token: string } | null>(null);
-  const quadro = useRef<HTMLDivElement | null>(null);
+
+  // termo
+  const [termoAberto, setTermoAberto] = useState(false);
+  const [chegouAoFim, setChegouAoFim] = useState(false);
+  const [aceitouTermo, setAceitouTermo] = useState(false);
+  const corpoTermo = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -48,14 +58,45 @@ export default function Atendimento() {
     })();
   }, [id]);
 
-  async function entrar() {
+  /* Só considera lido quando o fim do texto aparece na tela. A folga de
+     24px evita que arredondamento de pixel impeça alguém de concluir. */
+  function aoRolar() {
+    const el = corpoTermo.current;
+    if (!el) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setChegouAoFim(true);
+  }
+
+  // termo curto em tela grande pode não ter rolagem nenhuma
+  useEffect(() => {
+    if (!termoAberto) return;
+    const t = setTimeout(() => {
+      const el = corpoTermo.current;
+      if (el && el.scrollHeight <= el.clientHeight + 24) setChegouAoFim(true);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [termoAberto]);
+
+  async function entrar(comGravacao: boolean) {
+    if (comGravacao && !aceitouTermo) {
+      setAviso(
+        "Para autorizar a gravação, abra o Termo de Consentimento, leia até o " +
+        "final e confirme a ciência dentro dele. É rápido — o botão de " +
+        "concordar aparece ao fim do texto."
+      );
+      setTermoAberto(true);
+      return;
+    }
     setEntrando(true);
-    setErro("");
+    setErro(""); setAviso("");
     try {
       const r = await fetch(`${API}/api/v1/atendimentos/${id}/entrar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nome: nome.trim() || "Cliente", aceita_gravacao: aceita }),
+        body: JSON.stringify({
+          nome: nome.trim() || "Cliente",
+          aceita_gravacao: comGravacao,
+          leu_termo: aceitouTermo,
+        }),
       });
       const d = await r.json();
       if (!r.ok) { setErro(d.detail || "Não foi possível entrar na sala."); return; }
@@ -67,11 +108,10 @@ export default function Atendimento() {
     }
   }
 
-  // já dentro da sala: o Prebuilt do Daily assume a tela inteira
   if (sala) {
     const src = `${sala.url}?t=${encodeURIComponent(sala.token)}`;
     return (
-      <div className="fixed inset-0 bg-black" ref={quadro}>
+      <div className="fixed inset-0 bg-black">
         <iframe
           src={src}
           allow="camera; microphone; fullscreen; speaker; display-capture; autoplay"
@@ -85,23 +125,16 @@ export default function Atendimento() {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-5 py-10">
       <div className="rounded-2xl border border-charcoal/10 bg-white p-6 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gold">
-          FC Advocacia
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gold">FC Advocacia</p>
         <h1 className="mt-1 text-2xl font-bold text-navy">Seu atendimento por vídeo</h1>
 
-        {erro && (
-          <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{erro}</p>
-        )}
-
-        {!dados && !erro && (
-          <p className="mt-4 text-sm text-charcoal/60">Carregando…</p>
-        )}
+        {erro && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{erro}</p>}
+        {!dados && !erro && <p className="mt-4 text-sm text-charcoal/60">Carregando…</p>}
 
         {dados?.expirado && (
           <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Este link de atendimento expirou. Peça um novo ao escritório — leva
-            um minuto para gerar.
+            Este link de atendimento expirou. Peça um novo ao escritório — leva um
+            minuto para gerar.
           </p>
         )}
 
@@ -118,38 +151,46 @@ export default function Atendimento() {
             </label>
 
             <div className="mt-5 rounded-xl border border-charcoal/10 bg-ice/60 p-4">
-              <p className="text-sm font-semibold text-navy">Sobre a gravação</p>
-              <div className="mt-2 space-y-2 text-sm leading-relaxed text-charcoal/75">
-                {dados.texto_consentimento.split("\n\n").map((p, i) => (
+              <div className="space-y-2 text-sm leading-relaxed text-charcoal/80">
+                {dados.resumo.split("\n\n").map((p, i) => (
                   <p key={i}>{p.replace(/\*\*/g, "")}</p>
                 ))}
               </div>
 
-              <label className="mt-4 flex items-start gap-3 text-sm text-charcoal/85">
-                <input
-                  type="checkbox"
-                  checked={aceita}
-                  onChange={(e) => setAceita(e.target.checked)}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-navy"
-                />
-                <span>
-                  Li e <b>autorizo a gravação do áudio</b> deste atendimento.
-                </span>
-              </label>
-              {!aceita && (
-                <p className="mt-2 text-xs text-charcoal/55">
-                  Sem problema: o atendimento acontece do mesmo jeito, apenas sem
-                  gravação.
-                </p>
-              )}
+              <button
+                onClick={() => { setTermoAberto(true); setAviso(""); }}
+                className="mt-3 inline-flex items-center gap-2 rounded-xl border border-navy/25 bg-white px-4 py-3 text-sm font-semibold text-navy transition hover:bg-navy/5"
+              >
+                📄 Abrir e ler o Termo de Consentimento
+              </button>
+
+              <p className={`mt-2 text-sm font-medium ${aceitouTermo ? "text-forest" : "text-charcoal/55"}`}>
+                {aceitouTermo
+                  ? "✓ Termo lido e ciência confirmada. Você pode entrar."
+                  : "Ainda não lido. A leitura é necessária para autorizar a gravação."}
+              </p>
             </div>
 
+            {aviso && (
+              <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                ⚠ {aviso}
+              </p>
+            )}
+
             <button
-              onClick={entrar}
+              onClick={() => entrar(true)}
               disabled={entrando}
-              className="mt-5 w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+              className="mt-4 w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
             >
               {entrando ? "Entrando…" : "Entrar no atendimento"}
+            </button>
+
+            <button
+              onClick={() => entrar(false)}
+              disabled={entrando}
+              className="mt-2 w-full rounded-xl border border-charcoal/15 px-6 py-3 text-sm font-medium text-charcoal/70 transition hover:bg-charcoal/5 disabled:opacity-50"
+            >
+              Entrar sem autorizar a gravação
             </button>
 
             <p className="mt-3 text-center text-xs text-charcoal/50">
@@ -158,6 +199,57 @@ export default function Atendimento() {
           </>
         )}
       </div>
+
+      {/* Termo em tela cheia: precisa rolar até o fim para concordar */}
+      {termoAberto && dados && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
+          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white">
+            <div className="flex items-start justify-between gap-3 border-b border-charcoal/10 px-5 py-4">
+              <div>
+                <h2 className="text-base font-bold text-navy">Termo de Consentimento</h2>
+                <p className="text-xs text-charcoal/50">
+                  Versão {dados.versao_consentimento} · role até o final para confirmar
+                </p>
+              </div>
+              <button onClick={() => setTermoAberto(false)} className="text-charcoal/40 hover:text-charcoal">✕</button>
+            </div>
+
+            <div
+              ref={corpoTermo}
+              onScroll={aoRolar}
+              className="flex-1 overflow-y-auto px-5 py-4"
+            >
+              <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-charcoal/85">
+                {dados.termo}
+              </pre>
+              <div className="h-2" />
+            </div>
+
+            <div className="border-t border-charcoal/10 bg-ice/40 px-5 py-4">
+              {!chegouAoFim && (
+                <p className="mb-2 text-center text-xs text-charcoal/55">
+                  ↓ Continue rolando até o fim do termo para liberar a confirmação
+                </p>
+              )}
+              <button
+                onClick={() => { setAceitouTermo(true); setTermoAberto(false); setAviso(""); }}
+                disabled={!chegouAoFim}
+                className="w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-charcoal/25"
+              >
+                {chegouAoFim
+                  ? "Li o termo e estou ciente — autorizo a gravação"
+                  : "Leia o termo até o final"}
+              </button>
+              <button
+                onClick={() => setTermoAberto(false)}
+                className="mt-2 w-full rounded-xl px-6 py-2 text-sm text-charcoal/55 hover:text-charcoal"
+              >
+                Fechar sem concordar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
