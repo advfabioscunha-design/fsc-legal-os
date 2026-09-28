@@ -791,12 +791,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <label className="text-[11px] text-white/60">% do proveito econômico
-                  <input value={hon.hon_percentual ?? ""} inputMode="decimal" placeholder="30"
+                  <input value={hon.hon_percentual ?? ""} inputMode="decimal" placeholder="ex.: 30"
                     onChange={(e) => setHon({ ...hon, hon_percentual: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
                 </label>
                 <label className="text-[11px] text-white/60">Salários mínimos
-                  <input value={hon.hon_salarios_minimos ?? ""} inputMode="decimal" placeholder="10"
+                  <input value={hon.hon_salarios_minimos ?? ""} inputMode="decimal" placeholder="ex.: 10"
                     onChange={(e) => setHon({ ...hon, hon_salarios_minimos: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
                 </label>
@@ -811,7 +811,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
                 </label>
                 <label className="text-[11px] text-white/60">Parcelas
-                  <input value={hon.hon_parcelas ?? ""} inputMode="numeric" placeholder="0"
+                  <input value={hon.hon_parcelas ?? ""} inputMode="numeric" placeholder="ex.: 3"
                     onChange={(e) => setHon({ ...hon, hon_parcelas: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
                 </label>
@@ -821,12 +821,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
                 </label>
                 <label className="text-[11px] text-white/60">Vencimento
-                  <input value={hon.hon_vencimento ?? ""} placeholder="todo dia 10"
+                  <input value={hon.hon_vencimento ?? ""} placeholder="ex.: todo dia 10"
                     onChange={(e) => setHon({ ...hon, hon_vencimento: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
                 </label>
                 <label className="text-[11px] text-white/60">Forma de pagamento
-                  <input value={hon.hon_forma_pagamento ?? ""} placeholder="PIX, boleto, dedução do alvará"
+                  <input value={hon.hon_forma_pagamento ?? ""} placeholder="ex.: PIX, boleto, dedução do alvará"
                     onChange={(e) => setHon({ ...hon, hon_forma_pagamento: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
                 </label>
