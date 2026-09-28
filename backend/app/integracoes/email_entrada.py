@@ -235,8 +235,10 @@ def _identificar(msg, alvo: str, de: str) -> tuple[list[dict], str | None, str]:
 # repetição do que já está na plataforma e não entra na conversa.
 CORTES = (
     re.compile(r"^\s*(>|\|)", re.M),
-    re.compile(r"^\s*Em .{0,80}escreveu\s*:", re.M | re.I),
-    re.compile(r"^\s*On .{0,80}wrote\s*:", re.M | re.I),
+    # a linha "Em <data>, Fulano <e-mail> escreveu:" costuma ser longa e
+    # quebrar em duas ou três linhas — por isso o DOTALL e a folga
+    re.compile(r"^[ \t]*Em\s.{0,300}?escreveu\s*:", re.M | re.I | re.S),
+    re.compile(r"^[ \t]*On\s.{0,300}?wrote\s*:", re.M | re.I | re.S),
     re.compile(r"^\s*-{2,}\s*(Mensagem original|Original Message|"
                r"Encaminhada|Forwarded message)", re.M | re.I),
     re.compile(r"^\s*De\s*:\s*.+\n\s*Enviad[ao]\s*:", re.M | re.I),
