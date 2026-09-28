@@ -428,6 +428,36 @@ def clausula_comunicacao() -> list[str]:
         "O CONTRATANTE obriga-se a manter atualizados os seus dados de "
         "contato na plataforma, presumindo-se recebida a comunicação enviada "
         "ao endereço eletrônico e ao telefone ali cadastrados.",
+
+        "Do atendimento por videoconferência: os atendimentos podem ser "
+        "realizados por vídeo, ao vivo, pela própria plataforma. Nesses "
+        "atendimentos é gravado SOMENTE O ÁUDIO, com autorização prévia e "
+        "expressa do CONTRATANTE, manifestada antes do início de cada "
+        "sessão e registrada com data e hora. A imagem não é gravada nem "
+        "armazenada. A recusa em autorizar a gravação não impede o "
+        "atendimento, que ocorrerá normalmente sem registro de áudio.",
+
+        "A gravação de áudio e a respectiva transcrição integram o "
+        "histórico do atendimento, destinam-se exclusivamente à condução "
+        "deste caso e estão abrangidas pelo sigilo profissional do "
+        "advogado, previsto no art. 34, VII, da Lei nº 8.906/94. O "
+        "CONTRATANTE pode solicitar a exclusão do áudio a qualquer tempo.",
+
+        "Da proteção dos dados: os dados, documentos e gravações do "
+        "CONTRATANTE são mantidos em banco de dados exclusivo deste "
+        "escritório, com armazenamento criptografado, acesso protegido por "
+        "chave de segurança e credenciais individuais para cada integrante "
+        "da equipe, com registro de acesso. A área do cliente é isolada por "
+        "controle técnico, de modo que cada contratante acessa apenas o seu "
+        "próprio processo. As informações não são compartilhadas com outros "
+        "escritórios, empresas ou plataformas de terceiros, salvo quando "
+        "indispensável ao cumprimento do mandato ou por determinação legal "
+        "ou judicial.",
+
+        "O tratamento dos dados pessoais do CONTRATANTE observa a Lei nº "
+        "13.709/2018 (LGPD) e está detalhado na Política de Privacidade do "
+        f"escritório, disponível em {painel}/privacidade, que integra este "
+        "contrato e da qual o CONTRATANTE declara ter tomado conhecimento.",
     ]
 
 

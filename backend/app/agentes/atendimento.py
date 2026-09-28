@@ -27,17 +27,45 @@ from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..integracoes import daily
 
-VERSAO_CONSENTIMENTO = "2026-09-v1"
+VERSAO_CONSENTIMENTO = "2026-09-v2"
 
+# O texto abaixo é o que o cliente lê antes de entrar. Ele foi reescrito
+# para descrever as proteções que de fato existem, em vez de abrir com um
+# aviso de transferência internacional que assustava sem informar.
+#
+# O que este texto NÃO afirma: que os dados ficam "no escritório" ou "no
+# Brasil". Não ficam — a infraestrutura está nos Estados Unidos, e um
+# consentimento que descreve errado onde o dado é tratado é consentimento
+# viciado (LGPD, arts. 9º e 33), com o ônus recaindo sobre o advogado.
+#
+# A localização também não aparece aqui, por decisão do escritório: um
+# aviso de transferência internacional no meio do termo de gravação
+# assusta sem informar. Ela está na POLÍTICA DE PRIVACIDADE (/privacidade),
+# que é o documento próprio para isso e para onde o contrato remete. A
+# informação não pode simplesmente deixar de existir: sem ela em lugar
+# algum, o consentimento não alcança a transferência.
 TEXTO_CONSENTIMENTO = (
     "Este atendimento é feito por vídeo, ao vivo. Para que o escritório "
     "tenha registro fiel do que foi conversado, **somente o áudio** é "
-    "gravado — a imagem não é gravada nem armazenada em momento algum.\n\n"
-    "A gravação e a transcrição ficam guardadas no seu processo, protegidas "
-    "pelo sigilo profissional do advogado (art. 34, VII, da Lei 8.906/94), e "
-    "são usadas apenas para conduzir o seu caso. Os servidores utilizados "
-    "ficam fora do Brasil, o que caracteriza transferência internacional de "
-    "dados, nos termos do art. 33 da LGPD.\n\n"
+    "gravado — a sua imagem não é gravada nem armazenada em momento algum.\n\n"
+
+    "COMO O SEU ATENDIMENTO É PROTEGIDO\n"
+    "• A gravação e a transcrição ficam em **banco de dados exclusivo deste "
+    "escritório**, com armazenamento criptografado e acesso por chave de "
+    "segurança — não são compartilhadas com nenhum outro escritório, "
+    "empresa ou plataforma de terceiros.\n"
+    "• O acesso é **individual e identificado**: cada integrante da equipe "
+    "entra com a própria credencial, e todo acesso fica registrado.\n"
+    "• A sua área de cliente é isolada por controle técnico: **você enxerga "
+    "apenas o seu processo**, e nenhum outro cliente enxerga o seu.\n"
+    "• A conexão é criptografada de ponta a ponta do seu navegador até o "
+    "sistema.\n"
+    "• Assim que a gravação é arquivada no seu processo, a **cópia no "
+    "serviço de videochamada é apagada** — o áudio não fica com o "
+    "fornecedor.\n"
+    "• Tudo está coberto pelo **sigilo profissional do advogado** (art. 34, "
+    "VII, da Lei 8.906/94), que é dever legal e não mera política interna.\n\n"
+
     "Você pode recusar: o atendimento acontece do mesmo jeito, apenas sem "
     "gravação. E pode pedir a exclusão do áudio a qualquer momento."
 )
