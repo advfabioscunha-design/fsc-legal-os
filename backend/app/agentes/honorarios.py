@@ -162,7 +162,38 @@ def clausula_pagamento(caso: dict) -> dict:
     if obs:
         texto_forma += f" {obs}"
 
-    return {"itens": itens, "forma": texto_forma, "resumo": " + ".join(resumo)}
+    # 4.3 — o que acontece quando não há dinheiro imediato para quitar.
+    # No modelo, esta cláusula falava da alínea "b" (os 10 salários mínimos).
+    # Se o ajuste não tiver essa alínea, a remissão fica no vazio — e cláusula
+    # que aponta para item inexistente é exatamente o tipo de brecha que se
+    # discute depois. Por isso ela é reescrita conforme o que foi combinado.
+    letras = "abcdefgh"
+    fixa = None
+    for n, item in enumerate(itens):
+        if item.startswith("O valor equivalente a") or item.startswith("O valor fixo"):
+            fixa = letras[n]
+            break
+    if fixa:
+        sem_saldo = (
+            "Ausência de Saldo Atrasado Imediato: Caso o benefício ou direito "
+            "seja concedido sem que haja valores retroativos e/ou montante "
+            "financeiro imediato a receber que seja suficiente para a quitação "
+            f'integral, as partes acordam que o valor correspondente à alínea "{fixa}" '
+            "será parcelado em mensalidades sucessivas, definidas em comum acordo "
+            "na época da concessão e estruturadas de forma a não comprometer o "
+            "sustento do CONTRATANTE."
+        )
+    else:
+        sem_saldo = (
+            "Ausência de Saldo Atrasado Imediato: Não havendo valores retroativos "
+            "ou montante financeiro imediato a receber, nada será devido a título "
+            "de honorários neste momento, permanecendo o CONTRATADO com direito "
+            "à verba pactuada sobre o proveito econômico que venha a ser obtido, "
+            "na medida em que for efetivamente recebido pelo CONTRATANTE."
+        )
+
+    return {"itens": itens, "forma": texto_forma, "sem_saldo": sem_saldo,
+            "resumo": " + ".join(resumo)}
 
 
 def resumo_curto(caso: dict) -> str:
@@ -289,21 +320,33 @@ Regras:
 - Não confunda o valor da causa, o valor do benefício ou a dívida discutida
   com os honorários do advogado.
 
-Responda SOMENTE com JSON, neste formato:
-{
-  "encontrado": true|false,
-  "hon_percentual": número ou null,
-  "hon_salarios_minimos": número ou null,
-  "hon_valor_fixo": número ou null,
-  "hon_entrada": número ou null,
-  "hon_parcelas": inteiro ou null,
-  "hon_parcela_valor": número ou null,
-  "hon_vencimento": "texto curto" ou null,
-  "hon_forma_pagamento": "texto curto" ou null,
-  "hon_observacao": "condição combinada fora do padrão" ou null,
-  "trecho": "a frase exata da conversa em que o valor foi combinado",
-  "confianca": "ALTA"|"MEDIA"|"BAIXA"
-}"""
+Devolva o resultado pela ferramenta `honorarios`, sempre — inclusive quando
+não encontrar nada (encontrado=false e os valores em branco)."""
+
+FERRAMENTA = {
+    "name": "honorarios",
+    "description": "Registra os honorários combinados que foram encontrados na conversa.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "encontrado": {"type": "boolean"},
+            "hon_percentual": {"type": ["number", "null"],
+                               "description": "Percentual sobre o proveito econômico."},
+            "hon_salarios_minimos": {"type": ["number", "null"]},
+            "hon_valor_fixo": {"type": ["number", "null"]},
+            "hon_entrada": {"type": ["number", "null"]},
+            "hon_parcelas": {"type": ["integer", "null"]},
+            "hon_parcela_valor": {"type": ["number", "null"]},
+            "hon_vencimento": {"type": ["string", "null"]},
+            "hon_forma_pagamento": {"type": ["string", "null"]},
+            "hon_observacao": {"type": ["string", "null"]},
+            "trecho": {"type": ["string", "null"],
+                       "description": "A frase exata da conversa em que o valor foi combinado."},
+            "confianca": {"type": "string", "enum": ["ALTA", "MEDIA", "BAIXA"]},
+        },
+        "required": ["encontrado", "confianca"],
+    },
+}
 
 
 def ler_da_conversa(caso_id: str) -> dict:
@@ -334,17 +377,17 @@ def ler_da_conversa(caso_id: str) -> dict:
         model=s.claude_model,
         max_tokens=1200,
         system=INSTRUCAO,
+        tools=[FERRAMENTA], tool_choice={"type": "tool", "name": "honorarios"},
         messages=[{"role": "user", "content":
                    f"Honorários hoje cadastrados no caso: {json.dumps(caso, default=str)}\n\n"
                    f"CONVERSA:\n{conversa}"}],
     )
-    bruto = "".join(b.text for b in r.content if b.type == "text").strip()
-    m = re.search(r"\{.*\}", bruto, re.S)
-    if not m:
-        return {"encontrado": False, "motivo": "Não foi possível interpretar a conversa."}
-    try:
-        dados = json.loads(m.group(0))
-    except Exception:
+    dados = None
+    for bloco in r.content:
+        if bloco.type == "tool_use" and bloco.name == "honorarios":
+            dados = bloco.input or {}
+            break
+    if dados is None:
         return {"encontrado": False, "motivo": "Não foi possível interpretar a conversa."}
 
     registrar_evento(caso_id, "HONORARIOS_LIDOS_DA_CONVERSA",

@@ -134,17 +134,50 @@ Regras:
 - Seja específico: cite o trecho do documento e o da conversa.
 - Gravidade ALTA só para o que impede o envio ou expõe o escritório.
 
-Responda SOMENTE com JSON:
-{
-  "divergencias": [
-    {"gravidade":"ALTA|MEDIA|BAIXA","o_que":"...","no_documento":"...",
-     "na_conversa":"...","sugestao":"..."}
-  ],
-  "riscos": [
-    {"gravidade":"ALTA|MEDIA|BAIXA","o_que":"...","sugestao":"..."}
-  ],
-  "parecer": "uma frase dizendo se pode enviar como está"
-}"""
+Devolva o resultado pela ferramenta `relatorio`, sempre — inclusive quando
+não houver nada a apontar (nesse caso, listas vazias e um parecer dizendo
+que o documento pode ser enviado)."""
+
+FERRAMENTA = {
+    "name": "relatorio",
+    "description": "Registra o resultado da revisão do documento.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "divergencias": {
+                "type": "array",
+                "description": "Pontos em que o documento contraria ou omite o combinado na conversa.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "gravidade": {"type": "string", "enum": ["ALTA", "MEDIA", "BAIXA"]},
+                        "o_que": {"type": "string"},
+                        "no_documento": {"type": "string"},
+                        "na_conversa": {"type": "string"},
+                        "sugestao": {"type": "string"},
+                    },
+                    "required": ["gravidade", "o_que"],
+                },
+            },
+            "riscos": {
+                "type": "array",
+                "description": "Pontos que expõem o escritório.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "gravidade": {"type": "string", "enum": ["ALTA", "MEDIA", "BAIXA"]},
+                        "o_que": {"type": "string"},
+                        "sugestao": {"type": "string"},
+                    },
+                    "required": ["gravidade", "o_que"],
+                },
+            },
+            "parecer": {"type": "string",
+                        "description": "Uma frase dizendo se pode enviar como está."},
+        },
+        "required": ["divergencias", "riscos", "parecer"],
+    },
+}
 
 
 def ler_com_a_conversa(doc: dict, paragrafos: list[str]) -> dict:
@@ -164,23 +197,25 @@ def ler_com_a_conversa(doc: dict, paragrafos: list[str]) -> dict:
         for m in msgs)[-14000:]
     texto = "\n".join(paragrafos)[-24000:]
 
+    # A resposta vem por ferramenta: o relatório chega já estruturado, sem
+    # depender de o texto ser um JSON bem formado. Aspas dentro de citações
+    # do contrato quebravam o JSON solto e a revisão inteira se perdia.
     cliente = anthropic.Anthropic(api_key=s.claude_api_key)
     r = cliente.messages.create(
-        model=s.claude_model, max_tokens=2000, system=INSTRUCAO,
+        model=s.claude_model, max_tokens=3000, system=INSTRUCAO,
+        tools=[FERRAMENTA], tool_choice={"type": "tool", "name": "relatorio"},
         messages=[{"role": "user", "content":
                    f"DOCUMENTO ({doc.get('titulo')}):\n{texto}\n\n"
                    f"CONVERSA COM O CLIENTE:\n{conversa}"}],
     )
-    bruto = "".join(b.text for b in r.content if b.type == "text")
-    m = re.search(r"\{.*\}", bruto, re.S)
-    if not m:
-        return {"divergencias": [], "riscos": [],
-                "parecer": "Não foi possível concluir a leitura da conversa."}
-    try:
-        return json.loads(m.group(0))
-    except Exception:
-        return {"divergencias": [], "riscos": [],
-                "parecer": "Não foi possível concluir a leitura da conversa."}
+    for bloco in r.content:
+        if bloco.type == "tool_use" and bloco.name == "relatorio":
+            d = bloco.input or {}
+            return {"divergencias": d.get("divergencias") or [],
+                    "riscos": d.get("riscos") or [],
+                    "parecer": d.get("parecer") or ""}
+    return {"divergencias": [], "riscos": [],
+            "parecer": "Não foi possível concluir a leitura da conversa."}
 
 
 # ── Ponto de entrada ─────────────────────────────────────────────

@@ -361,6 +361,15 @@ def _aplicar_honorarios(doc, clausula: dict) -> None:
                 _trocar_texto(p, f"4.2. {forma}")
                 break
 
+    # 4.3 — e quando não há dinheiro imediato. No modelo ela remete à alínea
+    # "b"; como as alíneas agora variam, a remissão é refeita junto.
+    sem_saldo = clausula.get("sem_saldo")
+    if sem_saldo:
+        for p in doc.paragraphs:
+            if p.text.strip().startswith("4.3"):
+                _trocar_texto(p, f"4.3. {sem_saldo}")
+                break
+
 
 def _numero_bonito(n: str) -> str:
     """5569993225383 → (69) 99322-5383."""
