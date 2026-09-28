@@ -36,9 +36,15 @@ comment on column public.prazos.depende_do_cliente is
   'true = audiência, perícia ou providência do cliente; só esses vão para '
   'a agenda dele. Prazo de peça é obrigação do advogado.';
 
--- uma intimação gera um prazo, e só um
+-- Uma intimação gera um prazo, e só um.
+--
+-- O índice é TOTAL, sem cláusula WHERE, e isso não é detalhe: o
+-- PostgREST recusa ON CONFLICT quando o índice é parcial, e o upsert do
+-- prazo falhava calado no meio da importação — o processo entrava com
+-- metade das publicações e nenhum prazo. Em Postgres, NULL não conflita
+-- com NULL, então prazos manuais (sem intimação) continuam convivendo.
 create unique index if not exists idx_prazos_intimacao
-  on public.prazos(intimacao_id) where intimacao_id is not null;
+  on public.prazos(intimacao_id);
 create index if not exists idx_prazos_fatal on public.prazos(prazo_fatal);
 
 

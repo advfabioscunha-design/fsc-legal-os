@@ -280,6 +280,7 @@ def importar(processos: list[dict], fase: str = "JUDICIAL") -> dict:
         raise ValueError("Fase deve ser JUDICIAL ou RECEBIMENTO.")
     db = get_db()
     criados, atualizados, intimacoes, prazos = 0, 0, 0, 0
+    falhas: list[dict] = []
 
     for p in processos:
         numero = (p.get("numero_processo") or "").strip()
@@ -336,8 +337,17 @@ def importar(processos: list[dict], fase: str = "JUDICIAL") -> dict:
             if nova.get("prazo_em"):
                 titulo = (f"{nova.get('tipo') or 'Intimação'} — "
                           f"{numero} ({com.get('tribunal') or ''})")
-                _gravar_prazo(caso_id, nova, titulo)
-                prazos += 1
+                # Um prazo que falha não pode abortar a importação: já
+                # aconteceu, e o processo entrou com metade das
+                # publicações e nenhum prazo, sem ninguém saber. A
+                # publicação fica registrada; a falha vira evento.
+                try:
+                    _gravar_prazo(caso_id, nova, titulo)
+                    prazos += 1
+                except Exception as e:
+                    falhas.append({"intimacao": nova["id"], "erro": str(e)[:200]})
+                    registrar_evento(caso_id, "PRAZO_NAO_CRIADO",
+                                     {"intimacao": nova["id"], "erro": str(e)[:300]})
 
         registrar_evento(caso_id, "PROCESSO_IMPORTADO", {
             "numero": numero, "fase": destino, "fonte": "COMUNICA_CNJ",
@@ -345,4 +355,4 @@ def importar(processos: list[dict], fase: str = "JUDICIAL") -> dict:
         })
 
     return {"criados": criados, "atualizados": atualizados,
-            "intimacoes": intimacoes, "prazos": prazos}
+            "intimacoes": intimacoes, "prazos": prazos, "falhas": falhas}
