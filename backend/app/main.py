@@ -1,4 +1,5 @@
 """FSC LEGAL OS v4.0 — Backend FastAPI (api.seudominio.com.br)."""
+import json
 import httpx
 from fastapi import FastAPI, Request, HTTPException, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -861,6 +862,129 @@ def gravar_honorarios(caso_id: str, body: HonorariosEntrada):
     return {"ok": True, "resumo": hon.resumo_curto(caso),
             "clausula": hon.clausula_pagamento(caso),
             "documentos": caso.get("_refeitos") or {}}
+
+
+# ── Atendimento telepresencial ───────────────────────────────────
+class AbrirAtendimento(BaseModel):
+    horas: int = 3
+
+
+@app.post("/api/v1/casos/{caso_id}/atendimentos")
+def abrir_atendimento(caso_id: str, body: AbrirAtendimento):
+    """Abre a sala e devolve o acesso do advogado + o link do cliente."""
+    from .agentes import atendimento
+    from .integracoes.daily import DailyIndisponivel
+    try:
+        return atendimento.abrir(caso_id, max(1, min(body.horas, 6)))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except DailyIndisponivel as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível abrir o atendimento: {e}")
+
+
+@app.get("/api/v1/casos/{caso_id}/atendimentos")
+def listar_atendimentos(caso_id: str):
+    try:
+        return get_db().table("atendimentos").select(
+            "id,status,sala_url,iniciado_em,encerrado_em,duracao_segundos,"
+            "consentimento_em,audio_path,transcricao,transcrito_em,erro,criado_em"
+        ).eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        return []
+
+
+@app.get("/api/v1/atendimentos/{atendimento_id}/entrada")
+def tela_de_entrada(atendimento_id: str):
+    """O que o cliente vê antes de entrar: o texto do consentimento."""
+    from .agentes import atendimento
+    try:
+        return atendimento.para_o_cliente(atendimento_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+class EntrarNaSala(BaseModel):
+    nome: str | None = None
+    aceita_gravacao: bool = False
+
+
+@app.post("/api/v1/atendimentos/{atendimento_id}/entrar")
+def entrar_na_sala(atendimento_id: str, body: EntrarNaSala, request: Request):
+    """Registra a decisão sobre a gravação e devolve o token de entrada.
+
+    Recusar não impede o atendimento — só desliga a gravação."""
+    from .agentes import atendimento
+    from .integracoes.daily import DailyIndisponivel
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else None)
+    try:
+        return atendimento.entrar(atendimento_id, body.nome or "Cliente",
+                                  bool(body.aceita_gravacao), ip)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except DailyIndisponivel as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/v1/atendimentos/{atendimento_id}/pode-gravar")
+def atendimento_pode_gravar(atendimento_id: str):
+    from .agentes import atendimento
+    return atendimento.pode_gravar(atendimento_id)
+
+
+class EncerrarAtendimento(BaseModel):
+    observacao: str | None = None
+
+
+@app.post("/api/v1/atendimentos/{atendimento_id}/encerrar")
+def encerrar_atendimento(atendimento_id: str, body: EncerrarAtendimento):
+    from .agentes import atendimento
+    try:
+        return atendimento.encerrar(atendimento_id, body.observacao)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/atendimentos/{atendimento_id}/transcrever")
+def transcrever_atendimento(atendimento_id: str):
+    """Refaz a transcrição na mão, quando a automática falhar."""
+    from .agentes import atendimento
+    try:
+        return atendimento.transcrever(atendimento_id)
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível transcrever: {e}")
+
+
+@app.post("/api/v1/atendimentos/webhook")
+async def atendimento_webhook(request: Request):
+    """Recebe do Daily o aviso de gravação pronta.
+
+    Sem conferir a assinatura, qualquer um poderia postar aqui e injetar
+    áudio no acervo do escritório — por isso o segredo é obrigatório."""
+    import hashlib
+    import hmac as _hmac
+    from .agentes import atendimento
+    s = get_settings()
+    corpo = await request.body()
+
+    if s.daily_webhook_segredo:
+        assinatura = (request.headers.get("x-webhook-signature")
+                      or request.headers.get("x-daily-signature") or "")
+        esperado = _hmac.new(s.daily_webhook_segredo.encode(),
+                             corpo, hashlib.sha256).hexdigest()
+        if not _hmac.compare_digest(esperado, assinatura.strip()):
+            raise HTTPException(401, "Assinatura do webhook inválida.")
+
+    try:
+        payload = json.loads(corpo or b"{}")
+    except Exception:
+        return {"ok": True, "ignorado": "payload inválido"}
+    try:
+        return atendimento.processar_webhook(payload)
+    except Exception as e:
+        return {"ok": False, "erro": str(e)[:200]}
 
 
 # ── Peticionamento: minuta com tags + injeção de precedentes ─────

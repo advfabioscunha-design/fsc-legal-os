@@ -72,6 +72,12 @@ class Settings(BaseModel):
     jurisprudencia_provedor: str = os.getenv("JURISPRUDENCIA_PROVEDOR", "")
     jusbrasil_api_token: str = os.getenv("JUSBRASIL_API_TOKEN", "")
     jurisprudencias_api_token: str = os.getenv("JURISPRUDENCIAS_API_TOKEN", "")
+
+    # ── Atendimento telepresencial (Daily) ───────────────────────
+    # Vídeo ao vivo, gravação só de áudio. O segredo do webhook impede que
+    # qualquer um poste "gravação pronta" e injete áudio no acervo.
+    daily_api_key: str = os.getenv("DAILY_API_KEY", "")
+    daily_webhook_segredo: str = os.getenv("DAILY_WEBHOOK_SEGREDO", "")
     escavador_webhook_token: str = os.getenv("ESCAVADOR_WEBHOOK_TOKEN", "fc-legal-os")
 
     # Fila / RPA
