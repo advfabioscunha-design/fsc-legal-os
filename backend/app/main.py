@@ -64,6 +64,18 @@ def _agendar_radar():
                 )
         except Exception as e:
             print(f"[caixa de entrada] job não agendado: {e}")
+        # Régua de cobrança: casos parados esperando documento do cliente.
+        # Roda de hora em hora, mas cada etapa (3, 7 e 10 dias) só dispara
+        # uma vez por caso — quem controla é a contagem gravada no caso.
+        try:
+            from .agentes import pendencias
+            sched.add_job(
+                pendencias.rodar,
+                CronTrigger(hour=9, minute=40),   # uma vez por dia, de manhã
+                id="regua_cobranca", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[régua] job não agendado: {e}")
         sched.start()
         app.state.scheduler = sched
     except Exception as e:  # API sobe mesmo sem o scheduler
@@ -849,6 +861,41 @@ def gravar_honorarios(caso_id: str, body: HonorariosEntrada):
     return {"ok": True, "resumo": hon.resumo_curto(caso),
             "clausula": hon.clausula_pagamento(caso),
             "documentos": caso.get("_refeitos") or {}}
+
+
+class PrazoFatal(BaseModel):
+    prazo_fatal: str | None = None
+    prazo_descricao: str | None = None
+
+
+@app.put("/api/v1/casos/{caso_id}/prazo")
+def gravar_prazo(caso_id: str, body: PrazoFatal):
+    """Prazo real do caso (prescrição, decadência, prazo processual).
+
+    É o que autoriza a cobrança do dia 7 a falar em risco ao direito. Sem
+    prazo cadastrado, a cobrança usa urgência operacional — não afirma ao
+    cliente algo que não está acontecendo."""
+    try:
+        get_db().table("casos").update({
+            "prazo_fatal": body.prazo_fatal or None,
+            "prazo_descricao": body.prazo_descricao or None,
+            "atualizado_em": datetime.now(_tz.utc).isoformat(),
+        }).eq("id", caso_id).execute()
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível gravar o prazo: {e}")
+    registrar_evento(caso_id, "PRAZO_CADASTRADO",
+                     {"prazo": body.prazo_fatal, "descricao": body.prazo_descricao})
+    return {"ok": True}
+
+
+@app.post("/api/v1/pendencias/rodar")
+def rodar_regua():
+    """Roda a régua de cobrança agora (o automático é diário, de manhã)."""
+    from .agentes import pendencias
+    try:
+        return pendencias.rodar()
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível rodar a régua: {e}")
 
 
 @app.post("/api/v1/documentos-assinatura/{doc_id}/revisar")
@@ -1677,14 +1724,20 @@ def acionar_cliente(caso_id: str, body: AcionarBody):
     }).execute()
     registrar_evento(caso_id, "SOLICITACAO_CLIENTE",
                      {"texto": body.solicitacao, "solicitacao_id": solicitacao_id})
-    # processo sai da produção até o cliente complementar (visível na área do cliente)
+    # o caso entra em AGUARDANDO_DOCUMENTOS: sai da esteira de produção, o
+    # relógio do escritório pausa e o do cliente começa a correr (régua)
+    from .agentes import pendencias
     try:
-        db.table("casos").update({
-            "aguardando_cliente": True, "aguardando_desc": body.solicitacao,
-            "atualizado_em": datetime.now(_tz.utc).isoformat(),
-        }).eq("id", caso_id).execute()
+        pendencias.marcar_aguardando(caso_id, body.solicitacao, solicitacao_id)
     except Exception:
-        pass
+        # versões antigas do banco: ao menos sinaliza a pendência
+        try:
+            db.table("casos").update({
+                "aguardando_cliente": True, "aguardando_desc": body.solicitacao,
+                "atualizado_em": datetime.now(_tz.utc).isoformat(),
+            }).eq("id", caso_id).execute()
+        except Exception:
+            pass
     # 3) avisa o cliente por e-mail e WhatsApp (número escolhido pelo DDD)
     envio = {}
     try:
@@ -1815,15 +1868,20 @@ class AjusteBody(BaseModel):
 def retomar_producao(caso_id: str):
     """Cliente complementou o que faltava → volta para a produção."""
     from .core.db import registrar_evento
+    from .agentes import pendencias
     try:
-        get_db().table("casos").update({
-            "aguardando_cliente": False, "aguardando_desc": None,
-            "atualizado_em": datetime.now(_tz.utc).isoformat(),
-        }).eq("id", caso_id).execute()
+        r = pendencias.retomar(caso_id, "retomada manual")
     except Exception:
-        pass
+        r = {}
+        try:
+            get_db().table("casos").update({
+                "aguardando_cliente": False, "aguardando_desc": None,
+                "atualizado_em": datetime.now(_tz.utc).isoformat(),
+            }).eq("id", caso_id).execute()
+        except Exception:
+            pass
     registrar_evento(caso_id, "CLIENTE_RETORNOU", {})
-    return {"ok": True}
+    return {"ok": True, **r}
 
 
 @app.post("/api/v1/casos/{caso_id}/mover-fase")
@@ -2602,14 +2660,22 @@ async def cliente_enviar_documentos(
         pendentes = 0
     retomado = False
     if pendentes == 0:
+        # é aqui que o card volta sozinho para a esteira: o tempo parado é
+        # devolvido ao SLA, a régua de cobrança encerra e o estado vira
+        # PRONTO_PARA_ANALISE
+        from .agentes import pendencias
         try:
-            db.table("casos").update({
-                "aguardando_cliente": False, "aguardando_desc": None,
-                "atualizado_em": datetime.now(_tz.utc).isoformat(),
-            }).eq("id", caso_id).execute()
+            pendencias.retomar(caso_id, "documento enviado pelo painel")
             retomado = True
         except Exception:
-            pass
+            try:
+                db.table("casos").update({
+                    "aguardando_cliente": False, "aguardando_desc": None,
+                    "atualizado_em": datetime.now(_tz.utc).isoformat(),
+                }).eq("id", caso_id).execute()
+                retomado = True
+            except Exception:
+                pass
 
     registrar_evento(caso_id, "DOCUMENTOS_RECEBIDOS_DO_CLIENTE",
                      {"arquivos": salvos, "solicitacao_id": solicitacao_id,

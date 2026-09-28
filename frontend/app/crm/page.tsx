@@ -7,12 +7,17 @@ import CasoDetalhe from "../components/CasoDetalhe";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
+// AGUARDANDO_DOCUMENTOS e PRONTO_PARA_ANALISE entram como colunas próprias:
+// caso parado esperando o cliente não deve poluir a visão de quem redige, e
+// o que o cliente devolveu precisa aparecer em algum lugar ao voltar.
 const COLUNAS = [
   { id: "QUALIFICACAO",   label: "Qualificacao",     cor: "border-[#8899AA]", hdr: "bg-[#8899AA]/10" },
   { id: "PROPOSTA",       label: "Negociacao/Proposta", cor: "border-[#4361EE]", hdr: "bg-[#4361EE]/10" },
   { id: "CONTRATO",       label: "Contrato",          cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/10" },
   { id: "PAGAMENTO",      label: "Pagamento",         cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/10" },
   { id: "COLETA_DOCS",    label: "Coleta Docs",       cor: "border-[#F39C12]", hdr: "bg-[#F39C12]/10" },
+  { id: "AGUARDANDO_DOCUMENTOS", label: "Aguardando Cliente", cor: "border-[#E5A44C]", hdr: "bg-[#E5A44C]/15" },
+  { id: "PRONTO_PARA_ANALISE",   label: "Pronto p/ Analise",  cor: "border-[#1DB954]", hdr: "bg-[#1DB954]/15" },
   { id: "COLETA_PROVAS",  label: "Coleta Provas",     cor: "border-[#F39C12]", hdr: "bg-[#F39C12]/10" },
   { id: "ANALISE",        label: "Analise",           cor: "border-[#4361EE]", hdr: "bg-[#4361EE]/10" },
   { id: "PETICAO",        label: "Peticionamento",    cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/10" },

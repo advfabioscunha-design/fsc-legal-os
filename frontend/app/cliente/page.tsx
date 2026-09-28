@@ -544,10 +544,42 @@ export default function AreaCliente() {
               </div>
             )}
 
-            {caso?.aguardando_cliente && (
-              <div className="mt-4 rounded-lg border border-amber/50 bg-amber/10 p-4 text-sm text-charcoal/80">
-                <b className="text-navy">Seu processo saiu temporariamente da produção</b> porque precisamos de um complemento: {caso.aguardando_desc}. Envie pelo <button onClick={() => setVista("atendimento")} className="font-semibold text-gold underline">atendimento</button> e ele volta na hora para a produção.
-              </div>
+            {/* Barra de andamento: amarela enquanto a bola está com o cliente,
+                verde assim que ele envia. É o que responde, sem ele precisar
+                perguntar, a pergunta "e o meu processo?". */}
+            {caso && (
+              caso.aguardando_cliente ? (
+                <div className="mt-4 overflow-hidden rounded-xl border border-amber/60 bg-amber/10">
+                  <div className="h-1.5 w-full bg-amber/25">
+                    <div className="h-full w-1/2 bg-amber" />
+                  </div>
+                  <div className="p-4">
+                    <p className="text-sm font-bold text-navy">⚠ Ação necessária: precisamos de um documento seu</p>
+                    <p className="mt-1 text-sm text-charcoal/80">{caso.aguardando_desc}</p>
+                    <p className="mt-2 text-xs text-charcoal/60">
+                      Enquanto isso, seu processo fica parado aguardando você. Assim que enviar,
+                      ele volta na hora para os nossos especialistas.
+                    </p>
+                    <button onClick={() => setVista("atendimento")}
+                      className="mt-3 rounded-xl bg-navy px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90">
+                      Enviar documento agora
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 overflow-hidden rounded-xl border border-forest/40 bg-forest/10">
+                  <div className="h-1.5 w-full bg-forest/25">
+                    <div className="h-full w-4/5 bg-forest" />
+                  </div>
+                  <div className="p-4">
+                    <p className="text-sm font-bold text-forest">✓ Em elaboração pelos nossos especialistas</p>
+                    <p className="mt-1 text-xs text-charcoal/60">
+                      Não há nada pendente do seu lado. Qualquer movimentação aparece aqui e
+                      chega também no seu e-mail.
+                    </p>
+                  </div>
+                </div>
+              )
             )}
 
             {!caso ? (

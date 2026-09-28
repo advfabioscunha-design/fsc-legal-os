@@ -324,12 +324,28 @@ def _dar_ciencia_por_email(caso_id: str) -> int:
     return len(pend)
 
 
-def _reabrir_para_a_esteira(caso_id: str, tem_anexo: bool) -> None:
-    """Cliente respondeu: o caso volta para a fila de trabalho do escritório
-    e some o 'aguardando cliente' do painel."""
-    db = get_db()
+def _tem_pendencia(caso_id: str) -> bool:
+    """O caso está esperando documento do cliente?"""
     try:
-        db.table("casos").update({
+        c = get_db().table("casos").select("aguardando_desde") \
+              .eq("id", caso_id).maybe_single().execute().data
+        return bool((c or {}).get("aguardando_desde"))
+    except Exception:
+        return False
+
+
+def _reabrir_para_a_esteira(caso_id: str, tem_anexo: bool) -> None:
+    """Cliente respondeu: o caso volta para a fila de trabalho do escritório,
+    o tempo parado é devolvido ao SLA e a régua de cobrança encerra."""
+    from ..agentes import pendencias
+    try:
+        pendencias.retomar(caso_id, "documento recebido por e-mail" if tem_anexo
+                           else "resposta recebida por e-mail")
+        return
+    except Exception:
+        pass
+    try:
+        get_db().table("casos").update({
             "aguardando_cliente": False, "aguardando_desc": None,
             "atualizado_em": datetime.now(_tz.utc).isoformat(),
         }).eq("id", caso_id).execute()
@@ -522,7 +538,9 @@ def ler_respostas(limite: int = 60, dias: int = 21) -> dict:
                 # responder já é ciência, e o caso volta para a esteira
                 cientes = _dar_ciencia_por_email(caso_id)
                 resultado["ciencias"] += cientes
-                if conferido:
+                # resposta com anexo devolve o caso à esteira; resposta só de
+                # texto não, porque o documento pedido continua faltando
+                if conferido and (anexos or not _tem_pendencia(caso_id)):
                     _reabrir_para_a_esteira(caso_id, bool(anexos))
 
                 registrar_evento(caso_id, "RESPOSTA_CLIENTE_EMAIL",
