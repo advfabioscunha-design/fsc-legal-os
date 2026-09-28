@@ -7,6 +7,15 @@ O que ela faz, na ordem:
     publicações novas dos processos que já estão na plataforma. Processo
     desconhecido NÃO é cadastrado sozinho: fica na prévia da tela do
     judicial para o advogado conferir e importar.
+
+    ATENÇÃO — hoje esta etapa falha aqui: o Comunica CNJ responde 403
+    para este servidor, que está nos Estados Unidos. Quem consegue
+    consultar é o navegador do escritório, no Brasil, e é de lá que a
+    varredura sai (tela de Intimações → "Atualizar pelo Diário", que
+    chama `importador.sincronizar_conhecidos`). A etapa continua aqui
+    porque passa a funcionar sozinha no dia em que houver um ponto de
+    saída no Brasil; enquanto não houver, ela apenas registra o erro e
+    as outras etapas seguem.
  2. RECALCULA a data de trabalho de todo prazo aberto: prazo fatal menos
     dois dias úteis. Se o prazo fatal mudou, a agenda muda com ele.
  3. VIRA A FASE quando o fato aparece: processo protocolado vai para

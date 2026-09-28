@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import PainelLayout from "../components/PainelLayout";
+import { porOab, FonteOcupada } from "../../lib/cnj";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
+const OAB_PADRAO = { numero: "10849", uf: "RO" };
 
 /* INTIMAÇÕES E PRAZOS
 
@@ -65,25 +67,55 @@ export default function Intimacoes() {
 
   useEffect(() => { load(); }, []);
 
+  /* A rodada tem duas metades, por uma razão de infraestrutura:
+     a consulta ao CNJ precisa sair deste navegador (o servidor está
+     fora do Brasil e o CNJ o recusa); o resto — recalcular datas, virar
+     fases, mandar convites — roda no servidor. */
   async function rodarControladoria() {
     setRodando(true); setAviso("");
+    const partes: string[] = [];
     try {
+      try {
+        const comunicacoes = await porOab(OAB_PADRAO.numero, OAB_PADRAO.uf, 15);
+        const rs = await fetch(`${API}/api/v1/controladoria/sincronizar`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comunicacoes }),
+        });
+        const s = await rs.json().catch(() => ({}));
+        if (rs.ok) {
+          partes.push(
+            `${s.publicacoes ?? 0} publicação(ões) lida(s) no Diário, ` +
+            `${s.intimacoes ?? 0} nova(s) e ${s.prazos ?? 0} prazo(s) criado(s)` +
+            (s.novos_para_conferir
+              ? `; ${s.novos_para_conferir} processo(s) fora do acervo aguardando conferência na tela Judicial`
+              : "") + "."
+          );
+        } else {
+          partes.push(`O servidor não aceitou as publicações (${s.detail || rs.status}).`);
+        }
+      } catch (e: any) {
+        partes.push(e instanceof FonteOcupada
+          ? `O Diário do CNJ não respondeu agora (${e.message}).`
+          : "Não foi possível consultar o Diário agora.");
+      }
+
       const r = await fetch(`${API}/api/v1/controladoria/rodar`, { method: "POST" });
       const d = await r.json().catch(() => ({}));
-      const p = d.publicacoes || {};
-      setAviso(
-        p.erro
-          ? `Diário do CNJ indisponível agora (${p.erro}). O resto da rodada foi feito.`
-          : `${p.intimacoes ?? 0} publicação(ões) nova(s), ${p.prazos ?? 0} prazo(s) criado(s), ` +
-            `${d.datas_ajustadas ?? 0} data(s) reajustada(s), ` +
-            `${(d.fases?.para_judicial ?? 0)} caso(s) para o judicial e ` +
-            `${(d.fases?.para_recebimento ?? 0)} para recebimento.` +
-            (p.novos_para_conferir ? ` ${p.novos_para_conferir} processo(s) novo(s) aguardando conferência na tela Judicial.` : "")
+      partes.push(
+        `${d.datas_ajustadas ?? 0} data(s) de trabalho reajustada(s), ` +
+        `${d.fases?.para_judicial ?? 0} caso(s) para o judicial, ` +
+        `${d.fases?.para_recebimento ?? 0} para recebimento, ` +
+        `${d.convites?.escritorio ?? 0} convite(s) para o escritório e ` +
+        `${d.convites?.cliente ?? 0} para clientes.`
       );
       load();
     } catch {
       setAviso("Não foi possível falar com o servidor.");
-    } finally { setRodando(false); }
+      setRodando(false);
+      return;
+    }
+    setAviso(partes.join(" "));
+    setRodando(false);
   }
 
   async function concluir(id: string) {

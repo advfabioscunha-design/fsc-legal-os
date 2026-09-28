@@ -1,7 +1,11 @@
 "use client";
 import { useState } from "react";
+import { porOab, porProcesso, FonteOcupada } from "../../lib/cnj";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
+
+// OAB do escritório — usada quando o campo fica em branco.
+const OAB_PADRAO = { numero: "10849", uf: "RO" };
 
 /* CARREGAR PROCESSOS DO ACERVO
 
@@ -46,12 +50,21 @@ export default function ImportarProcessos({
   async function buscar() {
     setBuscando(true); setErro(""); setItens([]); setResultado(null);
     try {
-      const r = modo === "oab"
-        ? await fetch(`${API}/api/v1/processos/previa-oab`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ numero: oab || null, uf: uf || null, dias }),
-          })
-        : await fetch(`${API}/api/v1/processos/previa-numero?numero=${encodeURIComponent(numero)}`);
+      /* A consulta ao CNJ sai deste navegador (ver lib/cnj.ts): o
+         servidor do escritório fica fora do Brasil e o CNJ recusa. */
+      const comunicacoes = modo === "oab"
+        ? await porOab(oab || OAB_PADRAO.numero, uf || OAB_PADRAO.uf, dias)
+        : await porProcesso(numero);
+      if (!comunicacoes.length) {
+        setErro(modo === "oab"
+          ? "Nada publicado para esta OAB no período escolhido."
+          : "Nada publicado no DJEN para este número. Confira o número ou cadastre o processo manualmente.");
+        return;
+      }
+      const r = await fetch(`${API}/api/v1/processos/previa-do-navegador`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comunicacoes }),
+      });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErro(d.detail || `Erro ${r.status}`); return; }
       const lista: Item[] = d.itens || [];
@@ -61,8 +74,10 @@ export default function ImportarProcessos({
       lista.forEach((i) => { m[i.numero_processo] = !i.ja_na_plataforma; });
       setMarcados(m);
       if (d.aviso) setErro(d.aviso);
-    } catch {
-      setErro("Não foi possível falar com o servidor.");
+    } catch (e: any) {
+      setErro(e instanceof FonteOcupada
+        ? `O Diário do CNJ não respondeu agora (${e.message}). É instabilidade comum da fonte — tente de novo em alguns minutos.`
+        : "Não foi possível concluir a consulta.");
     } finally { setBuscando(false); }
   }
 

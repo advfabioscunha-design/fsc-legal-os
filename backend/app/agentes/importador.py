@@ -143,6 +143,60 @@ def previa_por_oab(numero: str | None = None, uf: str | None = None,
     }
 
 
+def previa_de_comunicacoes(itens: list[dict]) -> dict:
+    """Mesma prévia, mas a partir de publicações que o NAVEGADOR leu.
+
+    O Comunica CNJ recusa requisição vinda de fora do Brasil, e o nosso
+    servidor está nos Estados Unidos. Então a consulta sai do navegador
+    do escritório — que está no Brasil — e o resultado chega aqui já
+    normalizado. O cruzamento com o acervo e a gravação continuam no
+    servidor, onde é o lugar deles."""
+    grupos: dict[str, list[dict]] = {}
+    for c in itens or []:
+        num = (c.get("numero_processo") or "").strip()
+        if num:
+            grupos.setdefault(num, []).append(c)
+    for lista in grupos.values():
+        lista.sort(key=lambda i: i.get("data") or "")
+    existentes = _casos_por_numero(list(grupos))
+    processos = [_resumir(n, c, existentes.get(n)) for n, c in grupos.items()]
+    processos.sort(key=lambda p: p.get("ultima_data") or "", reverse=True)
+    return {
+        "publicacoes": len(itens or []),
+        "processos": len(processos),
+        "novos": sum(1 for p in processos if not p["ja_na_plataforma"]),
+        "itens": processos,
+    }
+
+
+def sincronizar_conhecidos(itens: list[dict]) -> dict:
+    """Grava as publicações novas dos processos que JÁ estão aqui, cria
+    os prazos e deixa os processos desconhecidos para conferência."""
+    from . import controladoria
+    db = get_db()
+    previa = previa_de_comunicacoes(itens)
+    novas, prazos = 0, 0
+    for p in previa["itens"]:
+        if not p["ja_na_plataforma"]:
+            continue
+        for com in p["comunicacoes"]:
+            nova = _gravar_intimacao(p["caso_id"], com)
+            if not nova:
+                continue
+            novas += 1
+            if nova.get("prazo_em"):
+                _gravar_prazo(p["caso_id"], nova,
+                              f"{nova.get('tipo') or 'Intimação'} — {p['numero_processo']}")
+                db.table("prazos").update({
+                    "depende_do_cliente": controladoria.depende_do_cliente(
+                        nova.get("conteudo"), nova.get("tipo")),
+                }).eq("intimacao_id", nova["id"]).execute()
+                prazos += 1
+    return {"publicacoes": previa["publicacoes"], "intimacoes": novas,
+            "prazos": prazos, "novos_para_conferir": previa["novos"],
+            "processos": previa["processos"]}
+
+
 def previa_por_numero(numero: str) -> dict:
     comunicacoes = comunica_cnj.por_processo(numero)
     if not comunicacoes:

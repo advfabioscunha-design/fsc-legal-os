@@ -3112,6 +3112,26 @@ def previa_numero(numero: str):
         raise HTTPException(503, str(e))
 
 
+class ComunicacoesLidas(BaseModel):
+    comunicacoes: list[dict]
+
+
+@app.post("/api/v1/processos/previa-do-navegador")
+def previa_do_navegador(body: ComunicacoesLidas):
+    """O navegador do escritório consulta o CNJ (que recusa o nosso
+    servidor, por estar fora do Brasil) e manda o resultado para cá."""
+    from .agentes import importador
+    return importador.previa_de_comunicacoes(body.comunicacoes)
+
+
+@app.post("/api/v1/controladoria/sincronizar")
+def controladoria_sincronizar(body: ComunicacoesLidas):
+    """Grava as publicações novas dos processos já cadastrados e cria os
+    prazos; o que não é do acervo fica para conferência na tela."""
+    from .agentes import importador
+    return importador.sincronizar_conhecidos(body.comunicacoes)
+
+
 @app.post("/api/v1/processos/importar")
 def importar_processos(body: ImportarProcessos):
     from .agentes import importador
