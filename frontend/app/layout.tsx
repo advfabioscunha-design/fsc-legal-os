@@ -1,8 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { Playfair_Display, Inter } from "next/font/google";
-import AtendimentoWhats from "./components/AtendimentoWhats";
-import AtendimentoChat from "./components/AtendimentoChat";
+import AtendimentoFlutuante from "./components/AtendimentoFlutuante";
 
 const playfair = Playfair_Display({
   subsets: ["latin"], weight: ["500", "600", "700", "800"], variable: "--font-playfair", display: "swap",
@@ -23,8 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt-BR" className={`${playfair.variable} ${inter.variable}`}>
       <body className="bg-white text-charcoal antialiased">
         {children}
-        <AtendimentoChat variant="floating" />
-        <AtendimentoWhats variant="floating" />
+        {/* só no site e na área do cliente — ver o componente */}
+        <AtendimentoFlutuante />
       </body>
     </html>
   );

@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import { usePathname } from "next/navigation";
 
 // Contatos por estado (DDI 55 + DDD + número)
 const CONTATOS = [
@@ -10,8 +9,6 @@ const CONTATOS = [
 const MSG = "Olá! Vim pelo site da FC Advocacia e gostaria de atendimento.";
 const waLink = (n: string) => `https://wa.me/${n}?text=${encodeURIComponent(MSG)}`;
 
-// Telas internas/equipe/cliente: sem botão flutuante
-const OCULTAR_EM = ["/entrar", "/equipe", "/crm", "/cliente", "/portal", "/processos", "/admin", "/agenda", "/assistente"];
 
 function Opcoes() {
   return (
@@ -39,8 +36,7 @@ export default function AtendimentoWhats({
   className = "",
 }: { variant?: "inline" | "floating"; label?: string; className?: string }) {
   const [open, setOpen] = useState(false);
-  const pathname = usePathname();
-  if (variant === "floating" && OCULTAR_EM.some((p) => pathname?.startsWith(p))) return null;
+  // Quem decide onde o flutuante aparece é AtendimentoFlutuante.
 
   if (variant === "floating") {
     return (

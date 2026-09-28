@@ -125,6 +125,16 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [aba, modo]);
 
+  /* Vir de outra tela com um caso em mente — "abrir caso" na lista de
+     prazos, por exemplo — abre a pasta dele direto, em vez de largar a
+     pessoa na esteira inteira para procurar o card. Lemos da URL no
+     efeito, e não com useSearchParams, para a página não precisar de
+     fronteira de Suspense no build. */
+  useEffect(() => {
+    const alvo = new URLSearchParams(window.location.search).get("caso");
+    if (alvo) setSelecionado(alvo);
+  }, []);
+
   async function aprovar(id: string) {
     await fetch(`${API}/api/v1/casos/${id}/aprovar-protocolar`, { method: "POST" });
     load();

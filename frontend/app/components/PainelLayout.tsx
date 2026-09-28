@@ -29,6 +29,19 @@ const MENU = [
   { href: "/assistente", label: "Assistente", icone: "💡" },
 ];
 
+/* Onde mora cada caso, agora que são quatro telas. A busca global
+   precisa disso: antes ela mandava todo resultado para a Produção, e um
+   processo já em juízo não aparecia lá — quem buscava concluía que o
+   caso havia sumido. */
+const TELA_POR_ESTADO: Record<string, string> = {
+  LEAD: "/contratos", QUALIFICACAO: "/contratos", PROPOSTA: "/contratos",
+  CONTRATO: "/contratos", PAGAMENTO: "/contratos", LEAD_FRIO: "/contratos",
+  JUDICIAL: "/judicial", PROTOCOLADO: "/judicial", TRANSITO_JULGADO: "/judicial",
+  RECEBIMENTO: "/recebimento", CONCLUIDO: "/recebimento",
+};
+const telaDoCaso = (estado?: string | null) =>
+  (estado && TELA_POR_ESTADO[estado]) || "/crm";
+
 export default function PainelLayout({ children, titulo }: { children: React.ReactNode; titulo?: string }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -102,7 +115,7 @@ export default function PainelLayout({ children, titulo }: { children: React.Rea
                 <div className="absolute left-0 right-0 z-40 mt-2 max-h-80 overflow-y-auto rounded-xl border border-white/10 bg-[#0B1F3B] p-2 shadow-2xl">
                   {buscando ? <p className="px-2 py-1 text-xs text-[#8899AA]">Buscando…</p> :
                     resultados.map((c) => (
-                      <Link key={c.id} href="/crm" onClick={() => setResultados([])}
+                      <Link key={c.id} href={telaDoCaso(c.estado)} onClick={() => setResultados([])}
                         className="block rounded-lg px-3 py-2 text-sm text-white hover:bg-white/5">
                         <span className="font-semibold">{c.clientes?.nome ?? "—"}</span>
                         <span className="ml-2 text-xs text-[#8899AA]">{c.grupo ?? ""} {c.numero_processo ? `· ${c.numero_processo}` : ""} · {c.estado}</span>

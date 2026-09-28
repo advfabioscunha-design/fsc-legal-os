@@ -25,6 +25,15 @@ const OAB_PADRAO = { numero: "10849", uf: "RO" };
    o cálculo usa o padrão do tipo de ato e não conhece feriado local nem
    suspensão de expediente. Quem confirma é o advogado. */
 
+/* "Abrir caso" tem que cair na tela onde o caso está — um processo em
+   execução não aparece na tela do judicial. */
+function telaDaFase(fase?: string | null) {
+  if (fase === "RECEBIMENTO" || fase === "CONCLUIDO") return "/recebimento";
+  if (fase === "JUDICIAL" || fase === "PROTOCOLADO" || fase === "TRANSITO_JULGADO")
+    return "/judicial";
+  return "/crm";
+}
+
 function cor(dias: number) {
   if (dias < 0) return "#C0392B";
   if (dias <= 2) return "#E5A44C";
@@ -218,7 +227,7 @@ export default function Intimacoes() {
                 </div>
                 <div className="flex shrink-0 gap-2">
                   {p.caso_id && (
-                    <Link href={`/judicial?caso=${p.caso_id}`}
+                    <Link href={`${telaDaFase(p.fase)}?caso=${p.caso_id}`}
                       className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:text-white">
                       abrir caso
                     </Link>

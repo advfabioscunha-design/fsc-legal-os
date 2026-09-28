@@ -1,10 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
 import Link from "next/link";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
-const OCULTAR_FLOATING = ["/entrar", "/cliente", "/crm", "/equipe", "/portal", "/processos", "/admin", "/agenda", "/assistente"];
 
 type Msg = { autor: "CLIENTE" | "AGENTE"; conteudo: string };
 
@@ -28,7 +26,6 @@ export default function AtendimentoChat({
   className = "",
   variant = "inline",
 }: { label?: string; className?: string; variant?: Variant }) {
-  const pathname = usePathname();
   const [aberto, setAberto] = useState(false);
   const [iniciado, setIniciado] = useState(false);
   const [nome, setNome] = useState("");
@@ -133,7 +130,9 @@ export default function AtendimentoChat({
     }
   }
 
-  if (variant === "floating" && OCULTAR_FLOATING.some((p) => pathname?.startsWith(p))) return null;
+  // Onde este botão aparece é decidido em AtendimentoFlutuante, um
+  // lugar só: a lista que existia aqui envelheceu e deixou os botões
+  // do site aparecerem nas telas novas da equipe.
 
   const botao =
     variant === "floating" ? (
