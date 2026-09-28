@@ -1,7 +1,8 @@
 """FSC LEGAL OS v4.0 — Backend FastAPI (api.seudominio.com.br)."""
 import json
 import httpx
-from fastapi import FastAPI, Request, HTTPException, Header, UploadFile, File
+from fastapi import (FastAPI, Request, HTTPException, Header, UploadFile,
+                     File, BackgroundTasks)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -958,11 +959,22 @@ def transcrever_atendimento(atendimento_id: str):
 
 
 @app.post("/api/v1/atendimentos/webhook")
-async def atendimento_webhook(request: Request):
+async def atendimento_webhook(request: Request, tarefas: BackgroundTasks):
     """Recebe do Daily o aviso de gravação pronta.
 
-    Sem conferir a assinatura, qualquer um poderia postar aqui e injetar
-    áudio no acervo do escritório — por isso o segredo é obrigatório."""
+    Dois cuidados que o Daily impõe e que são fáceis de errar:
+
+    1. ASSINATURA. O segredo é guardado em base64; a assinatura é o
+       HMAC-SHA256 de `timestamp + "." + corpo`, com a chave decodificada,
+       e vem em base64 no header X-Webhook-Signature. Sem conferir isso,
+       qualquer um poderia postar aqui e injetar áudio no acervo.
+
+    2. RESPONDER RÁPIDO. Baixar o áudio e transcrever leva minutos; se
+       demorarmos, o Daily marca o endpoint como defeituoso e para de
+       entregar. Então respondemos 200 na hora e processamos em segundo
+       plano — inclusive no ping de verificação, que vem sem corpo útil.
+    """
+    import base64
     import hashlib
     import hmac as _hmac
     from .agentes import atendimento
@@ -970,21 +982,29 @@ async def atendimento_webhook(request: Request):
     corpo = await request.body()
 
     if s.daily_webhook_segredo:
-        assinatura = (request.headers.get("x-webhook-signature")
-                      or request.headers.get("x-daily-signature") or "")
-        esperado = _hmac.new(s.daily_webhook_segredo.encode(),
-                             corpo, hashlib.sha256).hexdigest()
-        if not _hmac.compare_digest(esperado, assinatura.strip()):
-            raise HTTPException(401, "Assinatura do webhook inválida.")
+        ts = request.headers.get("x-webhook-timestamp", "")
+        assinatura = request.headers.get("x-webhook-signature", "")
+        if ts and assinatura:
+            try:
+                chave = base64.b64decode(s.daily_webhook_segredo)
+            except Exception:
+                chave = s.daily_webhook_segredo.encode()
+            esperado = base64.b64encode(_hmac.new(
+                chave, f"{ts}.".encode() + corpo, hashlib.sha256).digest()).decode()
+            if not _hmac.compare_digest(esperado, assinatura.strip()):
+                raise HTTPException(401, "Assinatura do webhook inválida.")
 
     try:
         payload = json.loads(corpo or b"{}")
     except Exception:
-        return {"ok": True, "ignorado": "payload inválido"}
-    try:
-        return atendimento.processar_webhook(payload)
-    except Exception as e:
-        return {"ok": False, "erro": str(e)[:200]}
+        return {"ok": True, "ignorado": "sem payload"}
+
+    tipo = (payload.get("type") or payload.get("event") or "").lower()
+    if not tipo:
+        return {"ok": True, "verificacao": True}   # ping de validação do Daily
+
+    tarefas.add_task(atendimento.processar_webhook, payload)
+    return {"ok": True, "recebido": tipo}
 
 
 # ── Peticionamento: minuta com tags + injeção de precedentes ─────
