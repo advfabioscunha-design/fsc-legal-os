@@ -2228,7 +2228,19 @@ def aprovar_etapa(caso_id: str):
 
 
 class MoverFase(BaseModel):
-    fase: str
+    """Duas telas chamam este endpoint com nomes diferentes: a pasta do
+    caso manda `fase` (é a que ela sempre mandou), e os botões das telas
+    de Judicial e Recebimento mandam `destino`. Aceitar os dois evita
+    uma rota duplicada — que foi exatamente o defeito que apareceu aqui:
+    duas rotas com o mesmo caminho, e o FastAPI atendendo só a primeira,
+    deixando a segunda como código morto que ninguém executa."""
+    fase: str | None = None
+    destino: str | None = None
+    motivo: str = ""
+
+    @property
+    def alvo(self) -> str:
+        return (self.fase or self.destino or "").upper()
 
 
 class AjusteBody(BaseModel):
@@ -2257,16 +2269,36 @@ def retomar_producao(caso_id: str):
 
 @app.post("/api/v1/casos/{caso_id}/mover-fase")
 def mover_fase(caso_id: str, body: MoverFase):
-    """Override manual da fase (ex.: reinserir após ação humana no ponto certo)."""
+    """Mover o caso de fase à mão.
+
+    Dentro da esteira (triagem/contratos) segue valendo o movimento
+    livre: o advogado reinsere o caso no ponto certo depois de uma ação
+    humana. Já a entrada nas fases processuais passa pela controladoria,
+    que exige número de processo e respeita a máquina de estados —
+    judicializar um caso sem número seria criar um processo que ninguém
+    consegue acompanhar."""
     from .core.db import registrar_evento
-    if body.fase not in ORDEM_ESTEIRA and body.fase not in ("CONCLUIDO", "AGENDADO"):
-        raise HTTPException(400, f"Fase '{body.fase}' inválida.")
+    from .agentes import controladoria
+    alvo = body.alvo
+    if not alvo:
+        raise HTTPException(400, "Informe a fase de destino.")
+
+    if alvo in ("JUDICIAL", "RECEBIMENTO", "TRANSITO_JULGADO"):
+        try:
+            r = controladoria.mover_fase(caso_id, alvo, body.motivo)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        _avisar_fase(caso_id, alvo)
+        return {"ok": True, "novo_estado": alvo, **r}
+
+    if alvo not in ORDEM_ESTEIRA and alvo not in ("CONCLUIDO", "AGENDADO"):
+        raise HTTPException(400, f"Fase '{alvo}' inválida.")
     get_db().table("casos").update({
-        "estado": body.fase, "atualizado_em": datetime.now(_tz.utc).isoformat(),
+        "estado": alvo, "atualizado_em": datetime.now(_tz.utc).isoformat(),
     }).eq("id", caso_id).execute()
-    registrar_evento(caso_id, "FASE_MOVIDA_MANUAL", {"fase": body.fase})
-    _avisar_fase(caso_id, body.fase)
-    return {"ok": True, "novo_estado": body.fase}
+    registrar_evento(caso_id, "FASE_MOVIDA_MANUAL", {"fase": alvo})
+    _avisar_fase(caso_id, alvo)
+    return {"ok": True, "novo_estado": alvo}
 
 
 @app.post("/api/v1/casos/{caso_id}/solicitar-ajuste")
@@ -3081,10 +3113,6 @@ class ImportarProcessos(BaseModel):
     fase: str = "JUDICIAL"
 
 
-class MoverFase(BaseModel):
-    destino: str                       # JUDICIAL | RECEBIMENTO
-    motivo: str = ""
-
 
 @app.post("/api/v1/processos/previa-oab")
 def previa_oab(body: ImportarOAB):
@@ -3173,14 +3201,6 @@ def importar_processos(body: ImportarProcessos):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-
-@app.post("/api/v1/casos/{caso_id}/mover-fase")
-def mover_fase(caso_id: str, body: MoverFase):
-    from .agentes import controladoria
-    try:
-        return controladoria.mover_fase(caso_id, body.destino.upper(), body.motivo)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
 
 
 @app.post("/api/v1/controladoria/rodar")

@@ -9,19 +9,19 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
 /* O menu segue o caminho do caso, na ordem em que ele acontece — e são
    quatro fases, cada uma na sua tela:
 
-     1. CONTRATOS    quem chegou, proposta, assinatura, pagamento
-     2. PRODUÇÃO     documentos, análise, peça, revisão, protocolo
-     3. JUDICIAL     protocolado, tramitação, trânsito em julgado
-     4. RECEBIMENTO  cumprimento, alvará, prestação de contas
+     1. CONTRATOS      quem chegou, proposta, assinatura, pagamento
+     2. TRIAGEM        documentos, análise, peça, revisão, protocolo
+     3. JUDICIALIZADO  protocolado, tramitação, trânsito em julgado
+     4. EXECUÇÃO       cumprimento, alvará, prestação de contas
 
    Depois delas vêm as ferramentas transversais: intimações e prazos,
    agenda, administração. "Início" abre a visão geral. */
 const MENU = [
   { href: "/inicio", label: "Início", icone: "🏠" },
   { href: "/contratos", label: "Contratos", icone: "🤝" },
-  { href: "/crm", label: "Produção", icone: "🗂️" },
-  { href: "/judicial", label: "Judicial", icone: "⚖️" },
-  { href: "/recebimento", label: "Recebimento", icone: "💰" },
+  { href: "/crm", label: "Triagem", icone: "🗂️" },
+  { href: "/judicial", label: "Judicializado", icone: "⚖️" },
+  { href: "/recebimento", label: "Execução", icone: "💰" },
   { href: "/intimacoes", label: "Intimações e prazos", icone: "🔔" },
   { href: "/processos", label: "Todos os processos", icone: "📁" },
   { href: "/agenda", label: "Agenda", icone: "📅" },

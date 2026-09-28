@@ -11,8 +11,9 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
    trabalhos diferentes com ritmos diferentes.
 
    CONTRATOS é a fase comercial: quem chegou, o que foi proposto, quem
-   assinou e quem pagou. PRODUÇÃO começa quando o contrato está fechado:
-   documento, análise, peça, revisão e protocolo.
+   assinou e quem pagou. TRIAGEM começa quando o contrato está fechado:
+   documento, análise, peça, revisão e protocolo. Depois vêm
+   JUDICIALIZADO e EXECUÇÃO, cada uma na sua tela.
 
    Misturar os dois, como estava, fazia o advogado que ia redigir uma
    petição atravessar dez colunas de negociação para chegar no caso dele. */
@@ -35,7 +36,7 @@ const COLUNAS_JUDICIAL = [
 ];
 
 const COLUNAS_RECEBIMENTO = [
-  { id: "RECEBIMENTO", label: "Execução / Recebimento", cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/15" },
+  { id: "RECEBIMENTO", label: "Em execução",            cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/15" },
   { id: "CONCLUIDO",   label: "Concluído",              cor: "border-[#5A6B7C]", hdr: "bg-[#5A6B7C]/10" },
 ];
 
@@ -78,10 +79,10 @@ const formVazio = { nome: "", cpf: "", contato: "", grupo: "", fase: "PETICAO", 
 export type ModoEsteira = "contratos" | "producao" | "judicial" | "recebimento";
 
 const POR_MODO: Record<ModoEsteira, { titulo: string; colunas: typeof COLUNAS_CONTRATOS }> = {
-  contratos:   { titulo: "Contratos",             colunas: COLUNAS_CONTRATOS },
-  producao:    { titulo: "Produção",              colunas: COLUNAS_PRODUCAO },
-  judicial:    { titulo: "Judicial",              colunas: COLUNAS_JUDICIAL },
-  recebimento: { titulo: "Execução / Recebimento", colunas: COLUNAS_RECEBIMENTO },
+  contratos:   { titulo: "Contratos",    colunas: COLUNAS_CONTRATOS },
+  producao:    { titulo: "Triagem",      colunas: COLUNAS_PRODUCAO },
+  judicial:    { titulo: "Judicializado", colunas: COLUNAS_JUDICIAL },
+  recebimento: { titulo: "Execução",     colunas: COLUNAS_RECEBIMENTO },
 };
 
 export default function Esteira({ modo }: { modo: ModoEsteira }) {
@@ -92,7 +93,6 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
   const COLUNAS = POR_MODO[modo].colunas;
   const estados = COLUNAS.map((c) => c.id);
   const [casos, setCasos] = useState<Caso[]>([]);
-  const [pendencias, setPendencias] = useState<Caso[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [aba, setAba] = useState<"esteira" | "suspensos" | "arquivados" | "lixeira">("esteira");
@@ -112,17 +112,18 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
       return;
     }
     const situ = aba === "esteira" ? "ATIVO" : aba === "suspensos" ? "SUSPENSO" : "ARQUIVADO";
-    Promise.all([
-      fetch(`${API}/api/v1/casos?situacao=${situ}`).then((r) => r.json()).catch(() => []),
-      aba === "esteira"
-        ? fetch(`${API}/api/v1/pendencias`).then((r) => r.json()).catch(() => [])
-        : Promise.resolve([]),
-    ]).then(([cs, ps]) => {
-      // cada tela mostra apenas as etapas que lhe dizem respeito
-      const lista = Array.isArray(cs) ? cs : [];
-      setCasos(aba === "esteira" ? lista.filter((c: Caso) => estados.includes(c.estado)) : lista);
-      setPendencias(Array.isArray(ps) ? ps : []);
-    }).finally(() => setLoading(false));
+    /* Cada tela carrega só o que é dela. A caixa de "intervenção
+       urgente" ficava em todas e repetia os mesmos nove casos em cima
+       de qualquer trabalho — quem abria o Judicial via a fila da
+       triagem antes do próprio acervo. O caso pede atenção no lugar
+       onde ele está: o card fica na coluna dele, com o contador de
+       mensagens, e os prazos têm a tela de Intimações. */
+    fetch(`${API}/api/v1/casos?situacao=${situ}`)
+      .then((r) => r.json()).catch(() => [])
+      .then((cs) => {
+        const lista = Array.isArray(cs) ? cs : [];
+        setCasos(aba === "esteira" ? lista.filter((c: Caso) => estados.includes(c.estado)) : lista);
+      }).finally(() => setLoading(false));
   }
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [aba, modo]);
@@ -146,7 +147,7 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
      julgado, mas há caso que anda por fora (acordo, cumprimento
      voluntário, desmembramento). O botão existe para isso. */
   async function moverFase(id: string, destino: "JUDICIAL" | "RECEBIMENTO") {
-    const rotulo = destino === "RECEBIMENTO" ? "execução / recebimento" : "judicial";
+    const rotulo = destino === "RECEBIMENTO" ? "execução" : "judicializado";
     if (!confirm(`Mover este caso para a fase ${rotulo}?`)) return;
     setMovendo(id);
     try {
@@ -246,33 +247,6 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
         ))}
       </div>
 
-      {/* Caixa de Intervenção Urgente */}
-      {pendencias.length > 0 && (
-        <div className="mt-4 rounded-lg border border-[#C0392B]/50 bg-[#C0392B]/10 p-4">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="rounded bg-[#C0392B] px-2 py-0.5 text-xs font-bold text-white">INTERVENÇÃO URGENTE</span>
-            <span className="text-sm text-white/80">{pendencias.length} caso(s) aguardando atendimento humano</span>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {pendencias.map((c) => (
-              <div key={c.id} className="w-60 shrink-0 rounded-lg bg-[#1A3A6B]/40 border border-[#C0392B]/30 p-3">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-white text-sm truncate">{c.clientes?.nome ?? "—"}</p>
-                  {(c.mensagens_nao_respondidas ?? 0) > 0 && (
-                    <span className="ml-2 shrink-0 rounded-full bg-[#C0392B] px-2 py-0.5 text-[11px] font-bold text-white">
-                      {c.mensagens_nao_respondidas} msg
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-[#8899AA] mt-1 truncate">{c.grupo ?? "—"}</p>
-                {ehEscritorio(c) && (
-                  <span className="mt-1 inline-block text-[10px] text-[#C9A84C]">★ Escritório</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Esteira (aba ativa) ou listas de Suspensos/Arquivados */}
       {aba === "esteira" ? (
@@ -292,6 +266,14 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
                       className={`cursor-pointer rounded-lg bg-[#1A3A6B]/30 border p-3 transition-colors ${ehEscritorio(c) ? "border-[#C9A84C]/40" : "border-white/5 hover:border-[#2D7DD2]/30"}`}>
                       <div className="flex items-start justify-between gap-1">
                         <p className="font-semibold text-white text-sm truncate">{c.clientes?.nome ?? "—"}</p>
+                        {/* A urgência agora mora no card, na coluna onde o
+                            caso está — e não numa caixa que repetia os
+                            mesmos casos em cima de todas as telas. */}
+                        {(c.mensagens_nao_respondidas ?? 0) > 0 && (
+                          <span className="shrink-0 rounded-full bg-[#C0392B] px-2 py-0.5 text-[10px] font-bold text-white">
+                            {c.mensagens_nao_respondidas} msg
+                          </span>
+                        )}
                       </div>
                       {ehEscritorio(c) && (
                         <span className="mt-1 inline-block rounded bg-[#C9A84C]/20 px-2 py-0.5 text-[10px] font-bold text-[#C9A84C]">★ ESCRITÓRIO</span>
@@ -318,7 +300,7 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
                         <button onClick={(e) => { e.stopPropagation(); moverFase(c.id, "JUDICIAL"); }}
                           disabled={movendo === c.id}
                           className="mt-2 w-full rounded-md border border-white/20 py-1.5 text-xs font-semibold text-white/70 transition hover:bg-white/5 disabled:opacity-40">
-                          {movendo === c.id ? "movendo…" : "← Voltar para o judicial"}
+                          {movendo === c.id ? "movendo…" : "← Voltar para o judicializado"}
                         </button>
                       )}
                       {col.id === "REVISAO" && (

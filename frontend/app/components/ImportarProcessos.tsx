@@ -116,7 +116,7 @@ export default function ImportarProcessos({
         className="my-6 w-full max-w-4xl rounded-2xl bg-[#0F2A44] p-6 text-white shadow-2xl">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-lg font-bold">
-            Carregar processos — fase {fase === "JUDICIAL" ? "judicial" : "de execução"}
+            Carregar processos — fase {fase === "JUDICIAL" ? "judicializado" : "de execução"}
           </h2>
           <button onClick={onFechar} className="text-white/60 hover:text-white">✕</button>
         </div>

@@ -96,7 +96,7 @@ export default function Intimacoes() {
             `${s.publicacoes ?? 0} publicação(ões) lida(s) no Diário, ` +
             `${s.intimacoes ?? 0} nova(s) e ${s.prazos ?? 0} prazo(s) criado(s)` +
             (s.novos_para_conferir
-              ? `; ${s.novos_para_conferir} processo(s) fora do acervo aguardando conferência na tela Judicial`
+              ? `; ${s.novos_para_conferir} processo(s) fora do acervo aguardando conferência na tela Judicializado`
               : "") + "."
           );
         } else {
