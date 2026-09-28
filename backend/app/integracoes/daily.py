@@ -57,32 +57,49 @@ def _post(caminho: str, payload: dict) -> dict:
 
 
 # ── Sala ─────────────────────────────────────────────────────────
+PLANO_SEM_GRAVACAO = "cannot be set to that value with your current plan"
+
+
 def criar_sala(validade_s: int = VALIDADE_PADRAO_S) -> dict:
     """Cria uma sala privada e descartável para um atendimento.
 
     O nome é aleatório de propósito: nome de sala aparece em URL, log e
     histórico de navegador, e não deve dizer quem é o cliente nem de que
     trata o caso.
+
+    Gravação é recurso de plano pago no Daily. Enquanto não houver cartão
+    cadastrado, a sala é criada SEM gravação em vez de falhar — o
+    atendimento ao vivo funciona do mesmo jeito, e a gravação passa a
+    valer sozinha assim que o plano permitir. Travar o atendimento inteiro
+    por causa de um cartão seria o pior dos mundos.
     """
     nome = f"fsc-{secrets.token_hex(8)}"
     expira = int(time.time()) + validade_s
-    sala = _post("/rooms", {
-        "name": nome,
-        "privacy": "private",          # só entra com token
-        "properties": {
-            "exp": expira,
-            "eject_at_room_exp": True,
+    base = {
+        "exp": expira,
+        "eject_at_room_exp": True,
+        "enable_chat": False,
+        "enable_screenshare": True,   # útil para mostrar documento
+        "enable_prejoin_ui": True,    # testa câmera e microfone antes
+        "start_video_off": False,
+        "start_audio_off": False,
+        "max_participants": 4,        # advogado, cliente e folga
+    }
+    try:
+        sala = _post("/rooms", {
+            "name": nome, "privacy": "private",
             # gravação de áudio: quem pode disparar é definido no token
-            "enable_recording": "cloud-audio-only",
-            "enable_chat": False,
-            "enable_screenshare": True,   # útil para mostrar documento
-            "enable_prejoin_ui": True,    # testa câmera e microfone antes
-            "start_video_off": False,
-            "start_audio_off": False,
-            "max_participants": 4,        # advogado, cliente e folga
-        },
-    })
-    return {"nome": sala["name"], "url": sala["url"], "expira_em": expira}
+            "properties": {**base, "enable_recording": "cloud-audio-only"},
+        })
+        grava = True
+    except DailyIndisponivel as e:
+        if PLANO_SEM_GRAVACAO not in str(e):
+            raise
+        sala = _post("/rooms", {"name": nome, "privacy": "private",
+                                "properties": base})
+        grava = False
+    return {"nome": sala["name"], "url": sala["url"], "expira_em": expira,
+            "gravacao_disponivel": grava}
 
 
 def excluir_sala(nome: str) -> bool:
@@ -95,16 +112,20 @@ def excluir_sala(nome: str) -> bool:
 
 
 # ── Tokens de entrada ────────────────────────────────────────────
-def token_advogado(sala: str, nome_exibicao: str, expira_em: int) -> str:
+def token_advogado(sala: str, nome_exibicao: str, expira_em: int,
+                   com_gravacao: bool = True) -> str:
     """Token do advogado: dono da sala e ÚNICO que pode gravar."""
-    d = _post("/meeting-tokens", {"properties": {
-        "room_name": sala,
-        "user_name": nome_exibicao,
-        "is_owner": True,
-        "enable_recording": "cloud-audio-only",
-        "exp": expira_em,
-    }})
-    return d["token"]
+    props = {"room_name": sala, "user_name": nome_exibicao,
+             "is_owner": True, "exp": expira_em}
+    if com_gravacao:
+        try:
+            return _post("/meeting-tokens", {
+                "properties": {**props, "enable_recording": "cloud-audio-only"}
+            })["token"]
+        except DailyIndisponivel as e:
+            if PLANO_SEM_GRAVACAO not in str(e):
+                raise
+    return _post("/meeting-tokens", {"properties": props})["token"]
 
 
 def token_cliente(sala: str, nome_exibicao: str, expira_em: int) -> str:

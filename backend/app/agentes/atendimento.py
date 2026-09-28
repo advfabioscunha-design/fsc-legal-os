@@ -64,7 +64,8 @@ def abrir(caso_id: str, horas: int = 3) -> dict:
 
     sala = daily.criar_sala(validade_s=horas * 3600)
     s = get_settings()
-    token = daily.token_advogado(sala["nome"], s.advogado, sala["expira_em"])
+    token = daily.token_advogado(sala["nome"], s.advogado, sala["expira_em"],
+                                 com_gravacao=sala.get("gravacao_disponivel", True))
 
     linha = db.table("atendimentos").insert({
         "caso_id": caso_id,
@@ -75,9 +76,17 @@ def abrir(caso_id: str, horas: int = 3) -> dict:
     }).execute().data[0]
 
     registrar_evento(caso_id, "ATENDIMENTO_ABERTO",
-                     {"atendimento_id": linha["id"], "sala": sala["nome"]})
+                     {"atendimento_id": linha["id"], "sala": sala["nome"],
+                      "gravacao_disponivel": sala.get("gravacao_disponivel")})
+    aviso = "" if sala.get("gravacao_disponivel", True) else (
+        "A sala está no ar, mas a GRAVAÇÃO está indisponível: o plano atual "
+        "do Daily não permite gravar. Cadastre um cartão no painel do Daily "
+        "(contas novas ganham US$ 15 de crédito) e a gravação passa a "
+        "funcionar sozinha no próximo atendimento.")
     return {"ok": True, "atendimento": linha, "url": sala["url"],
             "token": token,
+            "gravacao_disponivel": sala.get("gravacao_disponivel", True),
+            "aviso": aviso,
             "link_cliente": f"{s.app_url}/atendimento/{linha['id']}"}
 
 
