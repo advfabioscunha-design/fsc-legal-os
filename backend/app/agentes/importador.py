@@ -71,10 +71,11 @@ def prazo_do_ato(item: dict) -> int | None:
     rotulo = f"{item.get('tipo_documento') or ''} {item.get('tipo') or ''}".lower()
     if any(s in rotulo for s in SEM_PRAZO):
         return None
-    for chave, dias in PRAZO_PADRAO.items():
-        if chave in rotulo:
-            return dias
-    return None
+    # Um rótulo pode casar com mais de um tipo ("DESPACHO/DECISÃO").
+    # Nesses casos vale o MENOR prazo: errar para o lado curto adianta
+    # trabalho; errar para o lado longo perde prazo.
+    achados = [dias for chave, dias in PRAZO_PADRAO.items() if chave in rotulo]
+    return min(achados) if achados else None
 
 
 # ── Prévia ──────────────────────────────────────────────────────
