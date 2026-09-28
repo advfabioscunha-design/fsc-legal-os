@@ -46,7 +46,11 @@ TRIBUNAIS: dict[str, dict] = {
              "graus": "1º e 2º", "uf": "MT"},
     "TJBA": {"nome": "TJ Bahia", "sistemas": ["PJe", "Projudi"], "datajud": "tjba",
              "graus": "1º e 2º", "uf": "BA"},
-    "TJSP": {"nome": "TJ São Paulo", "sistemas": ["e-SAJ"], "datajud": "tjsp",
+    # O TJSP está migrando os processos novos do e-SAJ para o eproc. Os
+    # dois sistemas convivem, e isso não muda nada aqui: quem publica é
+    # o tribunal, e o número CNJ é o mesmo (.8.26.) nos dois. Um caso de
+    # 2027 no eproc chega pelo mesmo caminho que um de 2020 no e-SAJ.
+    "TJSP": {"nome": "TJ São Paulo", "sistemas": ["e-SAJ", "eproc"], "datajud": "tjsp",
              "graus": "1º e 2º", "uf": "SP"},
 
     # ── Justiça do Trabalho ──────────────────────────────────────

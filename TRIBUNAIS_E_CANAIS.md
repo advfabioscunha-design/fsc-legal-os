@@ -33,7 +33,7 @@ sentença, que muda de juízo para juízo.
 | TJ Paraná | Projudi e PJe | DJEN | DataJud `tjpr` |
 | TJ Mato Grosso | PJe | DJEN | DataJud `tjmt` |
 | TJ Bahia | PJe e Projudi | DJEN | DataJud `tjba` |
-| TJ São Paulo | e-SAJ | DJEN | DataJud `tjsp` |
+| TJ São Paulo | e-SAJ e eproc | DJEN | DataJud `tjsp` |
 | TRT 12ª (SC) | PJe | DJEN | DataJud `trt12` |
 | TRT 14ª (RO/AC) | PJe | DJEN | DataJud `trt14` |
 | TRF 1ª Região | PJe | DJEN | DataJud `trf1` |
@@ -41,6 +41,11 @@ sentença, que muda de juízo para juízo.
 
 Primeiro e segundo grau vêm juntos: o DJEN não separa, e o DataJud traz
 o campo `grau` em cada processo.
+
+O TJSP está migrando os processos novos do e-SAJ para o eproc, e os dois
+convivem. Isso não muda nada por aqui: quem publica é o tribunal, e o
+número CNJ é o mesmo (`.8.26.`) nos dois sistemas — um caso novo no
+eproc chega pelo mesmo caminho que um antigo no e-SAJ.
 
 O tribunal é descoberto pelo **próprio número CNJ** (segmento da Justiça
 e código do tribunal, Resolução 65/2008), não pelo que veio escrito na
