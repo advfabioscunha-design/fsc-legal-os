@@ -189,7 +189,7 @@ def por_numero(numero: str, alias: str | None = None) -> dict | None:
     corpo = {"size": 1, "query": {"match": {"numeroProcesso": digitos}}}
     try:
         r = httpx.post(BASE.format(alias=alias), headers=_headers(),
-                       json=corpo, timeout=20)
+                       json=corpo, timeout=45)
         r.raise_for_status()
     except httpx.HTTPError:
         return None

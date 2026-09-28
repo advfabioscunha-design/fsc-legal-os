@@ -1,6 +1,7 @@
 """FSC LEGAL OS v4.0 — Backend FastAPI (api.seudominio.com.br)."""
 import json
 import re
+import time
 
 import httpx
 from fastapi import (FastAPI, Request, HTTPException, Header, UploadFile,
@@ -3171,24 +3172,27 @@ def cobertura_tribunais():
             return {"sigla": sigla, "nome": t["nome"], "datajud": None,
                     "ok": False, "detalhe": t.get("observacao")}
         try:
+            # Sondagem barata: `match_all` com contagem obriga o índice
+            # a varrer tudo — medido, 11,7s só do lado do CNJ. Com
+            # terminate_after e sem contagem total, a pergunta vira
+            # "você responde?", que é o que o diagnóstico quer saber.
+            inicio = time.time()
             r = httpx.post(datajud.BASE.format(alias=alias),
                            headers=datajud._headers(),
-                           json={"size": 1, "query": {"match_all": {}}}, timeout=12)
-            ok = r.status_code < 300
-            total = (((r.json().get("hits") or {}).get("total") or {}).get("value")
-                     if ok else None)
+                           json={"size": 0, "query": {"match_all": {}},
+                                 "track_total_hits": False, "terminate_after": 1},
+                           timeout=45)
             return {"sigla": sigla, "nome": t["nome"], "datajud": alias,
-                    "ok": ok, "http": r.status_code, "processos_no_indice": total}
+                    "ok": r.status_code < 300, "http": r.status_code,
+                    "segundos": round(time.time() - inicio, 1)}
         except Exception as e:
             return {"sigla": sigla, "nome": t["nome"], "datajud": alias,
                     "ok": False, "detalhe": str(e)[:150]}
 
-    # Um diagnóstico que demora minutos não é consultado. Onze chamadas
-    # em sequência, com 30s de espera cada, chegavam a cinco minutos e a
-    # tela desistia antes da resposta: agora vão juntas, com 12s de
-    # paciência — tempo de sobra para um índice que costuma responder
-    # em menos de três.
-    with ThreadPoolExecutor(max_workers=11) as pool:
+    # Um diagnóstico que demora minutos não é consultado.
+    # Poucas de cada vez: o índice do CNJ engasga quando recebe as onze
+    # de uma vez, e uma sondagem que derruba a fonte não é diagnóstico.
+    with ThreadPoolExecutor(max_workers=4) as pool:
         saida = list(pool.map(testar, TRIBUNAIS.items()))
     return {"tribunais": saida,
             "publicacoes": "DJEN/Comunica CNJ — nacional, cobre todos, "
