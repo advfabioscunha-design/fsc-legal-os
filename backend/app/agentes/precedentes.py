@@ -132,6 +132,13 @@ FERRAMENTA = {
                 "type": "string",
                 "description": "Quando indices vier vazio, por que nenhum julgado serve.",
             },
+            "local_contraria": {
+                "type": "boolean",
+                "description": "true quando os julgados encontrados no tribunal do "
+                               "protocolo decidem CONTRA a tese do cliente. É a "
+                               "informação mais importante que você pode devolver: "
+                               "muda a estratégia da ação, não só a citação.",
+            },
         },
         "required": ["indices"],
     },
@@ -246,6 +253,7 @@ def _resolver_tema(tema: str, contexto: str, tribunal: str | None,
     if not indices:
         return {"tema": tema, "usado": False, "provedor": achado["provedor"],
                 "aviso": achado.get("aviso"),
+                "local_contraria": bool(dados.get("local_contraria")),
                 "motivo": dados.get("motivo_descarte")
                           or "nenhum julgado com aderência estrita ao tema",
                 "bloco": "", "julgados": []}
@@ -309,8 +317,12 @@ def injetar(peticao_id: str) -> dict:
 
     usados = [r for r in resultados.values() if r.get("usado")]
     avisos = sorted({r.get("aviso") for r in resultados.values() if r.get("aviso")})
+    contrarios = [r["tema"] for r in resultados.values() if r.get("local_contraria")]
     relatorio = {
         "avisos": avisos,
+        # tese em que o tribunal do protocolo decide contra: é alerta de
+        # estratégia, não de formatação
+        "tribunal_contrario": contrarios,
         "tags": len(temas),
         "preenchidas": len(usados),
         "removidas": len(temas) - len(usados),
