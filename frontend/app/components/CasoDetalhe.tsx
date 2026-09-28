@@ -157,6 +157,56 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     } finally { setAtualizando(false); }
   }
 
+  /* ── Atendimento por vídeo ───────────────────────────────────────
+     Vídeo ao vivo; grava só o áudio, e só depois que o cliente autoriza.
+     O link do cliente já sai por e-mail e cai no painel dele. */
+  const [atend, setAtend] = useState<any[]>([]);
+  const [abrindoSala, setAbrindoSala] = useState(false);
+  const [linkAtend, setLinkAtend] = useState("");
+
+  async function carregarAtendimentos() {
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/atendimentos`);
+      if (!r.ok) return;
+      setAtend(await r.json());
+    } catch { /* painel opcional */ }
+  }
+
+  async function abrirAtendimento() {
+    setAbrindoSala(true);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/atendimentos`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ horas: 3 }),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.detail || "Não foi possível abrir a sala."); return; }
+      setLinkAtend(d.link_cliente);
+      if (d.aviso) alert(d.aviso);
+      // o advogado entra numa aba própria, em tela cheia
+      window.open(`${d.url}?t=${encodeURIComponent(d.token)}`, "_blank", "noopener");
+      await carregarAtendimentos();
+    } finally { setAbrindoSala(false); }
+  }
+
+  async function encerrarAtendimento(id: string) {
+    if (!confirm("Encerrar este atendimento? A sala é apagada e a gravação, se houver, será transcrita.")) return;
+    const r = await fetch(`${API}/api/v1/atendimentos/${id}/encerrar`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!r.ok) { const d = await r.json(); alert(d.detail || "Falha ao encerrar."); return; }
+    await carregarAtendimentos();
+  }
+
+  async function transcreverAtendimento(id: string) {
+    const r = await fetch(`${API}/api/v1/atendimentos/${id}/transcrever`, { method: "POST" });
+    const d = await r.json();
+    alert(r.ok && d.ok ? `Transcrição pronta: ${d.caracteres} caracteres.`
+                       : (d.motivo || d.detail || "Não foi possível transcrever."));
+    await carregarAtendimentos();
+  }
+
   /* ── Peticionamento e precedentes ────────────────────────────────
      Duas etapas separadas de propósito: quem redige a minuta não cita
      jurisprudência (deixa tags), e quem preenche as tags não escreve
@@ -277,7 +327,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     } catch { setCaso(null); }
     finally { setCarregando(false); }
   }
-  useEffect(() => { carregar(); carregarHonorarios(); carregarPeticoes(); /* eslint-disable-next-line */ }, [casoId]);
+  useEffect(() => { carregar(); carregarHonorarios(); carregarPeticoes(); carregarAtendimentos(); /* eslint-disable-next-line */ }, [casoId]);
 
   async function salvarCampos() {
     setSalvando(true);
@@ -827,6 +877,82 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <textarea value={solicitacao} onChange={(e) => setSolicitacao(e.target.value)} rows={2} placeholder="Ex.: Enviar RG e comprovante de residência..."
                 className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
               <button onClick={acionarCliente} className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3]">Enviar ao cliente</button>
+            </section>
+
+            {/* Atendimento por vídeo — grava só o áudio */}
+            <section>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Atendimento por vídeo</h3>
+              <p className="mb-2 text-xs text-white/55">
+                O senhor abre a sala e o cliente recebe o link <b className="text-white/75">no
+                painel e por e-mail</b>. Ele clica e entra pelo navegador, sem instalar nada e
+                sem criar conta. O vídeo é <b className="text-white/75">ao vivo</b>; o que fica
+                gravado é <b className="text-white/75">somente o áudio</b>, e apenas depois que
+                ele autoriza — a imagem não é guardada em lugar nenhum. Ao encerrar, o áudio cai
+                na pasta do caso e é transcrito.
+              </p>
+
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <button onClick={abrirAtendimento} disabled={abrindoSala}
+                  className="rounded-lg bg-[#1DB954] px-4 py-2 text-xs font-bold text-white hover:bg-[#17a349] disabled:opacity-50">
+                  {abrindoSala ? "Abrindo…" : "📹 Abrir sala de atendimento"}
+                </button>
+                {linkAtend && (
+                  <button onClick={() => { navigator.clipboard?.writeText(linkAtend); alert("Link do cliente copiado."); }}
+                    className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white/70 hover:text-white">
+                    copiar link do cliente
+                  </button>
+                )}
+              </div>
+
+              <ul className="space-y-2">
+                {atend.map((a: any) => {
+                  const rotulo: Record<string, string> = {
+                    AGENDADO: "aguardando o cliente", EM_ANDAMENTO: "em andamento",
+                    ENCERRADO: "encerrado", TRANSCRITO: "transcrito", FALHOU: "falhou",
+                  };
+                  const min = a.duracao_segundos ? Math.round(a.duracao_segundos / 60) : null;
+                  return (
+                    <li key={a.id} className="rounded-lg border border-white/10 bg-[#0A1628]/50 p-3 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-white/85">
+                          {new Date(a.criado_em).toLocaleString("pt-BR")}
+                        </span>
+                        <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-white/60">
+                          {rotulo[a.status] || a.status}
+                        </span>
+                        {min !== null && <span className="text-white/45">{min} min</span>}
+                        <span className={a.consentimento_em ? "text-[#1DB954]" : "text-[#E5A44C]"}>
+                          {a.consentimento_em ? "✓ gravação autorizada" : "sem autorização de gravação"}
+                        </span>
+                        {["AGENDADO", "EM_ANDAMENTO"].includes(a.status) && (
+                          <button onClick={() => encerrarAtendimento(a.id)}
+                            className="ml-auto text-[#C0392B] hover:underline">encerrar</button>
+                        )}
+                        {a.audio_path && !a.transcricao && (
+                          <button onClick={() => transcreverAtendimento(a.id)}
+                            className="ml-auto text-[#2D7DD2] hover:underline">transcrever</button>
+                        )}
+                      </div>
+
+                      {a.erro && <p className="mt-1 text-[#E57373]">⚠ {a.erro}</p>}
+
+                      {a.transcricao && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-white/45 hover:text-white/70">
+                            ver a transcrição do atendimento
+                          </summary>
+                          <p className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-[#060D18] p-3 leading-relaxed text-white/75">
+                            {a.transcricao}
+                          </p>
+                        </details>
+                      )}
+                    </li>
+                  );
+                })}
+                {atend.length === 0 && (
+                  <li className="text-xs text-white/40">Nenhum atendimento por vídeo neste caso.</li>
+                )}
+              </ul>
             </section>
 
             {/* Peticionamento: minuta com tags → precedentes reais */}

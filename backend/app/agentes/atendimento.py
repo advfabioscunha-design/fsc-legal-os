@@ -78,6 +78,29 @@ def abrir(caso_id: str, horas: int = 3) -> dict:
     registrar_evento(caso_id, "ATENDIMENTO_ABERTO",
                      {"atendimento_id": linha["id"], "sala": sala["nome"],
                       "gravacao_disponivel": sala.get("gravacao_disponivel")})
+    # o cliente é avisado pelos canais que já existem — painel e e-mail
+    link = f"{s.app_url}/atendimento/{linha['id']}"
+    try:
+        from ..integracoes import avisos
+        avisos.notificar(
+            caso_id, "ATENDIMENTO", "Seu atendimento por vídeo está pronto",
+            "O escritório abriu uma sala para falar com você por vídeo.\n\n"
+            f"É só clicar e entrar, direto pelo navegador — sem instalar nada "
+            f"e sem criar conta:\n{link}\n\n"
+            "Antes de entrar você escolhe se autoriza a gravação do áudio. "
+            "O link vale por algumas horas.",
+        )
+    except Exception:
+        pass
+    try:
+        db.table("mensagens").insert({
+            "caso_id": caso_id, "canal": "PORTAL", "autor": "HUMANO",
+            "conteudo": "📹 Seu atendimento por vídeo está pronto. "
+                        f"Clique para entrar: {link}",
+        }).execute()
+    except Exception:
+        pass
+
     aviso = "" if sala.get("gravacao_disponivel", True) else (
         "A sala está no ar, mas a GRAVAÇÃO está indisponível: o plano atual "
         "do Daily não permite gravar. Cadastre um cartão no painel do Daily "
@@ -87,7 +110,7 @@ def abrir(caso_id: str, horas: int = 3) -> dict:
             "token": token,
             "gravacao_disponivel": sala.get("gravacao_disponivel", True),
             "aviso": aviso,
-            "link_cliente": f"{s.app_url}/atendimento/{linha['id']}"}
+            "link_cliente": link}
 
 
 def para_o_cliente(atendimento_id: str) -> dict:
