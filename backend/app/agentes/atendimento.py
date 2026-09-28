@@ -276,6 +276,60 @@ def entrar(atendimento_id: str, nome: str, aceita_gravacao: bool,
             "pode_gravar": bool(aceita_gravacao)}
 
 
+def autorizar_durante(atendimento_id: str, ip: str | None = None,
+                      leu_termo: bool = False) -> dict:
+    """Autorização da gravação DEPOIS que o atendimento já começou.
+
+    Existe porque a decisão de gravar nem sempre nasce pronta: é comum o
+    cliente entrar reticente, conversar um pouco, entender para que serve
+    o registro e então concordar. Obrigá-lo a decidir na porta, com o
+    advogado esperando, empurra para o "sim" apressado — que é o
+    consentimento mais frágil que existe.
+
+    A exigência não muda: o termo tem de ser aberto e lido até o fim. O
+    que muda é o momento. E como o advogado só consegue acionar a
+    gravação depois disso, o que foi dito antes da autorização não entra
+    em arquivo nenhum."""
+    db = get_db()
+    a = db.table("atendimentos").select("*").eq("id", atendimento_id) \
+          .single().execute().data
+    if not a:
+        raise ValueError("Atendimento não encontrado.")
+
+    if a.get("consentimento_em"):
+        return {"ok": True, "pode_gravar": True,
+                "info": "A gravação já estava autorizada."}
+
+    if not leu_termo:
+        raise ValueError(
+            "Para autorizar a gravação é preciso abrir o Termo de "
+            "Consentimento, ler até o final e confirmar a ciência dentro "
+            "dele.")
+
+    agora = _agora()
+    db.table("atendimentos").update({
+        "consentimento_em": _iso(agora),
+        "consentimento_ip": (ip or "")[:60] or None,
+        "consentimento_texto": TERMO_COMPLETO,
+        "consentimento_versao": VERSAO_CONSENTIMENTO,
+        "atualizado_em": _iso(agora),
+    }).eq("id", atendimento_id).execute()
+
+    registrar_evento(a["caso_id"], "GRAVACAO_AUTORIZADA_DURANTE_ATENDIMENTO",
+                     {"atendimento_id": atendimento_id, "ip": ip})
+    try:
+        db.table("mensagens").insert({
+            "caso_id": a["caso_id"], "canal": "CRM", "autor": "HUMANO",
+            "conteudo": "🎙 O cliente autorizou a gravação do áudio durante o "
+                        "atendimento. A partir de agora o botão de gravar está "
+                        "liberado — o que foi conversado antes não foi gravado.",
+        }).execute()
+    except Exception:
+        pass
+    return {"ok": True, "pode_gravar": True,
+            "autorizado_em": _iso(agora)}
+
+
 def pode_gravar(atendimento_id: str) -> dict:
     """A trava do lado do servidor: o CRM consulta antes de mostrar o botão,
     e o encerramento confere de novo."""

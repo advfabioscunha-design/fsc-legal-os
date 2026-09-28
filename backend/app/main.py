@@ -1030,6 +1030,28 @@ def entrar_na_sala(atendimento_id: str, body: EntrarNaSala, request: Request):
         raise HTTPException(503, str(e))
 
 
+class AutorizarDurante(BaseModel):
+    leu_termo: bool = False
+
+
+@app.post("/api/v1/atendimentos/{atendimento_id}/autorizar-gravacao")
+def autorizar_gravacao(atendimento_id: str, body: AutorizarDurante,
+                       request: Request):
+    """O cliente entrou sem autorizar e mudou de ideia durante a conversa.
+
+    Mesma exigência de leitura do termo; muda só o momento."""
+    from .agentes import atendimento
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else None)
+    try:
+        return atendimento.autorizar_durante(atendimento_id, ip,
+                                             bool(body.leu_termo))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível registrar: {e}")
+
+
 @app.get("/api/v1/atendimentos/{atendimento_id}/pode-gravar")
 def atendimento_pode_gravar(atendimento_id: str):
     from .agentes import atendimento
