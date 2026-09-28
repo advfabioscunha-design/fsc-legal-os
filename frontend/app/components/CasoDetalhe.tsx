@@ -893,6 +893,11 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
 
                   {pet.relatorio && (
                     <div className="mt-3 text-xs">
+                      {(pet.relatorio.avisos || []).map((av: string, i: number) => (
+                        <p key={i} className="mb-1 rounded bg-[#E5A44C]/15 px-2 py-1 text-[#E5A44C]">
+                          ⚠ {av}. Rode de novo quando a cota renovar.
+                        </p>
+                      ))}
                       <p className="text-white/70">
                         {pet.relatorio.preenchidas} de {pet.relatorio.tags} marcações preenchidas
                         {pet.relatorio.removidas > 0 && (

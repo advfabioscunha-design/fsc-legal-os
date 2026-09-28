@@ -206,9 +206,14 @@ def _resolver_tema(tema: str, contexto: str, tribunal: str | None,
     achado = jurisprudencia_api.buscar(tema, tribunal, grupo, limite=8)
     candidatos = achado["candidatos"]
     if not candidatos:
+        motivo = "nenhum julgado no banco trata desta matéria"
+        if achado.get("aviso"):
+            # quota da API estourada é coisa diferente de "não existe julgado":
+            # o advogado precisa saber para rodar de novo amanhã
+            motivo = f"{achado['aviso']} — pesquisado apenas no banco interno"
         return {"tema": tema, "usado": False, "provedor": achado["provedor"],
-                "motivo": "nenhum julgado no banco trata desta matéria",
-                "bloco": "", "julgados": []}
+                "aviso": achado.get("aviso"),
+                "motivo": motivo, "bloco": "", "julgados": []}
 
     def _rotulo(p):
         texto = " ".join((p.get("ementa") or "").split())
@@ -240,6 +245,7 @@ def _resolver_tema(tema: str, contexto: str, tribunal: str | None,
                if isinstance(i, int) and 0 <= i < len(candidatos)][:2]
     if not indices:
         return {"tema": tema, "usado": False, "provedor": achado["provedor"],
+                "aviso": achado.get("aviso"),
                 "motivo": dados.get("motivo_descarte")
                           or "nenhum julgado com aderência estrita ao tema",
                 "bloco": "", "julgados": []}
@@ -250,7 +256,7 @@ def _resolver_tema(tema: str, contexto: str, tribunal: str | None,
                    dados.get("subsuncao") or "")
     return {
         "tema": tema, "usado": True, "provedor": achado["provedor"],
-        "bloco": texto,
+        "aviso": achado.get("aviso"), "bloco": texto,
         "julgados": [{"tribunal": p.get("tribunal"), "numero": p.get("numero"),
                       "fonte": p.get("fonte"), "url": p.get("url")}
                      for p in escolhidos],
@@ -302,7 +308,9 @@ def injetar(peticao_id: str) -> dict:
     final = re.sub(r"\n{3,}", "\n\n", final).strip() + "\n"
 
     usados = [r for r in resultados.values() if r.get("usado")]
+    avisos = sorted({r.get("aviso") for r in resultados.values() if r.get("aviso")})
     relatorio = {
+        "avisos": avisos,
         "tags": len(temas),
         "preenchidas": len(usados),
         "removidas": len(temas) - len(usados),

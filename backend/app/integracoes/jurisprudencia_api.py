@@ -111,6 +111,70 @@ def _do_escavador(tema: str, tribunal: str | None, limite: int) -> list[dict]:
     } for i in itens if (i.get("ementa") or "").strip()]
 
 
+class LimiteDaApi(RuntimeError):
+    """Quota diária da API de jurisprudência esgotada."""
+
+
+def _data_br(v: str | None) -> str | None:
+    """'09/09/2026' → '2026-09-09'. Devolve None quando não reconhece."""
+    if not v:
+        return None
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", v.strip())
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    return v.strip()[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", v.strip()) else None
+
+
+def _do_jurisprudencias_ai(tema: str, tribunal: str | None, limite: int) -> list[dict]:
+    """Jurisprudências.ai — API REST pública, plano gratuito.
+
+    Duas observações que mudam como o resultado é usado:
+
+    1. A busca devolve `excerpt`, que é um RECORTE do acórdão: começa e
+       termina no meio de frases. Tem uns 700 caracteres, mas não é a
+       ementa completa. Por isso `integral=False` — a petição vai citá-lo
+       como trecho do julgado, com o link do inteiro teor, e nunca como
+       ementa transcrita.
+    2. O plano gratuito é diário (5 buscas). Cada tema da petição consome
+       uma busca. Quando o limite estoura, a API responde 429 e nós
+       seguimos só com o banco interno, avisando no relatório — melhor do
+       que a petição sair sem precedente sem explicação.
+    """
+    s = get_settings()
+    token = getattr(s, "jurisprudencias_api_token", "")
+    if not token or not tribunal:
+        return []
+    slug = re.sub(r"[^a-z0-9]", "", tribunal.lower())
+    try:
+        r = httpx.get(
+            f"https://jurisprudencias.ai/api/v1/courts/{slug}/decisions",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            params={"q": tema, "page": 0},
+            timeout=30,
+        )
+        if r.status_code == 429:
+            raise LimiteDaApi("limite diário de buscas da API atingido")
+        r.raise_for_status()
+        itens = (r.json() or {}).get("data") or []
+    except LimiteDaApi:
+        raise
+    except Exception:
+        return []
+
+    return [{
+        "tribunal": tribunal.upper(),
+        "orgao_julgador": i.get("adjudicating_body"),
+        "tipo": i.get("process_type"),
+        "numero": i.get("process_number"),
+        "relator": i.get("rapporteur"),
+        "data_julgamento": _data_br(i.get("trial_date") or i.get("publication_date")),
+        "ementa": " ".join((i.get("excerpt") or "").split()),
+        "tema": tema,
+        "integral": False,          # é recorte, não a ementa inteira
+        "fonte": "API", "fonte_ref": i.get("url") or "", "url": i.get("url"),
+    } for i in itens[:limite] if (i.get("excerpt") or "").strip()]
+
+
 def _do_jusbrasil(tema: str, tribunal: str | None, limite: int) -> list[dict]:
     s = get_settings()
     token = getattr(s, "jusbrasil_api_token", "")
@@ -137,7 +201,9 @@ def _do_jusbrasil(tema: str, tribunal: str | None, limite: int) -> list[dict]:
     } for i in itens if (i.get("summary") or "").strip()]
 
 
-PROVEDORES = {"ESCAVADOR": _do_escavador, "JUSBRASIL": _do_jusbrasil}
+PROVEDORES = {"JURISPRUDENCIAS": _do_jurisprudencias_ai,
+              "ESCAVADOR": _do_escavador,
+              "JUSBRASIL": _do_jusbrasil}
 
 
 def buscar(tema: str, tribunal: str | None = None, grupo: str | None = None,
@@ -150,9 +216,13 @@ def buscar(tema: str, tribunal: str | None = None, grupo: str | None = None,
     internos = _do_banco(tema, tribunal, grupo, limite)
 
     externos: list[dict] = []
+    aviso = None
     provedor = (getattr(s, "jurisprudencia_provedor", "") or "").upper()
     if provedor in PROVEDORES:
-        externos = PROVEDORES[provedor](tema, tribunal, limite)
+        try:
+            externos = PROVEDORES[provedor](tema, tribunal, limite)
+        except LimiteDaApi as e:
+            aviso = str(e)
         # o que vem da API é guardado, para não pagar duas vezes pela
         # mesma pesquisa e para ficar disponível offline no protocolo
         for e in externos:
@@ -173,4 +243,4 @@ def buscar(tema: str, tribunal: str | None = None, grupo: str | None = None,
         saida.append(p)
     return {"candidatos": saida[:limite],
             "internos": len(internos), "externos": len(externos),
-            "provedor": provedor or "INTERNO"}
+            "provedor": provedor or "INTERNO", "aviso": aviso}

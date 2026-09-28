@@ -71,6 +71,7 @@ class Settings(BaseModel):
     # Vazio = usa só o banco interno do escritório (acórdãos em PDF).
     jurisprudencia_provedor: str = os.getenv("JURISPRUDENCIA_PROVEDOR", "")
     jusbrasil_api_token: str = os.getenv("JUSBRASIL_API_TOKEN", "")
+    jurisprudencias_api_token: str = os.getenv("JURISPRUDENCIAS_API_TOKEN", "")
     escavador_webhook_token: str = os.getenv("ESCAVADOR_WEBHOOK_TOKEN", "fc-legal-os")
 
     # Fila / RPA
