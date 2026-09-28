@@ -629,6 +629,150 @@ def gerar_documento(caso_id: str, body: GerarDocumento):
         raise HTTPException(500, f"Não foi possível gerar o documento: {e}")
 
 
+@app.post("/api/v1/casos/{caso_id}/documentos-assinatura/anexar")
+async def anexar_documento_avulso(
+    caso_id: str,
+    arquivo: UploadFile = File(...),
+    titulo: str | None = None,
+):
+    """'Outros': o escritório anexa um documento pronto (PDF ou Word) para
+    seguir junto dos demais no mesmo envio ao cliente."""
+    import re as _re, uuid
+    from .core.db import registrar_evento
+    s = get_settings()
+    db = get_db()
+
+    conteudo = await arquivo.read()
+    if not conteudo:
+        raise HTTPException(400, "Arquivo vazio.")
+    if len(conteudo) > 25 * 1024 * 1024:
+        raise HTTPException(400, "Arquivo acima de 25 MB.")
+
+    base = (arquivo.filename or "documento").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    safe = _re.sub(r"[^A-Za-z0-9._-]", "_", base) or "documento"
+    path = f"{caso_id}/gerados/{uuid.uuid4().hex}_{safe}"
+    try:
+        db.storage.from_(s.bucket_documentos).upload(
+            path, conteudo,
+            {"content-type": arquivo.content_type or "application/octet-stream",
+             "upsert": "true"},
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Falha ao anexar: {e}")
+
+    linha = {
+        "caso_id": caso_id, "tipo": "OUTRO",
+        "titulo": (titulo or base.rsplit(".", 1)[0])[:120],
+        "status": "EM_REVISAO", "storage_path": path, "gerado_por": "HUMANO",
+    }
+    if base.lower().endswith(".pdf"):
+        linha["pdf_path"] = path           # já é PDF: vai direto assim
+    doc = db.table("documentos_assinatura").insert(linha).execute().data[0]
+    registrar_evento(caso_id, "DOCUMENTO_ANEXADO",
+                     {"documento_id": doc["id"], "arquivo": base})
+    return {"ok": True, "documento": doc}
+
+
+class LoteEnvio(BaseModel):
+    documento_ids: list[str]
+
+
+@app.post("/api/v1/casos/{caso_id}/documentos-assinatura/enviar-lote")
+def enviar_lote_ao_cliente(caso_id: str, body: LoteEnvio):
+    """Envia VÁRIOS documentos ao cliente em um único e-mail — contrato,
+    procuração, declaração e o que mais for anexado seguem juntos, cada um
+    em PDF. O cliente devolve tudo assinado de uma vez, respondendo o
+    próprio e-mail ou pelo painel."""
+    import uuid as _uuid
+    from .core.db import registrar_evento
+    from .agentes import documentos as redator
+    db = get_db()
+    if not body.documento_ids:
+        raise HTTPException(400, "Selecione ao menos um documento.")
+
+    docs = db.table("documentos_assinatura").select("*") \
+             .in_("id", body.documento_ids).eq("caso_id", caso_id).execute().data or []
+    docs = [d for d in docs if d["status"] != "ASSINADO"]
+    if not docs:
+        raise HTTPException(400, "Nenhum documento pendente entre os selecionados.")
+
+    s = get_settings()
+    anexos, falhas, titulos = [], [], []
+    for d in docs:
+        caminho = d.get("pdf_path")
+        if not caminho:
+            try:
+                caminho = redator.gerar_pdf_do_documento(d["id"])["pdf_path"]
+            except Exception as e:
+                falhas.append(f"{d['titulo']}: {e}")
+                caminho = d["storage_path"]
+        try:
+            conteudo = db.storage.from_(s.bucket_documentos).download(caminho)
+        except Exception as e:
+            falhas.append(f"{d['titulo']}: {e}")
+            continue
+        ext = ".pdf" if caminho.lower().endswith(".pdf") else _sufixo(caminho)
+        import re as _re2
+        nome = _re2.sub(r'[\\/:*?"<>|]', "_", d["titulo"]) + ext
+        mime = "application/pdf" if ext == ".pdf" else "application/octet-stream"
+        anexos.append((nome, conteudo, mime))
+        titulos.append(d["titulo"])
+
+    if not anexos:
+        raise HTTPException(500, "Nenhum documento pôde ser preparado: "
+                                 + "; ".join(falhas))
+
+    # uma referência só para o lote inteiro
+    token = email_entrada.novo_token()
+    lote = str(_uuid.uuid4())
+    agora = datetime.now(_tz.utc).isoformat()
+    for d in docs:
+        db.table("documentos_assinatura").update({
+            "status": "ENVIADO", "enviado_em": agora, "atualizado_em": agora,
+            "email_token": token, "lote_id": lote,
+            "aprovado_por": s.advogado, "aprovado_em": agora,
+        }).eq("id", d["id"]).execute()
+
+    lista = "\n".join(f"   {i}. {t}" for i, t in enumerate(titulos, 1))
+    instrucao = (
+        f"Preparamos os documentos do seu processo. Seguem {len(anexos)} "
+        f"arquivos em PDF, anexos a este e-mail:\n\n{lista}\n\n"
+        "Assine TODOS e devolva do jeito que for mais fácil para você:\n\n"
+        "• PELO E-MAIL — RESPONDA esta mensagem com os documentos assinados "
+        "em anexo (PDF, Word ou foto). Não apague o assunto: é por ele que "
+        "identificamos o seu processo.\n\n"
+        "• PELA PLATAFORMA — entre no seu painel, baixe cada documento, "
+        "assine e use ENVIAR ASSINADO.\n\n"
+        "Pode imprimir e assinar à caneta ou assinar digitalmente no celular. "
+        "Assim que recebermos, seguimos com o seu processo."
+    )
+    try:
+        db.table("mensagens").insert({
+            "caso_id": caso_id, "canal": "PORTAL", "autor": "HUMANO",
+            "conteudo": f"📄 {len(anexos)} documentos disponíveis para assinatura."
+                        f"\n\n{instrucao}",
+        }).execute()
+    except Exception:
+        pass
+
+    envio = {}
+    try:
+        envio = avisos.notificar(
+            caso_id, "CONTRATO",
+            f"{len(anexos)} documentos para assinatura", instrucao,
+            anexos=anexos,
+            assunto_extra=f" (ref. {email_entrada.referencia(token)})",
+        )
+    except Exception as e:
+        envio = {"erros": [str(e)]}
+
+    registrar_evento(caso_id, "DOCUMENTOS_ENVIADOS_LOTE",
+                     {"quantidade": len(anexos), "titulos": titulos,
+                      "lote_id": lote, "falhas": falhas})
+    return {"ok": True, "enviados": titulos, "quantidade": len(anexos),
+            "falhas": falhas, **envio}
+
+
 @app.get("/api/v1/casos/{caso_id}/documentos-assinatura")
 def listar_documentos_assinatura(caso_id: str):
     try:

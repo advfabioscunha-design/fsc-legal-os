@@ -93,7 +93,7 @@ def _anexos(msg) -> list[tuple[str, bytes, str]]:
 
 # ── Arquivamento ────────────────────────────────────────────────
 def _guardar(doc: dict, nome: str, dados: bytes, mime: str, remetente: str,
-             conferido: bool) -> None:
+             conferido: bool, marcar_assinado: bool = True) -> None:
     s = get_settings()
     db = get_db()
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", nome.rsplit("/", 1)[-1]) or "assinado"
@@ -114,7 +114,7 @@ def _guardar(doc: dict, nome: str, dados: bytes, mime: str, remetente: str,
         linha.pop("enviado_por", None)
         db.table("documentos").insert(linha).execute()
 
-    if conferido:
+    if conferido and marcar_assinado:
         agora = datetime.now(_tz.utc).isoformat()
         db.table("documentos_assinatura").update({
             "status": "ASSINADO", "assinado_em": agora,
@@ -122,7 +122,8 @@ def _guardar(doc: dict, nome: str, dados: bytes, mime: str, remetente: str,
         }).eq("id", doc["id"]).execute()
 
 
-def _avisar_chat(doc: dict, conferido: bool, remetente: str, arquivos: list[str]) -> None:
+def _avisar_chat(doc: dict, conferido: bool, remetente: str, arquivos: list[str],
+                 parcial: bool = False, faltam: int = 0) -> None:
     db = get_db()
     lista = ", ".join(arquivos)
     try:
@@ -130,11 +131,18 @@ def _avisar_chat(doc: dict, conferido: bool, remetente: str, arquivos: list[str]
             "caso_id": doc["caso_id"], "canal": "PORTAL", "autor": "CLIENTE",
             "conteudo": f"✍ Enviei por e-mail o {doc['titulo']} assinado ({lista}).",
         }).execute()
-        if conferido:
+        if conferido and not parcial:
             db.table("mensagens").insert({
                 "caso_id": doc["caso_id"], "canal": "PORTAL", "autor": "AGENTE",
-                "conteudo": f"Recebemos o seu {doc['titulo']} assinado por e-mail. "
-                            f"Muito obrigado! Já está arquivado no seu processo.",
+                "conteudo": "Recebemos os seus documentos assinados por e-mail. "
+                            "Muito obrigado! Já estão arquivados no seu processo.",
+            }).execute()
+        elif parcial:
+            db.table("mensagens").insert({
+                "caso_id": doc["caso_id"], "canal": "PORTAL", "autor": "AGENTE",
+                "conteudo": f"Recebemos {len(arquivos)} documento(s) assinado(s) por "
+                            f"e-mail — obrigado! Ainda {'falta' if faltam == 1 else 'faltam'} "
+                            f"{faltam} para concluirmos esta etapa.",
             }).execute()
         else:
             db.table("mensagens").insert({
@@ -197,13 +205,15 @@ def ler_respostas(limite: int = 30) -> dict:
 
                 token = m.group(1).lower()
                 try:
-                    doc = db.table("documentos_assinatura").select("*") \
-                            .eq("email_token", token).maybe_single().execute().data
+                    docs = db.table("documentos_assinatura").select("*") \
+                             .eq("email_token", token).execute().data or []
                 except Exception:
-                    doc = None
-                if not doc:
+                    docs = []
+                pendentes = [d for d in docs if d["status"] != "ASSINADO"]
+                if not docs:
                     resultado["sem_referencia"] += 1
                     continue
+                doc = pendentes[0] if pendentes else docs[0]
 
                 anexos = _anexos(msg)
                 if not anexos:
@@ -215,13 +225,28 @@ def ler_respostas(limite: int = 30) -> dict:
                 de = _remetente(msg)
                 conferido = bool(email_cli) and de == email_cli
 
+                # os arquivos entram uma vez na pasta do caso
                 nomes = []
                 for nome, conteudo, mime in anexos:
-                    _guardar(doc, nome, conteudo, mime, de, conferido)
+                    _guardar(doc, nome, conteudo, mime, de, conferido,
+                             marcar_assinado=False)
                     nomes.append(nome)
 
-                _avisar_chat(doc, conferido, de, nomes)
-                if conferido:
+                # quando o envio foi em lote, só damos por assinado se vierem
+                # pelo menos tantos arquivos quanto documentos pendentes
+                completo = conferido and len(anexos) >= len(pendentes)
+                if completo:
+                    agora = datetime.now(_tz.utc).isoformat()
+                    for d in pendentes:
+                        db.table("documentos_assinatura").update({
+                            "status": "ASSINADO", "assinado_em": agora,
+                            "atualizado_em": agora,
+                        }).eq("id", d["id"]).execute()
+
+                _avisar_chat(doc, conferido, de, nomes,
+                             parcial=(conferido and not completo),
+                             faltam=max(len(pendentes) - len(anexos), 0))
+                if completo:
                     _liberar_producao(doc["caso_id"])
                     resultado["arquivadas"] += 1
                 else:
@@ -229,7 +254,8 @@ def ler_respostas(limite: int = 30) -> dict:
 
                 registrar_evento(doc["caso_id"], "ASSINADO_RECEBIDO_EMAIL",
                                  {"documento_id": doc["id"], "de": de,
-                                  "conferido": conferido, "arquivos": nomes})
+                                  "conferido": conferido, "completo": completo,
+                                  "pendentes": len(pendentes), "arquivos": nomes})
                 M.store(num, "+FLAGS", "\\Seen")
             except Exception as e:
                 resultado["erros"].append(str(e)[:200])

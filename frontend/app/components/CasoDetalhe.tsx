@@ -18,6 +18,9 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   });
   const [prestando, setPrestando] = useState(false);
   const [mostrarContas, setMostrarContas] = useState(false);
+  const [selecionados, setSelecionados] = useState<string[]>([]);
+  const [enviandoLote, setEnviandoLote] = useState(false);
+  const anexoRef = useRef<HTMLInputElement | null>(null);
   const [novaFase, setNovaFase] = useState("");
   const [subindo, setSubindo] = useState(false);
   const [linkNome, setLinkNome] = useState("");
@@ -213,10 +216,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const ROTULO_DOC: Record<string, string> = Object.fromEntries(DOCS_MENU.map((d) => [d.tipo, d.nome]));
 
   async function gerarDocumento(tipo: string) {
-    if (tipo === "OUTRO") {
-      alert("Para 'Outros', use o chat de Elaboração de Contratos e depois anexe o arquivo em Documentos e provas.");
-      return;
-    }
+    if (tipo === "OUTRO") { anexoRef.current?.click(); return; }
     setGerando(tipo);
     try {
       const r = await fetch(`${API}/api/v1/casos/${casoId}/documentos-assinatura`, {
@@ -235,6 +235,52 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       carregar();
     } catch { alert("Falha de conexão ao gerar o documento."); }
     finally { setGerando(""); }
+  }
+
+  async function anexarOutro(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setGerando("OUTRO");
+    try {
+      const fd = new FormData();
+      fd.append("arquivo", f);
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/documentos-assinatura/anexar`, {
+        method: "POST", body: fd,
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { alert(d.detail || "Não foi possível anexar."); return; }
+      carregar();
+    } finally { setGerando(""); }
+  }
+
+  function alternarSelecao(id: string) {
+    setSelecionados((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  }
+
+  async function enviarLote() {
+    if (!selecionados.length) return;
+    if (!window.confirm(
+      `Enviar ${selecionados.length} documento(s) ao cliente em UM ÚNICO e-mail?\n\n` +
+      "Todos vão em PDF, anexos na mesma mensagem. Ele assina e devolve tudo de " +
+      "uma vez, respondendo o e-mail ou pelo painel."
+    )) return;
+    setEnviandoLote(true);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/documentos-assinatura/enviar-lote`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documento_ids: selecionados }),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { alert(d.detail || "Não foi possível enviar."); return; }
+      const canais = [d.enviado_email ? "e-mail" : null, d.enviado_whatsapp ? "WhatsApp" : null]
+        .filter(Boolean).join(" e ");
+      alert(`${d.quantidade} documento(s) enviados juntos${canais ? ` por ${canais}` : ""}:\n\n`
+        + d.enviados.map((t: string) => `• ${t}`).join("\n")
+        + (d.falhas?.length ? `\n\nAtenção: ${d.falhas.join("; ")}` : ""));
+      setSelecionados([]);
+      onMudou(); carregar();
+    } finally { setEnviandoLote(false); }
   }
 
   async function enviarAoCliente(id: string) {
@@ -611,14 +657,33 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <input value={instrucaoDoc} onChange={(e) => setInstrucaoDoc(e.target.value)}
                 placeholder="Orientação para o agente (opcional): ex. incluir pedido de tutela de urgência"
                 className="mb-2 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+              <input ref={anexoRef} type="file" className="hidden" onChange={anexarOutro}
+                accept="application/pdf,.doc,.docx,image/*" />
               <div className="mb-3 flex flex-wrap gap-2">
                 {DOCS_MENU.map((m) => (
                   <button key={m.tipo} onClick={() => gerarDocumento(m.tipo)} disabled={!!gerando}
                     className="rounded-lg bg-[#C9A84C] px-3 py-2 text-xs font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
-                    {gerando === m.tipo ? "Gerando…" : `+ ${m.nome}`}
+                    {gerando === m.tipo ? "…" : m.tipo === "OUTRO" ? "+ Outros (anexar arquivo)" : `+ ${m.nome}`}
                   </button>
                 ))}
               </div>
+
+              {(caso.documentos_assinatura || []).filter((x: any) => x.status !== "ASSINADO").length > 1 && (
+                <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#1DB954]/30 bg-[#1DB954]/10 px-3 py-2">
+                  <span className="text-xs text-white/70">
+                    Marque os documentos e envie <b className="text-white/90">todos em um só e-mail</b>:
+                  </span>
+                  <button
+                    onClick={() => setSelecionados(
+                      (caso.documentos_assinatura || [])
+                        .filter((x: any) => x.status !== "ASSINADO").map((x: any) => x.id))}
+                    className="text-xs text-white/60 hover:text-white hover:underline">marcar todos</button>
+                  <button onClick={enviarLote} disabled={!selecionados.length || enviandoLote}
+                    className="ml-auto rounded-lg bg-[#1DB954] px-4 py-1.5 text-xs font-bold text-white hover:bg-[#17a349] disabled:opacity-40">
+                    {enviandoLote ? "Enviando…" : `Enviar ${selecionados.length || ""} juntos`}
+                  </button>
+                </div>
+              )}
 
               <ul className="space-y-2">
                 {(caso.documentos_assinatura || []).map((x: any) => {
@@ -630,10 +695,18 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                   return (
                     <li key={x.id} className="rounded-lg border border-white/10 bg-[#0A1628]/50 px-3 py-2 text-sm">
                       <div className="flex items-start justify-between gap-2">
-                        <span className="min-w-0">
-                          <span className="block font-semibold text-white/85">{ROTULO_DOC[x.tipo] || x.tipo}</span>
+                        <span className="flex min-w-0 items-start gap-2">
+                          {x.status !== "ASSINADO" && (
+                            <input type="checkbox" checked={selecionados.includes(x.id)}
+                              onChange={() => alternarSelecao(x.id)}
+                              className="mt-1 h-4 w-4 shrink-0 accent-[#1DB954]" />
+                          )}
+                          <span className="min-w-0">
+                          <span className="block font-semibold text-white/85">{x.tipo === "OUTRO" ? x.titulo : (ROTULO_DOC[x.tipo] || x.tipo)}</span>
                           <span className="block text-xs text-white/45">
                             {x.local_data}{x.foro ? ` · foro ${x.foro}` : ""}
+                            {x.lote_id ? " · enviado em lote" : ""}
+                          </span>
                           </span>
                         </span>
                         <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold"
@@ -643,8 +716,10 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                         <p className="mt-1 text-xs text-white/55">Ação: {x.tipo_acao}</p>
                       )}
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                        <a href={`/documento/${x.id}`} target="_blank" rel="noreferrer"
-                          className="font-bold text-[#C9A84C] hover:underline">abrir e ajustar</a>
+                        {x.tipo !== "OUTRO" && (
+                          <a href={`/documento/${x.id}`} target="_blank" rel="noreferrer"
+                            className="font-bold text-[#C9A84C] hover:underline">abrir e ajustar</a>
+                        )}
                         <a href={`${API}/api/v1/documentos-assinatura/${x.id}/baixar`} target="_blank" rel="noreferrer"
                           className="text-white/70 hover:text-white hover:underline">baixar .docx</a>
                         <a href={`${API}/api/v1/documentos-assinatura/${x.id}/baixar?formato=pdf`} target="_blank" rel="noreferrer"
@@ -654,8 +729,8 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                             className="font-bold text-[#1DB954] hover:underline">baixar assinado</a>
                         )}
                         {x.status !== "ASSINADO" && (
-                          <button onClick={() => enviarAoCliente(x.id)} className="font-bold text-[#1DB954] hover:underline">
-                            {x.status === "ENVIADO" ? "reenviar ao cliente" : "enviar ao cliente para assinar"}
+                          <button onClick={() => enviarAoCliente(x.id)} className="text-white/70 hover:text-white hover:underline">
+                            {x.status === "ENVIADO" ? "reenviar sozinho" : "enviar sozinho"}
                           </button>
                         )}
                         {x.status !== "ASSINADO" && (
