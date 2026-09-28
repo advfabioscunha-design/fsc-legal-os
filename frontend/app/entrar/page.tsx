@@ -22,12 +22,12 @@ export default function Entrar() {
     const next = new URLSearchParams(window.location.search).get("next");
     if (next === "/crm") {
       // só operador acessa o CRM; cliente vai para a própria área
-      router.push(perfil?.papel === "OPERADOR" ? "/crm" : "/cliente");
+      router.push(["OPERADOR", "ADMIN"].includes(perfil?.papel) ? "/crm" : "/cliente");
       return;
     }
     if (next === "/cliente") { router.push("/cliente"); return; }
     // sem destino: vai pela função do papel
-    router.push(perfil?.papel === "OPERADOR" ? "/crm" : "/cliente");
+    router.push(["OPERADOR", "ADMIN"].includes(perfil?.papel) ? "/crm" : "/cliente");
   }
 
   async function enviar(e: React.FormEvent) {

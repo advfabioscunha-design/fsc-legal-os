@@ -67,7 +67,8 @@ export default function CRM() {
       if (!sess.session) { router.replace("/entrar"); return; }
       const { data: perfil } = await supabase
         .from("perfis").select("papel").eq("id", sess.session.user.id).maybeSingle();
-      if (perfil?.papel !== "OPERADOR") { router.replace("/cliente"); return; }
+      // ADMIN também é equipe: promover o titular não pode expulsá-lo do CRM
+      if (!["OPERADOR", "ADMIN"].includes(perfil?.papel)) { router.replace("/cliente"); return; }
       setAutorizado(true);
     })();
   }, [router]);

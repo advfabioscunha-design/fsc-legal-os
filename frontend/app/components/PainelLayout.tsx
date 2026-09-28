@@ -28,7 +28,7 @@ export default function PainelLayout({ children, titulo }: { children: React.Rea
       if (!sess.session) { router.replace("/entrar?next=/crm"); return; }
       const { data: perfil } = await supabase
         .from("perfis").select("papel").eq("id", sess.session.user.id).maybeSingle();
-      if (perfil?.papel !== "OPERADOR") { router.replace("/cliente"); return; }
+      if (!["OPERADOR", "ADMIN"].includes(perfil?.papel)) { router.replace("/cliente"); return; }
       setAutorizado(true);
     })();
   }, [router]);

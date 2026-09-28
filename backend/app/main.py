@@ -865,6 +865,104 @@ def gravar_honorarios(caso_id: str, body: HonorariosEntrada):
             "documentos": caso.get("_refeitos") or {}}
 
 
+# ── Trava de peticionamento e override ───────────────────────────
+def _perfil_do_token(authorization: str | None) -> dict:
+    """Quem é o usuário e qual o papel dele.
+
+    O papel NUNCA vem do corpo da requisição nem de um header: vem do
+    token validado contra o Supabase e do que está gravado em `perfis`.
+    O frontend esconder o botão é conveniência; a trava é aqui."""
+    user = _usuario_do_token(authorization)
+    try:
+        perfil = get_db().table("perfis").select("papel,permissoes,email") \
+                   .eq("id", user["id"]).maybe_single().execute().data or {}
+    except Exception:
+        perfil = {}
+    return {
+        "id": user["id"],
+        "email": perfil.get("email") or user.get("email"),
+        "papel": perfil.get("papel") or "CLIENTE",
+        "permissoes": perfil.get("permissoes") or [],
+    }
+
+
+def _pode_forcar(perfil: dict) -> bool:
+    return (perfil.get("papel") == "ADMIN"
+            or "override_peticao" in (perfil.get("permissoes") or []))
+
+
+@app.get("/api/v1/meu-perfil")
+def meu_perfil(authorization: str | None = Header(default=None)):
+    """O frontend usa isto para decidir se mostra o botão de forçar."""
+    p = _perfil_do_token(authorization)
+    return {**p, "pode_forcar_peticao": _pode_forcar(p)}
+
+
+class ValidarPeticionamento(BaseModel):
+    caso_id: str
+    tipo_peticao: str
+    override: bool = False
+    justificativa: str | None = None
+
+
+@app.post("/api/v1/validar-peticionamento")
+def validar_peticionamento(body: ValidarPeticionamento,
+                           authorization: str | None = Header(default=None)):
+    """Confere se a peça pode ser protocolada.
+
+    Sem override: Regra A (inicial → kit mínimo de documentos) ou Regra B
+    (demais peças → compatibilidade com o último andamento).
+
+    Com override: só ADMIN, ou quem tenha a permissão `override_peticao`,
+    passa por cima da trava — e a decisão fica registrada com o motivo que
+    foi ignorado e a justificativa de quem decidiu."""
+    from .agentes import controller_peticao as trava
+    perfil = _perfil_do_token(authorization)
+
+    if perfil["papel"] == "CLIENTE":
+        raise HTTPException(403, "Apenas a equipe do escritório pode peticionar.")
+
+    # a validação roda sempre — inclusive no override, porque é o parecer
+    # dela que fica registrado como o que foi ignorado
+    try:
+        parecer = trava.validar(body.caso_id, body.tipo_peticao, perfil["email"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível validar: {e}")
+
+    if parecer["aprovado"]:
+        return {**parecer, "override_usado": False,
+                "pode_forcar": _pode_forcar(perfil)}
+
+    if not body.override:
+        # travado: devolve 200 com aprovado=false para a interface explicar
+        return {**parecer, "override_usado": False,
+                "pode_forcar": _pode_forcar(perfil)}
+
+    if not _pode_forcar(perfil):
+        raise HTTPException(
+            403, "Somente o administrador pode liberar peticionamento com a "
+                 "validação reprovada. Fale com o Dr. Fábio Cunha.")
+
+    trava.registrar_override(
+        body.caso_id, body.tipo_peticao, parecer.get("motivo", ""),
+        body.justificativa or "", perfil, parecer.get("regra", ""))
+    return {**parecer, "aprovado": True, "override_usado": True,
+            "pode_forcar": True,
+            "motivo": "Liberado por decisão do administrador. "
+                      f"A validação havia apontado: {parecer.get('motivo', '')}"}
+
+
+@app.get("/api/v1/casos/{caso_id}/overrides")
+def listar_overrides(caso_id: str):
+    try:
+        return get_db().table("overrides_peticionamento").select("*") \
+            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+    except Exception:
+        return []
+
+
 # ── Atendimento telepresencial ───────────────────────────────────
 class AbrirAtendimento(BaseModel):
     horas: int = 3

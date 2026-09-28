@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import ModalPeticionar from "./ModalPeticionar";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 const GRUPOS = ["BANCARIO", "IMOBILIARIO", "TRABALHISTA", "PREVIDENCIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"];
@@ -156,6 +157,11 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       await carregar();
     } finally { setAtualizando(false); }
   }
+
+  /* ── Peticionar: a trava antes do protocolo ──────────────────────
+     O modal valida e, quando trava, só o administrador vê o bypass — e
+     ainda assim precisa justificar por escrito. */
+  const [modalPeticionar, setModalPeticionar] = useState(false);
 
   /* ── Atendimento por vídeo ───────────────────────────────────────
      Vídeo ao vivo; grava só o áudio, e só depois que o cliente autoriza.
@@ -955,6 +961,21 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               </ul>
             </section>
 
+            {/* Peticionar — trava processual antes do protocolo */}
+            <section>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Peticionar</h3>
+              <p className="mb-2 text-xs text-white/55">
+                Antes de o documento sair, a plataforma confere o que é verificável:
+                na <b className="text-white/75">inicial</b>, o kit mínimo de documentos;
+                nas <b className="text-white/75">demais peças</b>, se ela cabe no último
+                andamento do processo. Travando, o motivo aparece na hora.
+              </p>
+              <button onClick={() => setModalPeticionar(true)}
+                className="rounded-lg bg-[#C9A84C] px-4 py-2 text-xs font-bold text-[#0A1628] hover:bg-[#d8b95e]">
+                ⚖ Peticionar
+              </button>
+            </section>
+
             {/* Peticionamento: minuta com tags → precedentes reais */}
             <section>
               <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Peça inicial e precedentes</h3>
@@ -1577,6 +1598,13 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
           </div>
         )}
       </div>
+
+      <ModalPeticionar
+        casoId={casoId}
+        aberto={modalPeticionar}
+        aoFechar={() => setModalPeticionar(false)}
+        aoLiberar={() => { carregar(); }}
+      />
     </div>
   );
 }
