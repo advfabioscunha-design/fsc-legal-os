@@ -198,20 +198,12 @@ def situacao_confirmada(numero: str, comunicacoes: list[dict]) -> tuple[bool, st
     return arquivado, motivo
 
 
-def _resumir(numero: str, comunicacoes: list[dict], existente: dict | None,
-             confirmar: bool = False) -> dict:
+def _resumir(numero: str, comunicacoes: list[dict], existente: dict | None) -> dict:
     ultima = comunicacoes[-1]
     cliente = next((c.get("cliente_provavel") for c in reversed(comunicacoes)
                     if c.get("cliente_provavel")), None)
     texto_todo = "\n".join(c.get("texto") or "" for c in comunicacoes)
     arquivado, motivo = situacao(comunicacoes)
-    # A conferência no DataJud é uma chamada de rede por processo: num
-    # acervo de 5 anos seriam centenas, e a tela ficaria minutos parada.
-    # Por isso só roda quando pedida, e só sobre o que o texto marcou
-    # como arquivado — errar para "arquivado" custa um processo fora da
-    # esteira; errar para "ativo" custa uma linha a mais para conferir.
-    if confirmar and arquivado:
-        arquivado, motivo = situacao_confirmada(numero, comunicacoes)
     return {
         "arquivado": arquivado,
         "motivo_arquivado": motivo,
@@ -264,6 +256,14 @@ def previa_por_oab(numero: str | None = None, uf: str | None = None,
     }
 
 
+# Medido no servidor: o DataJud leva de 1 a 45 segundos por consulta,
+# conforme o tribunal (TRT14 responde em 0,6s; TRF1 em 44s; o TJSP nem
+# sempre responde). Conferir um acervo inteiro seria meia hora de tela
+# parada — por isso a confirmação tem teto, e os processos mais
+# recentes são os conferidos primeiro.
+TETO_CONFIRMACOES = 20
+
+
 def previa_de_comunicacoes(itens: list[dict], confirmar: bool = False) -> dict:
     """Mesma prévia, mas a partir de publicações que o NAVEGADOR leu.
 
@@ -280,15 +280,27 @@ def previa_de_comunicacoes(itens: list[dict], confirmar: bool = False) -> dict:
     for lista in grupos.values():
         lista.sort(key=lambda i: i.get("data") or "")
     existentes = _casos_por_numero(list(grupos))
-    processos = [_resumir(n, c, existentes.get(n), confirmar)
-                 for n, c in grupos.items()]
+    processos = [_resumir(n, c, existentes.get(n)) for n, c in grupos.items()]
     processos.sort(key=lambda p: p.get("ultima_data") or "", reverse=True)
+
+    confirmados = 0
+    if confirmar:
+        for p in processos:
+            if confirmados >= TETO_CONFIRMACOES:
+                break
+            if not p["arquivado"]:
+                continue
+            p["arquivado"], p["motivo_arquivado"] = situacao_confirmada(
+                p["numero_processo"], p["comunicacoes"])
+            p["conferido_no_datajud"] = True
+            confirmados += 1
     ativos = [p for p in processos if not p["arquivado"]]
     return {
         "publicacoes": len(itens or []),
         "processos": len(processos),
         "ativos": len(ativos),
         "arquivados": len(processos) - len(ativos),
+        "conferidos_no_datajud": confirmados,
         "novos": sum(1 for p in ativos if not p["ja_na_plataforma"]),
         "itens": processos,
     }

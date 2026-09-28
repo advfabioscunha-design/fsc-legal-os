@@ -212,11 +212,11 @@ export default function ImportarProcessos({
             </span>
           )}
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-white/55"
-            title="Confere no DataJud, pelo código do movimento, cada processo que o texto marcou como arquivado. Uma consulta por processo — mais devagar, e mais seguro.">
+            title="Confere no DataJud, pelo código do movimento, os processos que o texto marcou como arquivado — até 20 por busca, dos mais recentes. Medido: o DataJud leva de 1 a 45 segundos por processo, conforme o tribunal.">
             <input type="checkbox" checked={confirmarDatajud}
               onChange={(e) => setConfirmarDatajud(e.target.checked)}
               className="h-3.5 w-3.5 accent-[#C9A84C]" />
-            conferir arquivados no DataJud
+            conferir arquivados no DataJud (até 20, devagar)
           </label>
         </div>
 
@@ -243,7 +243,8 @@ export default function ImportarProcessos({
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-white/55">
               <span>
                 {itens.length} processo(s) — <b className="text-white/80">{resumo?.ativos ?? itens.length} ativo(s)</b>
-                {resumo?.arquivados ? `, ${resumo.arquivados} arquivado(s)` : ""} · {marcadosN} marcado(s)
+                {resumo?.arquivados ? `, ${resumo.arquivados} arquivado(s)` : ""}
+                {resumo?.conferidos_no_datajud ? ` (${resumo.conferidos_no_datajud} conferido(s) no DataJud)` : ""} · {marcadosN} marcado(s)
               </span>
               <div className="flex items-center gap-3">
                 <select value={tribunal} onChange={(e) => setTribunal(e.target.value)}

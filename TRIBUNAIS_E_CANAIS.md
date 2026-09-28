@@ -51,6 +51,33 @@ O tribunal é descoberto pelo **próprio número CNJ** (segmento da Justiça
 e código do tribunal, Resolução 65/2008), não pelo que veio escrito na
 publicação. Conferido nos números reais do acervo.
 
+## Medição real do DataJud (28/09/2026, do servidor)
+
+| Tribunal | Resposta |
+|---|---|
+| TRT14 | 0,6 s |
+| TRT12 | 1,5 s |
+| TJBA | 3,9 s |
+| TJRS | 5,4 s |
+| TRF4 | 10,9 s |
+| TJPR | 14,0 s |
+| TJSC | 15,3 s |
+| TJMT | 32,7 s |
+| TJRO | 39,3 s |
+| TRF1 | 44,5 s |
+| **TJSP** | **não respondeu em 45 s** |
+
+Dez dos onze respondem. O TJSP tem o maior índice do país e nem sempre
+responde dentro do tempo — para ele, o DJEN segue funcionando normal;
+o que falha é a consulta de movimentos.
+
+A consulta por número (a que a plataforma realmente faz) leva cerca de
+**8 segundos** no TRF4 e no TJRO. Isso é aceitável para conferir um
+processo quando alguém pede, e inviável para um acervo inteiro: 174
+processos × 8 s dariam mais de vinte minutos de tela parada. Por isso a
+conferência no DataJud é opcional, tem teto de 20 processos por busca e
+começa pelos mais recentes.
+
 ## O que os canais NÃO cobrem — e o que fazer
 
 **SEEU (execução penal).** Fora do DataJud e com pouca publicação no
