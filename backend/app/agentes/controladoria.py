@@ -158,10 +158,14 @@ def mover_fase(caso_id: str, destino: str, motivo: str = "") -> dict:
     if destino not in ("JUDICIAL", "RECEBIMENTO", "PROTOCOLADO"):
         raise ValueError("Destino inválido.")
     db = get_db()
-    caso = db.table("casos").select("id,estado,numero_processo") \
-        .eq("id", caso_id).single().execute().data
-    if not caso:
+    # `.single()` levanta exceção quando não acha nada, e o que chegava
+    # na tela era um "Internal Server Error" sem explicação. Um id que
+    # não existe é erro de quem chamou, não falha do servidor.
+    achados = db.table("casos").select("id,estado,numero_processo") \
+        .eq("id", caso_id).limit(1).execute().data
+    if not achados:
         raise ValueError("Caso não encontrado.")
+    caso = achados[0]
     if destino in ("JUDICIAL", "RECEBIMENTO") and not caso.get("numero_processo"):
         raise ValueError("Informe o número do processo antes de mover a fase — "
                          "sem ele não há como acompanhar as publicações.")

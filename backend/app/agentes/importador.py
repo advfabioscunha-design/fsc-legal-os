@@ -387,8 +387,9 @@ def importar(processos: list[dict], fase: str = "JUDICIAL") -> dict:
             # Caso que já existe só avança de fase, nunca retrocede:
             # quem está em RECEBIMENTO não volta para JUDICIAL por causa
             # de uma publicação antiga que apareceu na varredura.
-            atual = db.table("casos").select("estado").eq("id", caso_id) \
-                .single().execute().data or {}
+            achado = db.table("casos").select("estado").eq("id", caso_id) \
+                .limit(1).execute().data
+            atual = achado[0] if achado else {}
             if atual.get("estado") != "RECEBIMENTO":
                 dados["estado"] = destino
             db.table("casos").update(dados).eq("id", caso_id).execute()
