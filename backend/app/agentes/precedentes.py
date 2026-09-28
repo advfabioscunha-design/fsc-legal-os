@@ -84,9 +84,15 @@ O QUE VOCÊ ESCREVE
    mesmo sentido, pode afirmar entendimento consolidado; havendo um só, diga
    que o tribunal já reconheceu — nunca chame de pacífico o que não está
    demonstrado.
-2. DESTAQUE: indique o trecho EXATO da ementa escolhida que resolve a lide,
+2. DESTAQUE: indique o trecho EXATO do julgado escolhido que resolve a lide,
    copiado literalmente (uma frase, no máximo duas). O sistema aplica o
    negrito. Se copiar errado, o destaque não é aplicado.
+
+ATENÇÃO AO TIPO DE REGISTRO: alguns itens da lista vêm marcados como
+"TRECHO DO JULGADO (não é a ementa completa)". Nesses, a introdução que você
+escrever NÃO pode dizer que a ementa está transcrita nem sugerir que aquele
+é o texto integral do acórdão — o sistema os apresenta como referência ao
+que foi decidido, com aspas apenas no que é literal.
 3. SUBSUNÇÃO (1 parágrafo): o paralelo entre o julgado e o caso concreto —
    por que o que o tribunal decidiu se aplica exatamente a este autor, com
    os fatos deste processo. É o parágrafo mais importante: sem ele a ementa
@@ -146,21 +152,41 @@ def _cabecalho(p: dict) -> str:
     return linha + (f" ({', '.join(extras)})" if extras else "")
 
 
-def _citacao(p: dict, destaque: str | None) -> str:
-    """Ementa em bloco de citação, com negrito só no trecho que decide.
+MINIMO_EMENTA = 400        # abaixo disso não é ementa, é trecho
 
-    O negrito é aplicado pelo código, sobre o texto do banco — se o trecho
-    indicado não existir literalmente na ementa, a ementa sai sem destaque,
-    e não alterada para caber no destaque."""
-    ementa = " ".join((p.get("ementa") or "").split())
+
+def _citacao(p: dict, destaque: str | None) -> str:
+    """Transcreve a ementa em bloco de citação — quando é ementa mesmo.
+
+    O banco guarda dois tipos de registro: ementas completas, vindas dos
+    acórdãos em PDF ou da API, e TRECHOS curtos extraídos na leitura das
+    decisões. Transcrever um trecho de duas linhas como se fosse a ementa
+    do acórdão é afirmação falsa, e a parte contrária confere o inteiro
+    teor. Por isso o trecho entra como referência ao que foi decidido, com
+    aspas no que é citação literal, e não em bloco de ementa.
+
+    O negrito é aplicado pelo código sobre o texto do banco: se o trecho
+    indicado não existir literalmente, sai sem destaque — o texto do
+    julgado nunca é alterado para caber no destaque."""
+    texto = " ".join((p.get("ementa") or "").split())
+    integral = bool(p.get("integral")) or len(texto) >= MINIMO_EMENTA
+
     if destaque:
         limpo = " ".join(destaque.split())
-        if limpo and limpo in ementa:
-            ementa = ementa.replace(limpo, f"**{limpo}**", 1)
-    linhas = [f"> {_cabecalho(p)}", ">", f"> {ementa}"]
+        if limpo and limpo in texto:
+            texto = texto.replace(limpo, f"**{limpo}**", 1)
+
+    if integral:
+        linhas = [f"> {_cabecalho(p)}", ">", f"> {texto}"]
+        if p.get("url"):
+            linhas += [">", f"> [inteiro teor]({p['url']})"]
+        return "\n".join(linhas)
+
+    # referência: diz o que o tribunal decidiu, sem simular transcrição
+    ref = f"({_cabecalho(p)})"
     if p.get("url"):
-        linhas += [">", f"> [inteiro teor]({p['url']})"]
-    return "\n".join(linhas)
+        ref = f"([inteiro teor]({p['url']}) — {_cabecalho(p)})"
+    return f"Nesse julgado, o tribunal consignou que “{texto}” {ref}."
 
 
 def _bloco(escolhidos: list[dict], destaques: list[str],
@@ -184,10 +210,14 @@ def _resolver_tema(tema: str, contexto: str, tribunal: str | None,
                 "motivo": "nenhum julgado no banco trata desta matéria",
                 "bloco": "", "julgados": []}
 
-    lista = "\n\n".join(
-        f"[{i}] {_cabecalho(p)}\nTEMA: {p.get('tema') or '—'}\n"
-        f"EMENTA: {' '.join((p.get('ementa') or '').split())[:2500]}"
-        for i, p in enumerate(candidatos))
+    def _rotulo(p):
+        texto = " ".join((p.get("ementa") or "").split())
+        tipo = ("EMENTA" if (p.get("integral") or len(texto) >= MINIMO_EMENTA)
+                else "TRECHO DO JULGADO (não é a ementa completa)")
+        return (f"[{candidatos.index(p)}] {_cabecalho(p)}\n"
+                f"TEMA: {p.get('tema') or '—'}\n{tipo}: {texto[:2500]}")
+
+    lista = "\n\n".join(_rotulo(p) for p in candidatos)
 
     cliente = anthropic.Anthropic(api_key=s.claude_api_key)
     r = cliente.messages.create(
@@ -303,10 +333,11 @@ def sincronizar_do_banco_de_teses() -> dict:
     novos = 0
     for t in teses:
         for j in (t.get("jurisprudencia") or []):
-            ementa = (j.get("ementa") or "").strip()
-            if len(ementa) < 80:
-                continue          # fragmento não serve como citação
+            ementa = " ".join((j.get("ementa") or "").split())
+            if len(ementa) < 40:
+                continue          # fragmento curto demais para citar
             linha = {
+                "integral": len(ementa) >= MINIMO_EMENTA,
                 "tribunal": (j.get("tribunal") or t.get("tribunal_origem")
                              or "").upper() or "NAO_INFORMADO",
                 "tipo": j.get("tipo"), "numero": j.get("numero"),
