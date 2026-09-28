@@ -6,11 +6,26 @@ import { supabase } from "../../lib/supabaseClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
+/* O menu segue o caminho do caso, na ordem em que ele acontece — e são
+   quatro fases, cada uma na sua tela:
+
+     1. CONTRATOS    quem chegou, proposta, assinatura, pagamento
+     2. PRODUÇÃO     documentos, análise, peça, revisão, protocolo
+     3. JUDICIAL     protocolado, tramitação, trânsito em julgado
+     4. RECEBIMENTO  cumprimento, alvará, prestação de contas
+
+   Depois delas vêm as ferramentas transversais: intimações e prazos,
+   agenda, administração. "Início" abre a visão geral. */
 const MENU = [
-  { href: "/processos", label: "Pasta Processos", icone: "📁" },
-  { href: "/crm", label: "Esteira (CRM)", icone: "🗂️" },
-  { href: "/admin", label: "Administração", icone: "📊" },
+  { href: "/inicio", label: "Início", icone: "🏠" },
+  { href: "/contratos", label: "Contratos", icone: "🤝" },
+  { href: "/crm", label: "Produção", icone: "🗂️" },
+  { href: "/judicial", label: "Judicial", icone: "⚖️" },
+  { href: "/recebimento", label: "Recebimento", icone: "💰" },
+  { href: "/intimacoes", label: "Intimações e prazos", icone: "🔔" },
+  { href: "/processos", label: "Todos os processos", icone: "📁" },
   { href: "/agenda", label: "Agenda", icone: "📅" },
+  { href: "/admin", label: "Administração", icone: "📊" },
   { href: "/assistente", label: "Assistente", icone: "💡" },
 ];
 
@@ -53,7 +68,7 @@ export default function PainelLayout({ children, titulo }: { children: React.Rea
     <div className="flex min-h-screen" style={{ background: "#0A1628", fontFamily: "Inter, sans-serif" }}>
       {/* Menu lateral fixo */}
       <aside className="hidden w-60 shrink-0 flex-col border-r border-white/5 bg-[#0B1F3B] md:flex">
-        <Link href="/" className="flex flex-col px-5 py-5 leading-none">
+        <Link href="/inicio" className="flex flex-col px-5 py-5 leading-none">
           <span className="text-lg font-bold text-white">FC <span className="text-[#C9A24D]">Legal OS</span></span>
           <span className="text-[10px] uppercase tracking-widest text-[#8899AA]">Gestão Interna</span>
         </Link>

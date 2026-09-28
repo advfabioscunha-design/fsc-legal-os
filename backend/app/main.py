@@ -1,5 +1,7 @@
 """FSC LEGAL OS v4.0 — Backend FastAPI (api.seudominio.com.br)."""
 import json
+import re
+
 import httpx
 from fastapi import (FastAPI, Request, HTTPException, Header, UploadFile,
                      File, BackgroundTasks)
@@ -78,6 +80,18 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[régua] job não agendado: {e}")
+        # Controladoria: varre o DJEN pela OAB, recalcula as datas de
+        # trabalho, vira as fases e manda os convites de agenda. Roda de
+        # manhã cedo para que a fila do dia já esteja pronta às 8h BRT.
+        try:
+            from .agentes import controladoria
+            sched.add_job(
+                controladoria.rodar,
+                CronTrigger(hour=10, minute=10),   # 07:10 BRT
+                id="controladoria", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[controladoria] job não agendado: {e}")
         sched.start()
         app.state.scheduler = sched
     except Exception as e:  # API sobe mesmo sem o scheduler
@@ -3053,6 +3067,123 @@ def cliente_mensagem(caso_id: str, body: MensagemCliente,
     cli, ids = _clientes_do_token(authorization)
     _caso_do_cliente(caso_id, ids)
     return especialista.atender(caso_id, body.conteudo, "PORTAL")
+
+
+# ══ Fases judiciais, importação de processos e controladoria ═════
+class ImportarOAB(BaseModel):
+    numero: str | None = None          # vazio = OAB do escritório (.env)
+    uf: str | None = None
+    dias: int = 60
+
+
+class ImportarProcessos(BaseModel):
+    processos: list[dict]
+    fase: str = "JUDICIAL"
+
+
+class MoverFase(BaseModel):
+    destino: str                       # JUDICIAL | RECEBIMENTO
+    motivo: str = ""
+
+
+@app.post("/api/v1/processos/previa-oab")
+def previa_oab(body: ImportarOAB):
+    """Lê o Diário de Justiça Eletrônico Nacional (CNJ, gratuito) pela OAB
+    e devolve os processos encontrados, dizendo quais já estão aqui."""
+    from .agentes import importador
+    from .integracoes.comunica_cnj import FonteOcupada
+    try:
+        return importador.previa_por_oab(body.numero, body.uf, dias=body.dias)
+    except FonteOcupada as e:
+        raise HTTPException(503, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/processos/previa-numero")
+def previa_numero(numero: str):
+    from .agentes import importador
+    from .integracoes.comunica_cnj import FonteOcupada
+    if len(re.sub(r"\D", "", numero)) < 15:
+        raise HTTPException(400, "Número de processo incompleto (CNJ tem 20 dígitos).")
+    try:
+        return importador.previa_por_numero(numero)
+    except FonteOcupada as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/v1/processos/importar")
+def importar_processos(body: ImportarProcessos):
+    from .agentes import importador
+    if not body.processos:
+        raise HTTPException(400, "Nenhum processo selecionado.")
+    try:
+        return importador.importar(body.processos, body.fase)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/casos/{caso_id}/mover-fase")
+def mover_fase(caso_id: str, body: MoverFase):
+    from .agentes import controladoria
+    try:
+        return controladoria.mover_fase(caso_id, body.destino.upper(), body.motivo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/controladoria/rodar")
+def controladoria_rodar():
+    from .agentes import controladoria
+    return controladoria.rodar()
+
+
+@app.get("/api/v1/controladoria/fila")
+def controladoria_fila(dias: int = 30):
+    from .agentes import controladoria
+    return controladoria.fila(dias=dias)
+
+
+@app.get("/api/v1/painel/resumo")
+def painel_resumo():
+    """Os números da tela inicial e o que vence primeiro."""
+    from .agentes import controladoria
+    db = get_db()
+
+    def _contar(estados: list[str]) -> int:
+        total = 0
+        for e in estados:
+            r = db.table("casos").select("id", count="exact").eq("estado", e) \
+                .eq("situacao", "ATIVO").limit(1).execute()
+            total += r.count or 0
+        return total
+
+    try:
+        fila = controladoria.fila(dias=7)
+    except Exception:
+        fila = []
+    aguardando = db.table("casos").select("id", count="exact") \
+        .eq("aguardando_cliente", True).eq("situacao", "ATIVO").limit(1).execute().count or 0
+    novas = db.table("intimacoes").select("id", count="exact") \
+        .eq("lida", False).limit(1).execute().count or 0
+    return {
+        "aguardando_cliente": aguardando,
+        "contratos_abertos": _contar(["LEAD", "QUALIFICACAO", "PROPOSTA",
+                                      "CONTRATO", "PAGAMENTO"]),
+        "producao": _contar(["COLETA_DOCS", "AGUARDANDO_DOCUMENTOS",
+                             "PRONTO_PARA_ANALISE", "COLETA_PROVAS", "ANALISE",
+                             "PETICAO", "REVISAO", "PROTOCOLO_RPA"]),
+        "judicial": _contar(["JUDICIAL", "PROTOCOLADO"]),
+        "recebimento": _contar(["RECEBIMENTO"]),
+        "prazos_7_dias": len(fila),
+        "intimacoes_novas": novas,
+        "prazos_proximos": [
+            {"descricao": f["descricao"], "cliente": f["cliente"],
+             "numero_processo": f["numero_processo"],
+             "dias_restantes": f["dias_restantes"],
+             "caso_id": f["caso_id"]} for f in fila[:8]
+        ],
+    }
 
 
 @app.get("/api/v1/teses")
