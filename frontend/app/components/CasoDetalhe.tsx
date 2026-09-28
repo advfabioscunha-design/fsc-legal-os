@@ -43,6 +43,99 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   const ultimoCep = useRef("");
   const [instrucaoDoc, setInstrucaoDoc] = useState("");
 
+  /* ── Honorários ──────────────────────────────────────────────────
+     O combinado com o cliente vira cláusula de contrato, então fica em
+     campos próprios e não em texto livre: percentual, salários mínimos,
+     valor fixo, entrada e parcelamento. Mudou aqui, o contrato ainda em
+     revisão é refeito sozinho. */
+  const HON_VAZIO: Record<string, any> = {
+    hon_percentual: "", hon_salarios_minimos: "", hon_valor_fixo: "",
+    hon_entrada: "", hon_parcelas: "", hon_parcela_valor: "",
+    hon_vencimento: "", hon_forma_pagamento: "", hon_observacao: "",
+    resumo: "", clausula: { itens: [], forma: "" },
+  };
+  const [hon, setHon] = useState<Record<string, any>>(HON_VAZIO);
+  const [justHon, setJustHon] = useState("");
+  const [salvandoHon, setSalvandoHon] = useState(false);
+  const [lendoHon, setLendoHon] = useState(false);
+  const [sugestaoHon, setSugestaoHon] = useState<any>(null);
+  const [previaHon, setPreviaHon] = useState("");
+
+  const numHon = (v: any) => {
+    const t = String(v ?? "").trim().replace(/\./g, "").replace(",", ".");
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  async function carregarHonorarios() {
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/honorarios`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setHon({ ...HON_VAZIO, ...(d.valores || {}), resumo: d.resumo || "",
+               clausula: d.clausula || { itens: [], forma: "" } });
+    } catch { /* painel de honorários é opcional: não derruba a tela */ }
+  }
+
+  async function salvarHonorarios() {
+    setSalvandoHon(true);
+    try {
+      const corpo = {
+        hon_percentual: numHon(hon.hon_percentual),
+        hon_salarios_minimos: numHon(hon.hon_salarios_minimos),
+        hon_valor_fixo: numHon(hon.hon_valor_fixo),
+        hon_entrada: numHon(hon.hon_entrada),
+        hon_parcelas: numHon(hon.hon_parcelas),
+        hon_parcela_valor: numHon(hon.hon_parcela_valor),
+        hon_vencimento: hon.hon_vencimento || null,
+        hon_forma_pagamento: hon.hon_forma_pagamento || null,
+        hon_observacao: hon.hon_observacao || null,
+        justificativa: justHon || null,
+        origem: sugestaoHon?.encontrado ? "CONVERSA" : "ESCRITORIO",
+      };
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/honorarios`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.detail || "Não foi possível gravar os honorários."); return; }
+      setPreviaHon(d.resumo || "");
+      setJustHon("");
+      setSugestaoHon(null);
+      const docs = d.documentos || {};
+      const avisos: string[] = [];
+      if ((docs.refeitos || []).length) avisos.push(`Refeito com os novos valores: ${docs.refeitos.join(", ")}.`);
+      if ((docs.desatualizados || []).length)
+        avisos.push(`Já estava com o cliente e NÃO foi alterado: ${docs.desatualizados.join(", ")}. Gere nova via se quiser que ele assine com os novos valores.`);
+      if (avisos.length) alert(avisos.join("\n\n"));
+      await carregarHonorarios();
+      await carregar();
+    } finally { setSalvandoHon(false); }
+  }
+
+  async function lerHonorariosDaConversa() {
+    setLendoHon(true);
+    setSugestaoHon(null);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/honorarios/ler-conversa`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { alert(d.detail || "Não foi possível ler a conversa."); return; }
+      setSugestaoHon(d);
+    } finally { setLendoHon(false); }
+  }
+
+  function aplicarSugestao() {
+    if (!sugestaoHon) return;
+    const campos = ["hon_percentual", "hon_salarios_minimos", "hon_valor_fixo",
+                    "hon_entrada", "hon_parcelas", "hon_parcela_valor",
+                    "hon_vencimento", "hon_forma_pagamento", "hon_observacao"];
+    const novo: Record<string, any> = { ...hon };
+    campos.forEach((c) => { if (sugestaoHon[c] != null) novo[c] = String(sugestaoHon[c]); });
+    setHon(novo);
+    setJustHon(sugestaoHon.trecho ? `Combinado na conversa: “${sugestaoHon.trecho}”` : "Lido da conversa com o cliente");
+  }
+
   /* CEP → endereço. Preenche logradouro, bairro, cidade e UF; os campos
      continuam totalmente editáveis depois (o CEP é um atalho, não uma trava). */
   async function buscarCep(valor: string) {
@@ -90,7 +183,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     } catch { setCaso(null); }
     finally { setCarregando(false); }
   }
-  useEffect(() => { carregar(); /* eslint-disable-next-line */ }, [casoId]);
+  useEffect(() => { carregar(); carregarHonorarios(); /* eslint-disable-next-line */ }, [casoId]);
 
   async function salvarCampos() {
     setSalvando(true);
@@ -642,6 +735,133 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               <button onClick={acionarCliente} className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3]">Enviar ao cliente</button>
             </section>
 
+            {/* Honorários combinados — é daqui que sai a cláusula 4 do contrato */}
+            <section>
+              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Honorários combinados</h3>
+              <p className="mb-2 text-xs text-white/55">
+                O que estiver aqui é o que vai para a <b className="text-white/75">cláusula de
+                pagamento do contrato</b>. Mudou o combinado? Altere aqui: o contrato ainda
+                em revisão é refeito na hora, e o que já foi enviado ao cliente fica
+                sinalizado para o senhor decidir se emite nova via.
+              </p>
+
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <button onClick={lerHonorariosDaConversa} disabled={lendoHon}
+                  className="rounded-lg border border-[#2D7DD2]/50 bg-[#2D7DD2]/15 px-3 py-2 text-xs font-bold text-[#2D7DD2] hover:bg-[#2D7DD2]/25 disabled:opacity-50">
+                  {lendoHon ? "Lendo a conversa…" : "🔎 Ler o combinado na conversa"}
+                </button>
+                {hon.resumo && (
+                  <span className="rounded-lg bg-[#1DB954]/15 px-3 py-2 text-xs text-[#1DB954]">
+                    Hoje: <b>{hon.resumo}</b>
+                  </span>
+                )}
+              </div>
+
+              {sugestaoHon && (
+                <div className="mb-3 rounded-lg border border-[#2D7DD2]/40 bg-[#2D7DD2]/10 p-3">
+                  {sugestaoHon.encontrado ? (
+                    <>
+                      <p className="text-xs text-white/80">
+                        O agente encontrou na conversa (confiança {sugestaoHon.confianca || "—"}):
+                      </p>
+                      {sugestaoHon.trecho && (
+                        <p className="mt-1 border-l-2 border-[#2D7DD2]/60 pl-2 text-xs italic text-white/60">
+                          “{sugestaoHon.trecho}”
+                        </p>
+                      )}
+                      <div className="mt-2 flex gap-2">
+                        <button onClick={aplicarSugestao}
+                          className="rounded bg-[#2D7DD2] px-3 py-1.5 text-xs font-bold text-white">
+                          Usar estes valores
+                        </button>
+                        <button onClick={() => setSugestaoHon(null)}
+                          className="text-xs text-white/50 hover:text-white hover:underline">descartar</button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-white/70">
+                      Não encontrei valor de honorários combinado nesta conversa.
+                      {sugestaoHon.motivo ? ` ${sugestaoHon.motivo}` : ""}
+                      <button onClick={() => setSugestaoHon(null)}
+                        className="ml-2 text-white/50 hover:text-white hover:underline">fechar</button>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <label className="text-[11px] text-white/60">% do proveito econômico
+                  <input value={hon.hon_percentual ?? ""} inputMode="decimal" placeholder="30"
+                    onChange={(e) => setHon({ ...hon, hon_percentual: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-[11px] text-white/60">Salários mínimos
+                  <input value={hon.hon_salarios_minimos ?? ""} inputMode="decimal" placeholder="10"
+                    onChange={(e) => setHon({ ...hon, hon_salarios_minimos: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-[11px] text-white/60">Valor fixo (R$)
+                  <input value={hon.hon_valor_fixo ?? ""} inputMode="decimal" placeholder="0,00"
+                    onChange={(e) => setHon({ ...hon, hon_valor_fixo: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-[11px] text-white/60">Entrada (R$)
+                  <input value={hon.hon_entrada ?? ""} inputMode="decimal" placeholder="0,00"
+                    onChange={(e) => setHon({ ...hon, hon_entrada: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-[11px] text-white/60">Parcelas
+                  <input value={hon.hon_parcelas ?? ""} inputMode="numeric" placeholder="0"
+                    onChange={(e) => setHon({ ...hon, hon_parcelas: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-[11px] text-white/60">Valor da parcela (R$)
+                  <input value={hon.hon_parcela_valor ?? ""} inputMode="decimal" placeholder="calcula sozinho"
+                    onChange={(e) => setHon({ ...hon, hon_parcela_valor: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-[11px] text-white/60">Vencimento
+                  <input value={hon.hon_vencimento ?? ""} placeholder="todo dia 10"
+                    onChange={(e) => setHon({ ...hon, hon_vencimento: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-[11px] text-white/60">Forma de pagamento
+                  <input value={hon.hon_forma_pagamento ?? ""} placeholder="PIX, boleto, dedução do alvará"
+                    onChange={(e) => setHon({ ...hon, hon_forma_pagamento: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+                </label>
+              </div>
+              <input value={hon.hon_observacao ?? ""} placeholder="Condição combinada fora do padrão (opcional)"
+                onChange={(e) => setHon({ ...hon, hon_observacao: e.target.value })}
+                className="mt-2 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+              <input value={justHon} onChange={(e) => setJustHon(e.target.value)}
+                placeholder="Motivo da alteração (fica no histórico do caso)"
+                className="mt-2 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <button onClick={salvarHonorarios} disabled={salvandoHon}
+                  className="rounded-lg bg-[#C9A84C] px-4 py-2 text-xs font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
+                  {salvandoHon ? "Gravando…" : "Gravar e atualizar o contrato"}
+                </button>
+                {previaHon && <span className="text-[11px] text-white/50">Ficará: {previaHon}</span>}
+              </div>
+
+              {!!(hon.clausula?.itens || []).length && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-[11px] text-white/45 hover:text-white/70">
+                    ver como ficará a cláusula no contrato
+                  </summary>
+                  <div className="mt-1 space-y-1 rounded-lg border border-white/10 bg-[#0A1628]/50 p-3 text-[11px] leading-relaxed text-white/70">
+                    <p className="font-bold text-white/80">4.1. A CONTRATANTE pagará ao advogado:</p>
+                    {(hon.clausula.itens as string[]).map((t, n) => (
+                      <p key={n}>{"abcdefgh"[n]}) {t}</p>
+                    ))}
+                    {hon.clausula.forma && <p className="pt-1">4.2. {hon.clausula.forma}</p>}
+                  </div>
+                </details>
+              )}
+            </section>
+
             {/* Gerar documento a partir dos modelos do escritório */}
             <section>
               <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Gerar documento</h3>
@@ -714,6 +934,13 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                       </div>
                       {x.tipo_acao && x.tipo === "PROCURACAO" && (
                         <p className="mt-1 text-xs text-white/55">Ação: {x.tipo_acao}</p>
+                      )}
+                      {x.honorarios_desatualizado && (
+                        <p className="mt-1 rounded bg-[#C0392B]/15 px-2 py-1 text-xs text-[#E57373]">
+                          ⚠ Os honorários mudaram depois que este documento foi gerado.
+                          Ele continua com os valores antigos — gere uma nova via antes de
+                          mandar para assinatura.
+                        </p>
                       )}
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
                         {x.tipo !== "OUTRO" && (

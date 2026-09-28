@@ -36,6 +36,7 @@ import anthropic
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from . import honorarios
 
 MODELOS_DIR = os.getenv(
     "MODELOS_DIR",
@@ -311,6 +312,56 @@ def gerar_procuracao(cli: dict, dados: dict):
     return doc
 
 
+def _aplicar_honorarios(doc, clausula: dict) -> None:
+    """Reescreve o item 4 (Do Pagamento) com o que foi combinado no caso.
+
+    O modelo traz duas alíneas fixas — 30% e 10 salários mínimos. Elas são
+    substituídas pelas alíneas do ajuste real; sobrando alíneas do modelo,
+    são removidas. Se nada estiver combinado, o modelo é preservado: melhor
+    o advogado ver o texto padrão e corrigir do que receber um contrato sem
+    cláusula de honorários."""
+    itens = clausula.get("itens") or []
+    if not itens:
+        return
+
+    ini = _indice(doc, lambda t: t.startswith("4.1."))
+    if ini < 0:
+        return
+
+    # as alíneas do modelo que ficam entre o 4.1 e o 4.2
+    alineas = []
+    for p in doc.paragraphs[ini + 1:]:
+        t = p.text.strip()
+        if t.startswith("4.2") or t.startswith("5."):
+            break
+        if re.match(r"^[a-z]\)\s", t):
+            alineas.append(p)
+
+    letras = "abcdefghij"
+    anterior = doc.paragraphs[ini]
+    novos = []
+    for n, texto in enumerate(itens):
+        alvo = alineas[n] if n < len(alineas) else None
+        if alvo is not None:
+            _trocar_texto(alvo, f"{letras[n]}) {texto}")
+            anterior = alvo
+        else:
+            anterior = _clonar_apos(anterior, f"{letras[n]}) {texto}")
+        novos.append(anterior)
+
+    # alíneas do modelo que sobraram saem do documento
+    for p in alineas[len(itens):]:
+        p._p.getparent().remove(p._p)
+
+    # 4.2 — forma de pagamento
+    forma = clausula.get("forma")
+    if forma:
+        for p in doc.paragraphs:
+            if p.text.strip().startswith("4.2"):
+                _trocar_texto(p, f"4.2. {forma}")
+                break
+
+
 def gerar_contrato(cli: dict, dados: dict):
     doc = _abrir("CONTRATO")
 
@@ -343,7 +394,12 @@ def gerar_contrato(cli: dict, dados: dict):
                                         "Habilitação para Recebimento")):
                     p._p.getparent().remove(p._p)
 
-    # 3) foro — comarca do cliente
+    # 3) honorários (item 4) — a cláusula é escrita a partir do que está
+    #    combinado no caso. Sem isso, o contrato sairia sempre com o 30% e os
+    #    10 salários mínimos do modelo, independentemente do que foi ajustado.
+    _aplicar_honorarios(doc, dados.get("honorarios") or {})
+
+    # 4) foro — comarca do cliente
     for p in doc.paragraphs:
         t = p.text.strip()
         if t.startswith("10.1.") and "foro" in t:
@@ -410,6 +466,8 @@ def gerar(caso_id: str, tipo: str, titulo_livre: str | None = None,
         "foro": comarca_do_cliente(cli),
         "tipo_acao": redacao["tipo_acao"],
         "objeto": redacao["objeto"],
+        # honorários do caso: é o que escreve a cláusula 4 do contrato
+        "honorarios": honorarios.clausula_pagamento(caso),
     }
 
     if tipo == "OUTRO":
@@ -438,6 +496,9 @@ def gerar(caso_id: str, tipo: str, titulo_livre: str | None = None,
         "local_data": dados["local_data"], "foro": dados["foro"],
         "tipo_acao": dados["tipo_acao"], "storage_path": path,
         "gerado_por": "AGENTE",
+        # carimba a versão dos honorários usada, para sabermos depois se o
+        # documento envelheceu por causa de uma renegociação
+        "honorarios_versao": caso.get("hon_atualizado_em"),
     }).execute().data[0]
 
     registrar_evento(caso_id, "DOCUMENTO_GERADO",

@@ -779,11 +779,88 @@ def enviar_lote_ao_cliente(caso_id: str, body: LoteEnvio):
 
 @app.get("/api/v1/casos/{caso_id}/documentos-assinatura")
 def listar_documentos_assinatura(caso_id: str):
+    from .agentes import honorarios as hon
+    db = get_db()
     try:
-        return get_db().table("documentos_assinatura").select("*") \
-            .eq("caso_id", caso_id).order("criado_em", desc=True).execute().data
+        docs = db.table("documentos_assinatura").select("*") \
+            .eq("caso_id", caso_id).neq("status", "SUBSTITUIDO") \
+            .order("criado_em", desc=True).execute().data or []
     except Exception:
         return []
+    try:
+        caso = db.table("casos").select("hon_atualizado_em") \
+                 .eq("id", caso_id).single().execute().data or {}
+        for d in docs:
+            d["honorarios_desatualizado"] = hon.documento_desatualizado(d, caso)
+    except Exception:
+        pass
+    return docs
+
+
+# ── Honorários do caso ───────────────────────────────────────────
+class HonorariosEntrada(BaseModel):
+    hon_percentual: float | None = None
+    hon_salarios_minimos: float | None = None
+    hon_valor_fixo: float | None = None
+    hon_entrada: float | None = None
+    hon_parcelas: int | None = None
+    hon_parcela_valor: float | None = None
+    hon_vencimento: str | None = None
+    hon_forma_pagamento: str | None = None
+    hon_observacao: str | None = None
+    justificativa: str | None = None
+    origem: str | None = None
+
+
+@app.get("/api/v1/casos/{caso_id}/honorarios")
+def ver_honorarios(caso_id: str):
+    from .agentes import honorarios as hon
+    db = get_db()
+    caso = db.table("casos").select("*").eq("id", caso_id).single().execute().data
+    if not caso:
+        raise HTTPException(404, "Caso não encontrado.")
+    try:
+        hist = db.table("honorarios_historico").select("*").eq("caso_id", caso_id) \
+                 .order("criado_em", desc=True).limit(10).execute().data or []
+    except Exception:
+        hist = []
+    return {"valores": {c: caso.get(c) for c in hon.CAMPOS},
+            "atualizado_em": caso.get("hon_atualizado_em"),
+            "origem": caso.get("hon_origem"),
+            "resumo": hon.resumo_curto(caso),
+            "clausula": hon.clausula_pagamento(caso),
+            "historico": hist}
+
+
+@app.put("/api/v1/casos/{caso_id}/honorarios")
+def gravar_honorarios(caso_id: str, body: HonorariosEntrada):
+    """Grava o combinado e acerta os documentos que ainda não saíram."""
+    from .agentes import honorarios as hon
+    valores = body.model_dump(exclude={"justificativa", "origem"})
+    try:
+        caso = hon.salvar(caso_id, valores,
+                          autor=get_settings().advogado,
+                          origem=(body.origem or "ESCRITORIO"),
+                          justificativa=body.justificativa or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível gravar os honorários: {e}")
+    return {"ok": True, "resumo": hon.resumo_curto(caso),
+            "clausula": hon.clausula_pagamento(caso),
+            "documentos": caso.get("_refeitos") or {}}
+
+
+@app.post("/api/v1/casos/{caso_id}/honorarios/ler-conversa")
+def ler_honorarios_da_conversa(caso_id: str):
+    """O agente lê a conversa com o cliente e PROPÕE os valores combinados.
+    Quem aplica é o escritório — valor de honorários não entra em contrato
+    por conta própria."""
+    from .agentes import honorarios as hon
+    try:
+        return hon.ler_da_conversa(caso_id)
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível ler a conversa: {e}")
 
 
 @app.get("/api/v1/casos/{caso_id}/qualificacao")
