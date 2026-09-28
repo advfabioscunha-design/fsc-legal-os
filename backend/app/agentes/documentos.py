@@ -362,6 +362,102 @@ def _aplicar_honorarios(doc, clausula: dict) -> None:
                 break
 
 
+def _numero_bonito(n: str) -> str:
+    """5569993225383 → (69) 99322-5383."""
+    d = re.sub(r"\D", "", n or "")
+    if d.startswith("55"):
+        d = d[2:]
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    return n
+
+
+def clausula_comunicacao() -> list[str]:
+    """O tópico sobre como cliente e escritório se falam.
+
+    Existe por duas razões. Para o cliente: ele sabe onde olhar antes de
+    perguntar, e tem no painel o andamento do processo em tempo real, sem
+    depender de alguém responder. Para o escritório: fixa quais são os
+    canais oficiais, de modo que combinação feita por fora — recado em rede
+    social, número pessoal, conversa de corredor — não vira obrigação nem
+    discussão depois sobre o que foi ou não informado.
+    """
+    s = get_settings()
+    painel = s.app_url.replace("https://", "").replace("http://", "")
+    return [
+        "Toda a comunicação entre CONTRATANTE e CONTRATADO será feita "
+        "exclusivamente pelos canais oficiais do escritório, a saber: a "
+        "plataforma do cliente, disponível em "
+        f"{painel}; o endereço eletrônico {s.email_escritorio}; e os "
+        f"telefones {_numero_bonito(s.whatsapp_numero_69)} e "
+        f"{_numero_bonito(s.whatsapp_numero_48)}.",
+
+        "A PLATAFORMA é o canal preferencial e mais seguro, por não deixar "
+        "margem a dúvida: nela o CONTRATANTE acompanha, em tempo real, todo "
+        "o andamento do seu processo, com as peças, os documentos e o "
+        "histórico completo do atendimento reunidos em um só lugar e "
+        "disponíveis a qualquer hora.",
+
+        "Antes de encaminhar qualquer dúvida, o CONTRATANTE deverá acessar o "
+        "seu painel e verificar as informações ali registradas, que estão "
+        "sempre atualizadas. Permanecendo a dúvida, o próprio painel "
+        "disponibiliza atendimento exclusivo para esclarecimentos sobre o "
+        "processo, com registro de tudo o que for perguntado e respondido.",
+
+        "Todas as intimações, decisões e atualizações processuais são "
+        "registradas na plataforma e comunicadas ao CONTRATANTE por e-mail, "
+        "de modo que a ciência do andamento independe de contato telefônico.",
+
+        "Comunicações enviadas por canais não oficiais — redes sociais, "
+        "aplicativos de mensagem em números particulares ou terceiros — não "
+        "serão consideradas para nenhum efeito deste contrato, por não haver "
+        "como assegurar a sua autenticidade, o seu registro e o seu "
+        "encaminhamento ao processo.",
+
+        "O CONTRATANTE obriga-se a manter atualizados os seus dados de "
+        "contato na plataforma, presumindo-se recebida a comunicação enviada "
+        "ao endereço eletrônico e ao telefone ali cadastrados.",
+    ]
+
+
+def _inserir_comunicacao(doc) -> None:
+    """Acrescenta o tópico de comunicação antes do foro e renumera o foro.
+
+    O modelo do escritório não tem esse tópico; ele é montado aqui para que
+    todo contrato saia com ele, sem depender de alguém lembrar de colar o
+    texto."""
+    if any("canais oficiais do escritório" in p.text for p in doc.paragraphs):
+        return                                   # já está no documento
+
+    i = _indice(doc, lambda t: re.match(r"^\d+\.\s*Do Foro", t or ""))
+    if i < 0:
+        return
+    cabecalho = doc.paragraphs[i]
+    m = re.match(r"^(\d+)\.", cabecalho.text.strip())
+    n = int(m.group(1)) if m else 10
+
+    # o foro passa a ser o tópico seguinte
+    _trocar_texto(cabecalho, f"{n + 1}. Do Foro")
+    for p in doc.paragraphs[i + 1:]:
+        t = p.text.strip()
+        if t.startswith(f"{n}."):
+            _trocar_texto(p, re.sub(rf"^{n}\.", f"{n + 1}.", t))
+            break
+
+    # e o novo tópico entra no lugar que era do foro
+    titulo = _clonar_apos(cabecalho, f"{n}. Da Comunicação entre as Partes",
+                          negrito_ate=len(f"{n}. Da Comunicação entre as Partes"))
+    # o clone nasce depois do cabeçalho do foro; trazemos para antes dele
+    cabecalho._p.addprevious(titulo._p)
+    anterior = titulo
+    for k, texto in enumerate(clausula_comunicacao(), start=1):
+        novo = _clonar_apos(anterior, f"{n}.{k} {texto}")
+        cabecalho._p.addprevious(novo._p)
+        anterior = novo
+
+
 def gerar_contrato(cli: dict, dados: dict):
     doc = _abrir("CONTRATO")
 
@@ -399,10 +495,15 @@ def gerar_contrato(cli: dict, dados: dict):
     #    10 salários mínimos do modelo, independentemente do que foi ajustado.
     _aplicar_honorarios(doc, dados.get("honorarios") or {})
 
-    # 4) foro — comarca do cliente
+    # 4) tópico de comunicação — canais oficiais e uso do painel do cliente
+    _inserir_comunicacao(doc)
+
+    # 5) foro — comarca do cliente
     for p in doc.paragraphs:
         t = p.text.strip()
-        if t.startswith("10.1.") and "foro" in t:
+        # o número do tópico do foro muda quando inserimos o de comunicação,
+        # então identificamos pelo conteúdo, não pela numeração
+        if re.match(r"^\d+\.1\.", t) and "foro de" in t:
             _trocar_texto(p, re.sub(r"o foro de .+?\.$", f"o foro de {dados['foro']}.", t))
         elif re.match(r"^Palhoça/SC,\s*\d{1,2}\s+de\s+\w+\s+de\s+\d{4}", t):
             _trocar_texto(p, dados["local_data"])

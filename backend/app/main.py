@@ -851,6 +851,31 @@ def gravar_honorarios(caso_id: str, body: HonorariosEntrada):
             "documentos": caso.get("_refeitos") or {}}
 
 
+@app.post("/api/v1/documentos-assinatura/{doc_id}/revisar")
+def revisar_documento(doc_id: str):
+    """O agente confere o documento contra o cadastro e a conversa, e diz
+    se pode ir para assinatura."""
+    from .agentes import revisor
+    try:
+        return revisor.revisar(doc_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível revisar: {e}")
+
+
+@app.post("/api/v1/documentos-assinatura/{doc_id}/atualizar")
+def atualizar_documento(doc_id: str):
+    """Refaz o documento por inteiro com os dados atuais."""
+    from .agentes import revisor
+    try:
+        return revisor.atualizar_na_integra(doc_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível atualizar: {e}")
+
+
 @app.post("/api/v1/casos/{caso_id}/honorarios/ler-conversa")
 def ler_honorarios_da_conversa(caso_id: str):
     """O agente lê a conversa com o cliente e PROPÕE os valores combinados.

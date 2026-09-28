@@ -125,6 +125,38 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     } finally { setLendoHon(false); }
   }
 
+  /* ── Revisão do documento ────────────────────────────────────────
+     Entre gerar e enviar muita coisa muda: o cliente corrige o endereço,
+     o valor é renegociado no chat. O revisor confere o documento contra o
+     cadastro e contra a conversa antes de ele ir para assinatura. */
+  const [revisando, setRevisando] = useState("");
+  const [revisao, setRevisao] = useState<any>(null);
+  const [atualizando, setAtualizando] = useState(false);
+
+  async function revisarDocumento(id: string) {
+    setRevisando(id);
+    setRevisao(null);
+    try {
+      const r = await fetch(`${API}/api/v1/documentos-assinatura/${id}/revisar`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { alert(d.detail || "Não foi possível revisar o documento."); return; }
+      setRevisao({ ...d, id });
+    } finally { setRevisando(""); }
+  }
+
+  async function atualizarDocumento(id: string) {
+    if (!confirm("Refazer este documento por inteiro, com os dados atuais do cadastro e o combinado na conversa?")) return;
+    setAtualizando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/documentos-assinatura/${id}/atualizar`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { alert(d.detail || "Não foi possível atualizar o documento."); return; }
+      setRevisao(null);
+      if (d.aviso) alert(d.aviso + " Envie a nova via se quiser que ele assine esta.");
+      await carregar();
+    } finally { setAtualizando(false); }
+  }
+
   function aplicarSugestao() {
     if (!sugestaoHon) return;
     const campos = ["hon_percentual", "hon_salarios_minimos", "hon_valor_fixo",
@@ -960,10 +992,84 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                             {x.status === "ENVIADO" ? "reenviar sozinho" : "enviar sozinho"}
                           </button>
                         )}
+                        <button onClick={() => revisarDocumento(x.id)} disabled={revisando === x.id}
+                          className="font-bold text-[#2D7DD2] hover:underline disabled:opacity-50">
+                          {revisando === x.id ? "revisando…" : "🔍 revisar"}
+                        </button>
                         {x.status !== "ASSINADO" && (
                           <button onClick={() => excluirDocumentoAssin(x.id)} className="ml-auto text-[#C0392B] hover:underline">descartar</button>
                         )}
                       </div>
+
+                      {revisao && revisao.id === x.id && (
+                        <div className="mt-2 rounded-lg border border-[#2D7DD2]/40 bg-[#2D7DD2]/10 p-3 text-xs">
+                          <div className="mb-2 flex items-start justify-between gap-2">
+                            <p className={revisao.pode_enviar ? "text-[#1DB954]" : "text-[#E5A44C]"}>
+                              {revisao.pode_enviar
+                                ? "✓ Documento conferido: os dados batem com o cadastro e com a conversa."
+                                : "⚠ Há pontos a resolver antes de mandar para assinatura."}
+                            </p>
+                            <button onClick={() => setRevisao(null)} className="text-white/40 hover:text-white">fechar</button>
+                          </div>
+
+                          {(revisao.conferencia || []).filter((c: any) => !c.ok).length > 0 && (
+                            <div className="mb-2">
+                              <p className="font-bold text-white/75">Fora do cadastro</p>
+                              <ul className="mt-1 space-y-0.5">
+                                {(revisao.conferencia || []).filter((c: any) => !c.ok).map((c: any, i: number) => (
+                                  <li key={i} className="text-white/70">
+                                    • <b>{c.campo}</b>: {c.achado}
+                                    {c.esperado && <span className="text-white/45"> — deveria constar “{c.esperado}”</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {(revisao.divergencias || []).length > 0 && (
+                            <div className="mb-2">
+                              <p className="font-bold text-white/75">Diferente do combinado na conversa</p>
+                              <ul className="mt-1 space-y-1">
+                                {revisao.divergencias.map((d: any, i: number) => (
+                                  <li key={i} className="text-white/70">
+                                    <span className={d.gravidade === "ALTA" ? "text-[#E57373]" : "text-white/50"}>
+                                      [{d.gravidade}]
+                                    </span> {d.o_que}
+                                    {d.na_conversa && <span className="block text-white/45">na conversa: “{d.na_conversa}”</span>}
+                                    {d.sugestao && <span className="block text-white/55">→ {d.sugestao}</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {(revisao.riscos || []).length > 0 && (
+                            <div className="mb-2">
+                              <p className="font-bold text-white/75">Risco para o escritório</p>
+                              <ul className="mt-1 space-y-1">
+                                {revisao.riscos.map((d: any, i: number) => (
+                                  <li key={i} className="text-white/70">
+                                    <span className={d.gravidade === "ALTA" ? "text-[#E57373]" : "text-white/50"}>
+                                      [{d.gravidade}]
+                                    </span> {d.o_que}
+                                    {d.sugestao && <span className="block text-white/55">→ {d.sugestao}</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {revisao.parecer && <p className="text-white/60 italic">{revisao.parecer}</p>}
+                          {revisao.aviso && <p className="text-white/60">{revisao.aviso}</p>}
+
+                          {revisao.pode_atualizar && (
+                            <button onClick={() => atualizarDocumento(x.id)} disabled={atualizando}
+                              className="mt-2 rounded bg-[#2D7DD2] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                              {atualizando ? "Refazendo…" : "Atualizar o documento na íntegra"}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </li>
                   );
                 })}
