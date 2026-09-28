@@ -37,11 +37,26 @@ class FonteOcupada(RuntimeError):
     """O CNJ recusou a consulta por carga. Vale tentar de novo depois."""
 
 
+def _destino() -> tuple[str, dict]:
+    """Direto no CNJ, ou pela ponte no Brasil quando ela existe.
+
+    O CNJ bloqueia IP estrangeiro; este servidor está nos Estados
+    Unidos. A ponte (infra/ponte-cnj) é uma máquina em São Paulo que só
+    repassa a consulta. Sem ela configurada, a chamada daqui devolve
+    403 — e quem consulta é o navegador do escritório."""
+    from ..core.config import get_settings
+    s = get_settings()
+    if s.comunica_ponte_url:
+        return s.comunica_ponte_url, {"X-Ponte-Token": s.comunica_ponte_token}
+    return BASE, {}
+
+
 def _pedir(params: dict) -> dict:
+    url, headers = _destino()
     ultimo = ""
     for tentativa in range(TENTATIVAS):
         try:
-            r = httpx.get(BASE, params=params, timeout=60)
+            r = httpx.get(url, params=params, headers=headers, timeout=90)
             r.raise_for_status()
             dados = r.json()
         except (httpx.HTTPError, ValueError) as e:

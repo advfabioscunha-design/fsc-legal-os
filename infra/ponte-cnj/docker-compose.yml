@@ -1,0 +1,27 @@
+services:
+  ponte:
+    build: .
+    restart: unless-stopped
+    environment:
+      PONTE_TOKEN: ${PONTE_TOKEN}
+    expose:
+      - "8080"
+
+  # Caddy resolve o HTTPS sozinho: basta o subdomínio apontar para o IP
+  # desta máquina. Sem certificado válido, o token viajaria em claro.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ponte
+
+volumes:
+  caddy_data:
+  caddy_config:

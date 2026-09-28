@@ -73,6 +73,15 @@ class Settings(BaseModel):
     jusbrasil_api_token: str = os.getenv("JUSBRASIL_API_TOKEN", "")
     jurisprudencias_api_token: str = os.getenv("JURISPRUDENCIAS_API_TOKEN", "")
 
+    # ── Ponte CNJ (saída de rede no Brasil) ──────────────────────
+    # O Comunica CNJ recusa requisição de IP fora do Brasil (403 no
+    # CloudFront) e este servidor está nos Estados Unidos. Com a ponte
+    # configurada — uma máquina pequena em São Paulo, ver
+    # infra/ponte-cnj — a varredura do Diário volta a rodar sozinha.
+    # Sem ela, a consulta continua saindo do navegador do escritório.
+    comunica_ponte_url: str = os.getenv("COMUNICA_PONTE_URL", "")
+    comunica_ponte_token: str = os.getenv("COMUNICA_PONTE_TOKEN", "")
+
     # ── Atendimento telepresencial (Daily) ───────────────────────
     # Vídeo ao vivo, gravação só de áudio. O segredo do webhook impede que
     # qualquer um poste "gravação pronta" e injete áudio no acervo.

@@ -3116,6 +3116,37 @@ class ComunicacoesLidas(BaseModel):
     comunicacoes: list[dict]
 
 
+@app.get("/api/v1/processos/diagnostico-cnj")
+def diagnostico_cnj():
+    """Este servidor consegue falar com o Diário do CNJ?
+
+    Responde a pergunta que decide se a varredura roda sozinha ou se
+    depende de alguém abrir a tela: 403 é o bloqueio geográfico do CNJ
+    (este servidor está fora do Brasil) e significa que falta a ponte."""
+    from .core.config import get_settings
+    from .integracoes import comunica_cnj
+    s = get_settings()
+    saida = {
+        "ponte_configurada": bool(s.comunica_ponte_url),
+        "ponte_url": s.comunica_ponte_url or None,
+    }
+    try:
+        itens = comunica_cnj.por_oab("10849", "RO", dias=2, paginas=1, por_pagina=1)
+        saida.update({"ok": True, "publicacoes_lidas": len(itens),
+                      "varredura_noturna": "funciona sozinha"})
+    except Exception as e:
+        bloqueio = "403" in str(e)
+        saida.update({
+            "ok": False, "erro": str(e)[:300],
+            "diagnostico": ("Bloqueio geográfico do CNJ: este servidor está fora "
+                            "do Brasil. Suba a ponte (infra/ponte-cnj) e preencha "
+                            "COMUNICA_PONTE_URL." if bloqueio else
+                            "O CNJ não respondeu agora; pode ser instabilidade da fonte."),
+            "varredura_noturna": "depende do navegador do escritório",
+        })
+    return saida
+
+
 @app.post("/api/v1/processos/previa-do-navegador")
 def previa_do_navegador(body: ComunicacoesLidas):
     """O navegador do escritório consulta o CNJ (que recusa o nosso

@@ -1,0 +1,5 @@
+# Subdomínio da ponte. Trocar pelo que for criado no DNS.
+br.fscadvocaciadigital.com.br {
+	encode gzip
+	reverse_proxy ponte:8080
+}
