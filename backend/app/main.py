@@ -3390,6 +3390,28 @@ def controladoria_rodar():
     return controladoria.rodar()
 
 
+@app.get("/api/v1/controladoria/semana")
+def controladoria_semana(dias: int = 7):
+    """Como está a semana, dia a dia — outra pergunta que a fila por
+    urgência não responde."""
+    from .agentes import controladoria
+    return controladoria.agenda_da_semana(dias=dias)
+
+
+@app.get("/api/v1/controladoria/auditoria")
+def controladoria_auditoria():
+    """O que está fora dos conformes e precisa da mão de alguém."""
+    from .agentes import controladoria
+    return controladoria.auditoria()
+
+
+@app.post("/api/v1/controladoria/agendar-eventos")
+def controladoria_agendar_eventos():
+    """Põe na agenda as audiências e perícias designadas nas publicações."""
+    from .agentes import controladoria
+    return controladoria.agendar_eventos()
+
+
 @app.get("/api/v1/controladoria/fila")
 def controladoria_fila(dias: int = 30):
     from .agentes import controladoria

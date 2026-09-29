@@ -55,7 +55,9 @@ function dataBr(iso?: string | null) {
 }
 
 export default function Intimacoes() {
-  const [aba, setAba] = useState<"prazos" | "intimacoes">("prazos");
+  const [aba, setAba] = useState<"prazos" | "semana" | "conformidade" | "intimacoes">("prazos");
+  const [plano, setPlano] = useState<any>(null);   // a semana pela frente
+  const [auditoria, setAuditoria] = useState<any>(null);
   const [prazos, setPrazos] = useState<any[]>([]);
   const [intimacoes, setIntimacoes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,9 +70,12 @@ export default function Intimacoes() {
     Promise.all([
       fetch(`${API}/api/v1/controladoria/fila?dias=120`).then((r) => r.json()).catch(() => []),
       fetch(`${API}/api/v1/intimacoes?limite=200`).then((r) => r.json()).catch(() => []),
-    ]).then(([f, i]) => {
+      fetch(`${API}/api/v1/controladoria/semana`).then((r) => r.json()).catch(() => null),
+      fetch(`${API}/api/v1/controladoria/auditoria`).then((r) => r.json()).catch(() => null),
+    ]).then(([f, i, s, a]) => {
       setPrazos(Array.isArray(f) ? f : []);
       setIntimacoes(Array.isArray(i) ? i : []);
+      setPlano(s); setAuditoria(a);
     }).finally(() => setLoading(false));
   }
 
@@ -163,7 +168,8 @@ export default function Intimacoes() {
         </section>
 
         <div className="flex flex-wrap items-center gap-2">
-          {([["prazos", "Prazos (fila do dia)"], ["intimacoes", "Publicações do Diário"]] as const)
+          {([["prazos", "Prazos (fila do dia)"], ["semana", "Minha semana"],
+             ["conformidade", "Conformidade"], ["intimacoes", "Publicações do Diário"]] as const)
             .map(([k, l]) => (
               <button key={k} onClick={() => setAba(k)}
                 className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
@@ -237,6 +243,98 @@ export default function Intimacoes() {
                     cumprido
                   </button>
                 </div>
+              </div>
+            ))}
+          </section>
+        ) : aba === "semana" ? (
+          /* A semana pela frente. A fila por urgência responde "o que é
+             mais urgente"; esta responde "como está a minha semana",
+             que é a pergunta de segunda de manhã. */
+          <section className="space-y-3">
+            {plano?.atrasados?.length > 0 && (
+              <div className="rounded-xl border border-[#C0392B]/40 bg-[#C0392B]/10 p-3">
+                <p className="text-sm font-bold text-[#C0392B]">
+                  {plano.atrasados.length} item(ns) passaram da data de trabalho
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {plano.atrasados.slice(0, 5).map((a: any, i: number) => (
+                    <li key={i} className="truncate text-xs text-white/70">
+                      • {a.cliente ? <b>{a.cliente}</b> : null} {a.titulo}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-4">
+              {(plano?.dias || []).map((d: any) => {
+                const dt = new Date(d.data + "T12:00");
+                const nomes = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+                const fds = [0, 6].includes(dt.getDay());
+                return (
+                  <div key={d.data}
+                    className={`rounded-xl border p-3 ${d.total ? "border-white/15 bg-[#0B1F3B]" : "border-white/5 bg-[#0B1F3B]/40"}`}>
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className={`text-xs font-bold ${fds ? "text-white/35" : "text-[#C9A24D]"}`}>
+                        {nomes[dt.getDay()]} {dataBr(d.data).slice(0, 5)}
+                      </span>
+                      {d.total > 0 && <span className="text-xs text-white/50">{d.total}</span>}
+                    </div>
+                    {d.total === 0 ? (
+                      <p className="text-[11px] text-white/25">livre</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {d.itens.map((it: any) => (
+                          <li key={it.id} className="rounded bg-[#0A1628]/60 px-2 py-1.5">
+                            <p className="truncate text-[11px] font-semibold text-white/85">
+                              {it.cliente || "—"}
+                            </p>
+                            <p className="truncate text-[10px] text-white/50">{it.titulo}</p>
+                            {it.depende_do_cliente && (
+                              <span className="mt-0.5 inline-block rounded bg-[#2D7DD2]/20 px-1 text-[9px] text-[#2D7DD2]">
+                                cliente comparece
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : aba === "conformidade" ? (
+          /* O que está quebrado e precisa da mão de alguém — não é
+             relatório de produtividade. */
+          <section className="space-y-2">
+            <div className="flex flex-wrap gap-3 text-xs text-white/60">
+              <span>{auditoria?.casos_conferidos ?? 0} caso(s) conferido(s)</span>
+              {["ALTA", "MEDIA", "BAIXA"].map((g) => (
+                <span key={g} style={{ color: g === "ALTA" ? "#C0392B" : g === "MEDIA" ? "#E5A44C" : "#8899AA" }}>
+                  {auditoria?.por_gravidade?.[g] ?? 0} {g.toLowerCase()}
+                </span>
+              ))}
+            </div>
+            {(auditoria?.achados || []).length === 0 ? (
+              <p className="rounded-xl border border-dashed border-[#1DB954]/30 p-6 text-center text-sm text-[#1DB954]">
+                Nada fora dos conformes.
+              </p>
+            ) : (auditoria.achados).map((a: any, i: number) => (
+              <div key={i} className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-[#0B1F3B] p-3">
+                <span className="w-14 shrink-0 text-[10px] font-bold"
+                  style={{ color: a.gravidade === "ALTA" ? "#C0392B" : a.gravidade === "MEDIA" ? "#E5A44C" : "#8899AA" }}>
+                  {a.gravidade}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-white/85">{a.o_que}</p>
+                  <p className="truncate text-xs text-white/45">{a.caso} — {a.fazer}</p>
+                </div>
+                {a.caso_id && (
+                  <Link href={`/judicial?caso=${a.caso_id}`}
+                    className="shrink-0 rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:text-white">
+                    abrir
+                  </Link>
+                )}
               </div>
             ))}
           </section>
