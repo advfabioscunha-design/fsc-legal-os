@@ -13,21 +13,30 @@ export default function Entrar() {
   const [msg, setMsg] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
 
+  /* PARA ONDE VAI QUEM ACABOU DE ENTRAR
+   *
+   * O operador caía direto na Triagem. Faz sentido para quem usa o
+   * sistema todo dia e só quer ver a esteira, mas é a tela errada para
+   * começar o dia: o Início mostra prazo, tarefa e o que está parado,
+   * e é de lá que se decide o que fazer.
+   *
+   * Qualquer tela interna pedida na URL é respeitada, desde que quem
+   * entrou seja da equipe. Cliente que tropeça num link interno vai
+   * para a área dele, sem mensagem de erro: não é engano dele. */
   async function redirecionarPorPapel() {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return;
     const { data: perfil } = await supabase
       .from("perfis").select("papel").eq("id", data.user.id).maybeSingle();
-    // destino solicitado na URL (?next=/cliente | /crm)
-    const next = new URLSearchParams(window.location.search).get("next");
-    if (next === "/crm") {
-      // só operador acessa o CRM; cliente vai para a própria área
-      router.push(["OPERADOR", "ADMIN"].includes(perfil?.papel) ? "/crm" : "/cliente");
+    const daEquipe = ["OPERADOR", "ADMIN"].includes(perfil?.papel);
+    const next = new URLSearchParams(window.location.search).get("next") || "";
+
+    if (next === "/cliente") { router.push("/cliente"); return; }
+    if (next.startsWith("/")) {
+      router.push(daEquipe ? next : "/cliente");
       return;
     }
-    if (next === "/cliente") { router.push("/cliente"); return; }
-    // sem destino: vai pela função do papel
-    router.push(["OPERADOR", "ADMIN"].includes(perfil?.papel) ? "/crm" : "/cliente");
+    router.push(daEquipe ? "/inicio" : "/cliente");
   }
 
   async function enviar(e: React.FormEvent) {
