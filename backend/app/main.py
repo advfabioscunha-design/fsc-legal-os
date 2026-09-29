@@ -217,9 +217,64 @@ def listar_casos(estado: str | None = None, grupo: str | None = None, situacao: 
             q = q.eq("grupo", grupo)
         return q.order("atualizado_em", desc=True).limit(300).execute().data
     try:
-        return montar(True)
+        casos = montar(True)
     except Exception:
-        return montar(False)  # coluna 'situacao' ainda não criada (migração pendente)
+        casos = montar(False)  # coluna 'situacao' ainda não criada (migração pendente)
+    return _com_prazo_em_aberto(casos)
+
+
+def _com_prazo_em_aberto(casos: list[dict]) -> list[dict]:
+    """Anexa a cada caso o prazo aberto mais próximo.
+
+    O card mostrava cliente, matéria e processo — e não mostrava a única
+    coisa que faz alguém largar tudo e trabalhar naquele caso hoje. Quem
+    olhava a esteira não via o que vencia; tinha de abrir outra tela.
+
+    Uma consulta para todos os casos, não uma por card: trezentas
+    consultas para desenhar uma tela é como se perde um sistema.
+    """
+    from datetime import date
+    if not casos:
+        return casos
+    ids = [c["id"] for c in casos if c.get("id")]
+    try:
+        prazos = get_db().table("prazos").select(
+            "id,caso_id,titulo,data,prazo_fatal,tipo,status,depende_do_cliente"
+        ).in_("caso_id", ids).eq("status", "ABERTO")             .order("prazo_fatal").limit(2000).execute().data or []
+    except Exception as e:
+        print(f"[casos] prazos não anexados: {e}")
+        return casos
+
+    # O mais próximo de vencer é o que importa. Sem prazo_fatal
+    # preenchido, cai para a data de trabalho.
+    por_caso: dict[str, dict] = {}
+    for p in prazos:
+        cid = p.get("caso_id")
+        if not cid:
+            continue
+        quando = p.get("prazo_fatal") or p.get("data") or "9999-12-31"
+        atual = por_caso.get(cid)
+        if not atual or quando < (atual.get("prazo_fatal") or atual.get("data") or "9999-12-31"):
+            por_caso[cid] = p
+
+    hoje = date.today()
+    for c in casos:
+        p = por_caso.get(c.get("id"))
+        if not p:
+            c["prazo_aberto"] = None
+            continue
+        alvo = p.get("prazo_fatal") or p.get("data")
+        try:
+            dias = (date.fromisoformat(str(alvo)[:10]) - hoje).days
+        except Exception:
+            dias = None
+        c["prazo_aberto"] = {
+            "id": p["id"], "titulo": p.get("titulo"),
+            "prazo_fatal": p.get("prazo_fatal"), "data_trabalho": p.get("data"),
+            "tipo": p.get("tipo"), "dias_restantes": dias,
+            "depende_do_cliente": p.get("depende_do_cliente"),
+        }
+    return casos
 
 
 @app.get("/api/v1/casos/{caso_id}")
@@ -2846,10 +2901,19 @@ def cliente_meus_casos(authorization: str | None = Header(default=None)):
 
 @app.get("/api/v1/cliente/cadastro")
 def cliente_cadastro(authorization: str | None = Header(default=None)):
-    """Cadastro do cliente logado (nome, e-mail, CPF, WhatsApp)."""
+    """Cadastro do cliente logado (nome, e-mail, CPF, WhatsApp).
+
+    Devolve também o TIPO, que decide qual área a pessoa vê. Quem chegou
+    pelo balcão pedindo um contrato de aluguel não tem processo: mostrar
+    "meus processos" e "você ainda não tem caso aberto" a essa pessoa é
+    falar de uma coisa que ela nunca pediu. E quem tem uma ação em curso
+    não deve cair numa vitrine de venda de documento.
+    """
     cli = _cliente_do_token(authorization)
-    return {k: cli.get(k) for k in
-            ("id", "nome", "email", "cpf_cnpj", "whatsapp", "origem", "criado_em")}
+    dados = {k: cli.get(k) for k in
+             ("id", "nome", "email", "cpf_cnpj", "whatsapp", "origem", "criado_em")}
+    dados["tipo"] = (cli.get("tipo") or "LITIGIOSO").upper()
+    return dados
 
 
 class CadastroCliente(BaseModel):
@@ -4464,3 +4528,137 @@ def balcao_mensagem(pedido_id: str, body: MensagemDoBalcao):
         "pedido_id": pedido_id, "autor": autor, "texto": body.texto[:4000],
     }).execute().data
     return r[0] if r else {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+# HISTÓRICO DO CASO — o que foi feito, e o relatório disso
+#
+# O sistema registrava cada ação em `eventos` — mais de noventa tipos —
+# e o card mostrava só a tabela `mensagens`. A perícia realizada, a
+# pendência resolvida, o prazo cumprido: tudo gravado, nada à vista.
+# ══════════════════════════════════════════════════════════════════
+
+class AjustarPrazo(BaseModel):
+    prazo_fatal: str | None = None
+    data: str | None = None            # dia de trabalho
+    titulo: str | None = None
+    responsavel_id: str | None = None
+    motivo: str = ""
+    quem: str = ""
+
+
+@app.get("/api/v1/casos/{caso_id}/linha-do-tempo")
+def caso_linha_do_tempo(caso_id: str, natureza: str | None = None,
+                        conversas: bool = True):
+    """Tudo que aconteceu no caso. `natureza=TRABALHO` traz só o que a
+    equipe fez — é o que alimenta o relatório."""
+    from .agentes import historico
+    return {
+        "resumo": historico.resumo(caso_id),
+        "itens": historico.linha_do_tempo(caso_id, natureza, conversas),
+    }
+
+
+@app.get("/api/v1/casos/{caso_id}/relatorio")
+def caso_relatorio(caso_id: str, completo: bool = False):
+    """Relatório de atividades do caso, em Word.
+
+    Por padrão só o trabalho da equipe: o cliente quer saber o que foi
+    feito para resolver a demanda dele, não quantas vezes a
+    controladoria varreu o banco de madrugada. `completo=true` inclui
+    tudo, para uso interno."""
+    from fastapi.responses import Response
+    from .agentes import historico
+    try:
+        conteudo, nome = historico.relatorio_docx(caso_id, so_trabalho=not completo)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return Response(
+        conteudo,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.patch("/api/v1/prazos/{prazo_id}/ajustar")
+def ajustar_prazo(prazo_id: str, body: AjustarPrazo):
+    """Corrige um prazo à mão, com registro de quem mudou e por quê.
+
+    Todo prazo calculado pelo sistema é ESTIMADO: a contagem sai da
+    publicação e do calendário de feriados nacionais, que não conhece
+    feriado local nem suspensão de expediente do tribunal. Quem está com
+    o processo aberto na tela sabe a data certa — faltava onde
+    escrevê-la.
+
+    A alteração vai para o histórico do caso justamente porque mudar
+    prazo é decisão de responsabilidade: se a data mudou, tem de haver
+    registro de quem mudou.
+    """
+    from .core.db import registrar_evento
+    db = get_db()
+    atual = db.table("prazos").select("*,casos(id)").eq("id", prazo_id) \
+        .limit(1).execute().data
+    if not atual:
+        raise HTTPException(404, "Prazo não encontrado.")
+    antes = atual[0]
+
+    campos = {k: v for k, v in {
+        "prazo_fatal": body.prazo_fatal,
+        "data": body.data,
+        "titulo": body.titulo,
+        "responsavel_id": body.responsavel_id,
+    }.items() if v is not None}
+    if not campos:
+        raise HTTPException(400, "Nada para alterar.")
+
+    # Mudar o prazo fatal sem mover o dia de trabalho deixaria a agenda
+    # apontando para a data antiga. Se o novo fatal ficou antes do dia
+    # de trabalho, a agenda perde o sentido — recua dois dias úteis.
+    if body.prazo_fatal and not body.data:
+        try:
+            from .core.datas import antecipar_uteis
+            from datetime import date as _d
+            novo_fatal = _d.fromisoformat(body.prazo_fatal[:10])
+            trabalho = _d.fromisoformat(str(antes.get("data") or "")[:10]) \
+                if antes.get("data") else None
+            if not trabalho or trabalho >= novo_fatal:
+                campos["data"] = antecipar_uteis(novo_fatal, 2).isoformat()
+        except Exception as e:
+            print(f"[prazos] dia de trabalho não recalculado: {e}")
+
+    campos["atualizado_em"] = datetime.now(_tz.utc).isoformat()
+    db.table("prazos").update(campos).eq("id", prazo_id).execute()
+
+    if antes.get("caso_id"):
+        registrar_evento(antes["caso_id"], "PRAZO_AJUSTADO", {
+            "titulo": antes.get("titulo"),
+            "de": antes.get("prazo_fatal") or antes.get("data"),
+            "para": body.prazo_fatal or body.data,
+            "motivo": body.motivo, "quem": body.quem or "escritório",
+        })
+    return {"ok": True, **campos}
+
+
+@app.post("/api/v1/prazos/{prazo_id}/cumprir")
+def cumprir_prazo(prazo_id: str, body: AjustarPrazo):
+    """Baixa o prazo dizendo o que foi feito.
+
+    `PATCH /prazos/{id}` já existia e só virava o status — o que foi
+    protocolado ficava sem registro, e o histórico do caso ganhava uma
+    linha muda."""
+    from .core.db import registrar_evento
+    db = get_db()
+    atual = db.table("prazos").select("*").eq("id", prazo_id).limit(1).execute().data
+    if not atual:
+        raise HTTPException(404, "Prazo não encontrado.")
+    db.table("prazos").update({
+        "status": "CONCLUIDO",
+        "atualizado_em": datetime.now(_tz.utc).isoformat(),
+    }).eq("id", prazo_id).execute()
+
+    if atual[0].get("caso_id"):
+        registrar_evento(atual[0]["caso_id"], "PRAZO_CUMPRIDO", {
+            "titulo": atual[0].get("titulo"),
+            "resultado": body.motivo, "quem": body.quem or "escritório",
+        })
+    return {"ok": True}

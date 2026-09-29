@@ -98,6 +98,15 @@ type Caso = {
   fase_judicial?: string | null;
   fase_judicial_motivo?: string | null;
   fase_judicial_fonte?: string | null;
+  // O prazo aberto mais próximo, anexado pelo backend. O card mostrava
+  // cliente, matéria e processo — e não mostrava a única coisa que faz
+  // alguém largar tudo e trabalhar naquele caso hoje.
+  prazo_aberto?: {
+    id: string; titulo?: string | null;
+    prazo_fatal?: string | null; data_trabalho?: string | null;
+    tipo?: string | null; dias_restantes?: number | null;
+    depende_do_cliente?: boolean | null;
+  } | null;
 };
 
 const formVazio = { nome: "", cpf: "", contato: "", grupo: "", fase: "PETICAO", numero_processo: "", honorarios: "", descricao: "" };
@@ -475,6 +484,10 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
                             : c.fase_judicial_motivo}
                         </p>
                       )}
+                      {c.prazo_aberto && (
+                        <PrazoNoCard prazo={c.prazo_aberto} aoMudar={load} />
+                      )}
+
                       {/* Avançar uma casa. No judicial a coluna vem das
                           publicações, então avançar ali é correção
                           manual e passa pelo mesmo caminho. */}
@@ -669,5 +682,102 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
         <CasoDetalhe casoId={selecionado} onFechar={() => setSelecionado(null)} onMudou={load} />
       )}
     </PainelLayout>
+  );
+}
+
+
+/* ── O prazo no card ───────────────────────────────────────────────
+
+   Mostra o prazo fatal mais próximo e deixa corrigi-lo ali mesmo.
+
+   A correção à mão não é luxo: todo prazo calculado pelo sistema é
+   ESTIMADO. A contagem sai da publicação e de um calendário de feriados
+   NACIONAIS — que não conhece feriado municipal, ponto facultativo nem
+   suspensão de expediente do tribunal. Quem está com o processo aberto
+   na tela sabe a data certa; faltava onde escrevê-la. */
+function PrazoNoCard({ prazo, aoMudar }: { prazo: any; aoMudar: () => void }) {
+  const [abrir, setAbrir] = useState(false);
+  const [data, setData] = useState(String(prazo.prazo_fatal || prazo.data_trabalho || "").slice(0, 10));
+  const [motivo, setMotivo] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const d = prazo.dias_restantes;
+  const cor = d == null ? "#8899AA"
+    : d < 0 ? "#C0392B" : d <= 2 ? "#E5A44C" : d <= 7 ? "#C9A84C" : "#8899AA";
+  const quando = d == null ? "sem data"
+    : d < 0 ? `venceu há ${Math.abs(d)} d`
+    : d === 0 ? "vence hoje"
+    : d === 1 ? "vence amanhã"
+    : `${d} dias`;
+  const br = (x?: string | null) =>
+    x ? `${String(x).slice(8, 10)}/${String(x).slice(5, 7)}` : "—";
+
+  async function salvar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!data) return;
+    setSalvando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/prazos/${prazo.id}/ajustar`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prazo_fatal: data, motivo, quem: "escritório" }),
+      });
+      if (!r.ok) { alert("Não consegui alterar o prazo."); return; }
+      setAbrir(false); setMotivo(""); aoMudar();
+    } finally { setSalvando(false); }
+  }
+
+  async function cumprir(e: React.MouseEvent) {
+    e.stopPropagation();
+    const feito = prompt("O que foi feito? (vai para o histórico do caso)");
+    if (feito === null) return;
+    setSalvando(true);
+    try {
+      await fetch(`${API}/api/v1/prazos/${prazo.id}/cumprir`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: feito, quem: "escritório" }),
+      });
+      aoMudar();
+    } finally { setSalvando(false); }
+  }
+
+  return (
+    <div className="mt-2 rounded-md border px-1.5 py-1"
+      style={{ borderColor: `${cor}66`, background: `${cor}14` }}>
+      <button onClick={(e) => { e.stopPropagation(); setAbrir(!abrir); }}
+        className="flex w-full items-center gap-1.5 text-left">
+        <span className="text-[10px]">⏳</span>
+        <span className="text-[10px] font-bold" style={{ color: cor }}>{quando}</span>
+        <span className="truncate text-[10px] text-white/50">
+          {br(prazo.prazo_fatal)} · {prazo.titulo || prazo.tipo || "prazo"}
+        </span>
+        {prazo.depende_do_cliente && (
+          <span className="shrink-0 text-[9px] text-white/35" title="Depende do cliente">👤</span>
+        )}
+      </button>
+
+      {abrir && (
+        <div className="mt-1.5 space-y-1" onClick={(e) => e.stopPropagation()}>
+          <p className="text-[9px] leading-snug text-white/40">
+            Prazo estimado pelo sistema: a contagem usa feriados nacionais e não
+            conhece feriado local nem suspensão de expediente. Confira e corrija.
+          </p>
+          <input type="date" value={data} onChange={(e) => setData(e.target.value)}
+            className="w-full rounded border border-white/15 bg-[#0A1628] px-1.5 py-1 text-[10px] text-white outline-none focus:border-[#C9A84C]" />
+          <input value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            placeholder="motivo da correção"
+            className="w-full rounded border border-white/15 bg-[#0A1628] px-1.5 py-1 text-[10px] text-white outline-none focus:border-[#C9A84C]" />
+          <div className="flex gap-1">
+            <button onClick={salvar} disabled={salvando}
+              className="flex-1 rounded bg-[#C9A84C] py-1 text-[10px] font-bold text-[#0A1628] disabled:opacity-40">
+              {salvando ? "…" : "Corrigir"}
+            </button>
+            <button onClick={cumprir} disabled={salvando}
+              className="flex-1 rounded bg-[#1DB954] py-1 text-[10px] font-bold text-white disabled:opacity-40">
+              Cumprido
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

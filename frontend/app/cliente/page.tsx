@@ -48,7 +48,19 @@ type Cadastro = {
   endereco_complemento?: string | null; endereco_bairro?: string | null;
   endereco_cidade?: string | null; endereco_uf?: string | null; endereco_cep?: string | null;
 };
-type Vista = "home" | "casos" | "acompanhar" | "atendimento" | "contrato" | "cadastro";
+type Vista = "home" | "casos" | "acompanhar" | "atendimento" | "contrato" | "cadastro" | "pedidos";
+
+/* QUEM VÊ O QUÊ
+
+   São dois serviços com ritos diferentes, e o cliente de um não deve ver
+   a tela do outro. Quem chegou pelo balcão pedindo um contrato de
+   aluguel não tem processo: mostrar "meus processos" e "você ainda não
+   tem caso aberto" a essa pessoa é falar de uma coisa que ela nunca
+   pediu, e dá a impressão de que algo deu errado.
+
+   Quem tem os dois (pediu um contrato e depois abriu uma ação, ou o
+   contrário) vê os dois. O tipo vem do cadastro, e nunca se apaga um
+   lado ao acrescentar o outro. */
 
 const WHATS_RO = "5569993225383";
 const WHATS_SC = "5548988357992";
@@ -85,6 +97,11 @@ export default function AreaCliente() {
   const cameraRef = useRef<HTMLInputElement | null>(null);
 
   const fimRef = useRef<HTMLDivElement | null>(null);
+  const [pedidos, setPedidos] = useState<any[]>([]);
+  const tipoCliente = String((cadastro as any)?.tipo || "LITIGIOSO").toUpperCase();
+  const veContratos = tipoCliente === "CONTRATOS" || tipoCliente === "AMBOS";
+  const veProcessos = tipoCliente !== "CONTRATOS" || casos.length > 0;
+
   const primeiroNome = (nome || "").trim().split(" ")[0] || "tudo bem";
   const whatsEscritorio = (cadastro?.whatsapp || "").replace(/\D/g, "").replace(/^55/, "").startsWith("69") ? WHATS_RO : WHATS_SC;
   const whatsLink = `https://wa.me/${whatsEscritorio}?text=${encodeURIComponent(
@@ -117,6 +134,14 @@ export default function AreaCliente() {
     } catch { /* mantém o que já está na tela */ }
   }, []);
 
+  const carregarPedidos = useCallback(async (tk: string) => {
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/meus-pedidos`,
+        { headers: { Authorization: `Bearer ${tk}` } });
+      setPedidos(r.ok ? await r.json() : []);
+    } catch { setPedidos([]); }
+  }, []);
+
   const carregarCasos = useCallback(async (tk: string) => {
     try {
       const r = await fetch(`${API}/api/v1/cliente/meus-casos`, { headers: { Authorization: `Bearer ${tk}` } });
@@ -137,6 +162,7 @@ export default function AreaCliente() {
         const rc = await fetch(`${API}/api/v1/cliente/cadastro`, { headers: { Authorization: `Bearer ${tk}` } });
         if (rc.ok) setCadastro(await rc.json());
       } catch { /* segue */ }
+      carregarPedidos(tk);
       const lista = await carregarCasos(tk);
       // abre direto o caso indicado no link do aviso (?caso=...)
       const alvo = new URLSearchParams(window.location.search).get("caso");
@@ -149,7 +175,7 @@ export default function AreaCliente() {
       }
       setCarregando(false);
     })();
-  }, [router, carregarCasos, carregarCaso]);
+  }, [router, carregarCasos, carregarCaso, carregarPedidos]);
 
   useEffect(() => { if (vista === "atendimento") fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, enviando, vista]);
 
@@ -357,6 +383,8 @@ export default function AreaCliente() {
         <p className="mb-6 text-sm text-charcoal/60">
           {casos.length > 1
             ? `Você tem ${casos.length} atendimentos conosco. Cada um tem o seu próprio número — é por ele que identificamos o seu caso.`
+            : tipoCliente === "CONTRATOS" && pedidos.length > 0
+            ? `Você tem ${pedidos.length} ${pedidos.length === 1 ? "documento" : "documentos"} conosco.`
             : "Bem-vindo(a) à sua área. Como podemos te ajudar hoje?"}
         </p>
 
@@ -416,6 +444,7 @@ export default function AreaCliente() {
           <p className="text-charcoal/50">Carregando...</p>
         ) : vista === "home" ? (
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {veProcessos && (
             <button onClick={() => setVista(casos.length > 1 ? "casos" : "acompanhar")}
               className="group relative flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
               <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy text-2xl">📁</span>
@@ -432,6 +461,24 @@ export default function AreaCliente() {
               </p>
               <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
             </button>
+            )}
+
+            {veContratos && (
+            <button onClick={() => setVista("pedidos")}
+              className="group relative flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-forest text-2xl">📄</span>
+              {pedidos.filter((p: any) => !["ENTREGUE", "ARQUIVADO"].includes(p.fase)).length > 0 && (
+                <span className="absolute right-5 top-5 rounded-full bg-gold px-2 py-0.5 text-[11px] font-bold text-navy">
+                  {pedidos.filter((p: any) => !["ENTREGUE", "ARQUIVADO"].includes(p.fase)).length}
+                </span>
+              )}
+              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Meus contratos</h2>
+              <p className="mt-2 text-sm text-charcoal/60">
+                Acompanhe os documentos que você encomendou, do pedido à entrega.
+              </p>
+              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
+            </button>
+            )}
 
             <button onClick={() => setVista("atendimento")}
               className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
@@ -456,6 +503,61 @@ export default function AreaCliente() {
               <p className="mt-2 text-sm text-charcoal/60">Confira seus dados de contato e tudo o que você já nos enviou.</p>
               <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
             </button>
+          </div>
+        ) : vista === "pedidos" ? (
+          <div>
+            <button onClick={() => setVista("home")}
+              className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
+            <h2 className="mb-1 font-serif text-xl font-bold text-navy">Meus contratos</h2>
+            <p className="mb-4 text-sm text-charcoal/60">
+              Documentos que você encomendou ao escritório.
+            </p>
+            {pedidos.length === 0 ? (
+              <div className="rounded-2xl border border-black/5 bg-white p-6 text-sm text-charcoal/60">
+                <p>Você ainda não pediu nenhum documento.</p>
+                <a href="/balcao"
+                  className="mt-3 inline-block rounded-xl bg-gold px-5 py-2 text-sm font-bold text-navy hover:bg-amber">
+                  Pedir um contrato →
+                </a>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pedidos.map((p: any) => {
+                  const entregue = p.fase === "ENTREGUE";
+                  const arquivado = p.fase === "ARQUIVADO";
+                  return (
+                    <a key={p.id} href={`/balcao/${p.id}`}
+                      className="block rounded-2xl border border-black/5 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-serif text-lg font-bold text-navy">
+                          {String(p.tipo || "").replaceAll("_", " ").toLowerCase()}
+                        </span>
+                        <span className="text-xs text-charcoal/40">{p.numero}</span>
+                        <span className={`ml-auto rounded-full px-3 py-0.5 text-[11px] font-bold ${entregue
+                          ? "bg-forest/15 text-forest"
+                          : arquivado ? "bg-black/5 text-charcoal/50"
+                          : "bg-gold/20 text-navy"}`}>
+                          {entregue ? "Entregue" : arquivado ? "Arquivado"
+                            : String(p.fase || "").replaceAll("_", " ").toLowerCase()}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-charcoal/60">
+                        {Number(p.valor || 0).toLocaleString("pt-BR",
+                          { style: "currency", currency: "BRL" })}
+                        {p.prazo_entrega_horas ? ` · entrega em até ${p.prazo_entrega_horas}h` : ""}
+                      </p>
+                      {entregue && p.prazo_alteracao_ate && (
+                        <p className="mt-1 text-xs text-charcoal/50">
+                          Ajustes sem custo até{" "}
+                          {String(p.prazo_alteracao_ate).slice(8, 10)}/
+                          {String(p.prazo_alteracao_ate).slice(5, 7)}
+                        </p>
+                      )}
+                    </a>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : vista === "casos" ? (
           /* ── LISTA DE ATENDIMENTOS ── */

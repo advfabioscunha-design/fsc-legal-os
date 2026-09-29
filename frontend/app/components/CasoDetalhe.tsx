@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ModalPeticionar from "./ModalPeticionar";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
@@ -1552,27 +1552,8 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               )}
             </section>
 
-            {/* Histórico / notas */}
-            <section>
-              <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Histórico do atendimento</h3>
-              <div className="max-h-60 space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-[#0A1628]/40 p-3">
-                {(caso.mensagens || []).map((m: any) => (
-                  <div key={m.id} className="text-sm">
-                    <span className={`text-[10px] uppercase ${m.autor === "CLIENTE" ? "text-[#2D7DD2]" : m.autor === "HUMANO" ? "text-[#C9A84C]" : "text-white/40"}`}>
-                      {m.autor}
-                      {m.canal === "EMAIL" && <span className="ml-1 text-white/40">✉ por e-mail</span>}
-                    </span>
-                    <p className="whitespace-pre-wrap text-white/80">{m.conteudo}</p>
-                  </div>
-                ))}
-                {(caso.mensagens || []).length === 0 && <p className="text-xs text-white/40">Sem mensagens.</p>}
-              </div>
-              <div className="mt-2 flex gap-2">
-                <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Acrescentar informação / nota interna"
-                  className="flex-1 rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
-                <button onClick={addNota} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">Adicionar</button>
-              </div>
-            </section>
+            {/* Histórico do caso — o que a equipe fez, separado da conversa */}
+            <LinhaDoTempo casoId={casoId} nota={nota} setNota={setNota} addNota={addNota} />
 
             {/* Ações */}
             <section className="border-t border-white/10 pt-4">
@@ -1621,5 +1602,130 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
         aoLiberar={() => { carregar(); }}
       />
     </div>
+  );
+}
+
+
+/* ── A linha do tempo do caso ──────────────────────────────────────
+
+   Aqui estava um buraco que ninguém via: cada ação do sistema gravava
+   um evento — audiência realizada, pendência resolvida, prazo cumprido,
+   peça redigida — e esta seção mostrava apenas a tabela de mensagens.
+   O trabalho era registrado e não tinha onde aparecer. Foi o que fez o
+   resultado da perícia, anotado na agenda, sumir do card.
+
+   As duas naturezas ficam em abas separadas de propósito: misturar
+   "protocolei a apelação" com "bom dia, doutor" é o que tornava o
+   histórico ilegível — e é a separação que permite gerar um relatório
+   com o que foi feito, sem a conversa no meio. */
+function LinhaDoTempo({ casoId, nota, setNota, addNota }: {
+  casoId: string; nota: string;
+  setNota: (v: string) => void; addNota: () => void;
+}) {
+  const [dados, setDados] = useState<any>(null);
+  const [aba, setAba] = useState<"TRABALHO" | "CLIENTE" | "TUDO">("TRABALHO");
+  const [baixando, setBaixando] = useState(false);
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/linha-do-tempo`);
+      setDados(await r.json());
+    } catch { setDados({ itens: [], resumo: {} }); }
+  }, [casoId]);
+  useEffect(() => { carregar(); }, [carregar, nota]);
+
+  const itens = (dados?.itens || []).filter((i: any) =>
+    aba === "TUDO" ? i.natureza !== "SISTEMA" : i.natureza === aba);
+  const r = dados?.resumo || {};
+
+  async function relatorio(completo: boolean) {
+    setBaixando(true);
+    try {
+      const resp = await fetch(
+        `${API}/api/v1/casos/${casoId}/relatorio${completo ? "?completo=true" : ""}`);
+      if (!resp.ok) { alert("Não consegui gerar o relatório."); return; }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `relatorio-do-caso.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { alert("Falha ao baixar."); }
+    finally { setBaixando(false); }
+  }
+
+  const cor = (n: string) =>
+    n === "TRABALHO" ? "#C9A84C" : n === "CLIENTE" ? "#2D7DD2" : "#8899AA";
+
+  return (
+    <section>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-bold text-[#C9A84C]">Histórico do caso</h3>
+        <span className="text-[10px] text-white/35">
+          {r.trabalho ?? 0} ações da equipe · {r.cliente ?? 0} com o cliente
+        </span>
+        <button onClick={() => relatorio(false)} disabled={baixando}
+          title="Word com tudo que a equipe fez neste caso, em ordem"
+          className="ml-auto rounded-lg bg-[#C9A84C] px-3 py-1.5 text-xs font-bold text-[#0A1628] hover:brightness-110 disabled:opacity-40">
+          {baixando ? "Gerando…" : "📄 Gerar relatório do caso"}
+        </button>
+      </div>
+
+      <div className="mb-2 flex gap-1">
+        {([["TRABALHO", "O que foi feito"], ["CLIENTE", "Com o cliente"],
+           ["TUDO", "Tudo"]] as const).map(([v, l]) => (
+          <button key={v} onClick={() => setAba(v)}
+            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${aba === v
+              ? "bg-[#C9A84C] text-[#0A1628]"
+              : "border border-white/15 text-white/55 hover:text-white"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <div className="max-h-72 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-[#0A1628]/40 p-3">
+        {!dados && <p className="text-xs text-white/40">Carregando…</p>}
+        {dados && itens.length === 0 && (
+          <p className="text-xs text-white/40">
+            {aba === "TRABALHO"
+              ? "Nada registrado ainda. Toda ação feita pelo sistema entra aqui sozinha; o que for feito fora dele precisa ser anotado abaixo."
+              : "Sem registros."}
+          </p>
+        )}
+        {itens.map((i: any, k: number) => (
+          <div key={k} className="flex gap-2 text-sm">
+            <span className="w-24 shrink-0 text-[10px] text-white/30">
+              {i.em?.slice(8, 10)}/{i.em?.slice(5, 7)}/{i.em?.slice(2, 4)} {i.em?.slice(11, 16)}
+            </span>
+            <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: cor(i.natureza) }} />
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-semibold text-white/85">{i.titulo}</p>
+              {i.detalhe && (
+                <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-white/55">
+                  {i.detalhe}
+                </p>
+              )}
+              {i.quem && <p className="text-[10px] text-white/30">{i.quem}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2 flex gap-2">
+        <input value={nota} onChange={(e) => setNota(e.target.value)}
+          placeholder="Registrar o que foi feito (entra no relatório do caso)"
+          className="flex-1 rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+        <button onClick={addNota}
+          className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+          Registrar
+        </button>
+      </div>
+      <p className="mt-1 text-[10px] text-white/30">
+        O que a equipe fizer fora do sistema — um telefonema ao cartório, uma
+        conversa com a parte contrária — só entra no relatório se for anotado aqui.
+      </p>
+    </section>
   );
 }
