@@ -21,10 +21,15 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
    outro opcional: quem tem os documentos à mão manda foto e pronto;
    quem está no ônibus digita. */
 
+/* A ORDEM MUDOU
+   O pagamento era a terceira etapa: o cliente preenchia tudo, lia a
+   orientação e só então pagava. Isso põe o trabalho antes do sim.
+   Agora é a primeira, e a coleta vem depois, quando o escritório já
+   está montando o documento daquela pessoa. */
 const FASES: { id: string; rotulo: string }[] = [
-  { id: "COLETA", rotulo: "Coleta de informações" },
-  { id: "CIENCIA", rotulo: "Orientação e ciência" },
   { id: "PAGAMENTO", rotulo: "Pagamento" },
+  { id: "COLETA", rotulo: "Informações do documento" },
+  { id: "CIENCIA", rotulo: "Orientação e ciência" },
   { id: "REDACAO", rotulo: "Elaboração" },
   { id: "REVISAO_IA", rotulo: "Revisão técnica" },
   { id: "AJUSTE", rotulo: "Ajustes" },
@@ -51,6 +56,7 @@ export default function PedidoDoCliente() {
   const [clausulas, setClausulas] = useState("");
   const [alteracao, setAlteracao] = useState("");
   const [comoEnviar, setComoEnviar] = useState<"" | "DOCUMENTOS" | "FORMULARIO">("");
+  const [comTimbre, setComTimbre] = useState(true);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
   const arquivoRef = useRef<HTMLInputElement>(null);
@@ -97,6 +103,30 @@ export default function PedidoDoCliente() {
       if (r.ok) { setAviso("Informações salvas. Pode continuar depois, se preferir."); carregar(); }
       else setAviso("Não foi possível salvar agora.");
     } finally { setOcupado(false); }
+  }
+
+  /* Salvar e terminar são botões diferentes de propósito. Quem está no
+     ônibus salva e volta depois; quem terminou avisa, e só esse aviso
+     manda o pedido para a redação. Sem a separação, ou o redator
+     começava com meia informação, ou o cliente ficava preso numa tela
+     que não avançava. */
+  async function concluirColeta() {
+    setOcupado(true); setAviso("");
+    try {
+      await fetch(`${API}/api/v1/contratos/pedidos/${id}/dados`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dados: valores, observacoes }),
+      });
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/coleta-concluida`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ com_timbre: comTimbre }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setAviso(j?.detail || "Não foi possível concluir agora."); return; }
+      setAviso("Recebido. O escritório começa a escrever o seu documento.");
+      carregar();
+    } catch { setAviso("Não foi possível falar com o servidor."); }
+    finally { setOcupado(false); }
   }
 
   async function enviarArquivos(lista: FileList | null, rotulo = "") {
@@ -151,9 +181,23 @@ export default function PedidoDoCliente() {
     <main className="min-h-screen bg-[#0A1628] px-4 py-8 text-white">
       <div className="mx-auto max-w-2xl space-y-5">
         <header>
-          <p className="text-xs text-white/40">{pedido.numero}</p>
-          <h1 className="text-xl font-bold">{tipo?.nome || pedido.tipo}</h1>
-          <p className="mt-0.5 text-xs text-white/50">{tipo?.base_legal}</p>
+          {/* O protocolo é o que o cliente cita quando liga. Vem antes
+              do nome do documento, e em destaque, não como rodapé. */}
+          <p className="inline-block rounded-md border border-white/15 bg-white/5 px-2.5 py-1 font-mono text-[11px] tracking-wide text-white/70">
+            {pedido.numero}
+          </p>
+          <h1 className="mt-2 text-xl font-bold">
+            {pedido.tipo === "OUTRO" && pedido.servico_livre
+              ? "Documento sob medida"
+              : tipo?.nome || pedido.tipo}
+          </h1>
+          {pedido.tipo === "OUTRO" && pedido.servico_livre ? (
+            <p className="mt-1 text-xs leading-relaxed text-white/60">
+              Seu pedido: {pedido.servico_livre}
+            </p>
+          ) : (
+            <p className="mt-0.5 text-xs text-white/50">{tipo?.base_legal}</p>
+          )}
           <p className="mt-1 text-xs text-white/60">
             {brl(pedido.valor)} · entrega em até {pedido.prazo_entrega_horas || 24} horas
             {pedido.assinatura_digital === false && " · sem assinatura eletrônica"}
@@ -332,11 +376,49 @@ export default function PedidoDoCliente() {
               </label>
             )}
 
+            {/* A ESCOLHA DO PAPEL, AGORA QUE ELA SIGNIFICA ALGO
+
+                Esta pergunta ficava na primeira tela, ao lado da lista
+                de documentos. Ali a pessoa ainda não sabia quanto
+                custava nem se ia contratar, e escolher o papel de um
+                documento que talvez nem exista é decisão sem contexto.
+                Aqui o documento é dela e está sendo montado. */}
+            {comoEnviar && (
+              <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                <p className="text-xs font-bold text-white/80">
+                  Como você quer o documento
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-white/50">
+                  Os dois têm exatamente o mesmo valor jurídico. O timbre
+                  mostra quem redigiu, e isso costuma pesar quando a outra
+                  parte lê.
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button onClick={() => setComTimbre(true)}
+                    className={`rounded-xl border p-3 text-left text-xs transition ${comTimbre
+                      ? "border-[#C9A84C] bg-[#C9A84C]/10" : "border-white/15 hover:border-white/30"}`}>
+                    <b className="block text-white">Papel timbrado</b>
+                    <span className="text-white/50">Com a identificação do escritório.</span>
+                  </button>
+                  <button onClick={() => setComTimbre(false)}
+                    className={`rounded-xl border p-3 text-left text-xs transition ${!comTimbre
+                      ? "border-[#C9A84C] bg-[#C9A84C]/10" : "border-white/15 hover:border-white/30"}`}>
+                    <b className="block text-white">Folha branca</b>
+                    <span className="text-white/50">Sem nenhuma identificação.</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {comoEnviar && (
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <button onClick={salvarColeta} disabled={ocupado}
+                  className="rounded-lg border border-white/20 px-5 py-2.5 text-sm font-semibold text-white/80 hover:border-white/40 disabled:opacity-50">
+                  {ocupado ? "Salvando…" : "Salvar e continuar depois"}
+                </button>
+                <button onClick={concluirColeta} disabled={ocupado}
                   className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
-                  {ocupado ? "Salvando…" : "Salvar informações"}
+                  Terminei, pode escrever
                 </button>
                 {comoEnviar === "FORMULARIO" && (
                   <span className="text-xs text-white/45">
@@ -368,10 +450,14 @@ export default function PedidoDoCliente() {
             )}
 
             <p className="mt-4 text-xs leading-relaxed text-white/55">
-              Assim que o pagamento for confirmado, a elaboração começa e o prazo
-              de {pedido.prazo_entrega_horas || 24} horas passa a contar. Se tiver
-              feito o PIX e a tela não mudar em algumas horas, fale com o
-              escritório, a conferência é feita por uma pessoa.
+              Assim que o pagamento for confirmado, o atendimento volta a falar
+              com você para pedir as informações do documento, e o prazo de{" "}
+              {pedido.prazo_entrega_horas || 24} horas passa a contar dali. Você
+              recebe aviso por e-mail, então pode fechar esta página.
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-white/40">
+              Se tiver feito o PIX e a tela não mudar em algumas horas, fale com
+              o escritório: a conferência do extrato é feita por uma pessoa.
             </p>
           </section>
         )}

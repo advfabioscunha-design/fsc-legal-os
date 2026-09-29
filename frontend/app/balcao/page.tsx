@@ -26,7 +26,9 @@ export default function Balcao() {
   const [tipos, setTipos] = useState<Tipo[]>([]);
   const [escolhido, setEscolhido] = useState<Tipo | null>(null);
   const [comOrientacao, setComOrientacao] = useState(false);
-  const [comTimbre, setComTimbre] = useState(true);
+  const [busca, setBusca] = useState("");
+  const [livre, setLivre] = useState(false);
+  const [descricaoLivre, setDescricaoLivre] = useState("");
 
   const [sessao, setSessao] = useState<any>(null);
   const [modo, setModo] = useState<"entrar" | "criar" | "recuperar" | "semEmail">("entrar");
@@ -73,6 +75,16 @@ export default function Balcao() {
 
   const reais = (v: number) =>
     v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+  /* A busca casa com nome e base legal, sem acento e sem caixa: quem
+     digita "locacao" tem de achar "Locação", e quem digita
+     "inquilinato" tem de achar a locação de imóvel, porque muita gente
+     procura pela lei e não pelo nome do documento. */
+  const sem = (t: string) =>
+    t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const achados = busca.trim()
+    ? tipos.filter((t) => sem(`${t.nome} ${t.base_legal}`).includes(sem(busca.trim())))
+    : tipos;
 
   async function entrar() {
     setOcupado(true); setErro(""); setAviso("");
@@ -144,14 +156,19 @@ export default function Balcao() {
   /* Criado o pedido, buscamos o termo de contratação para o cliente
      ler antes de qualquer coleta. */
   async function comecar() {
-    if (!escolhido) return;
+    const descrito = descricaoLivre.trim();
+    if (!escolhido && descrito.length < 8) return;
     setOcupado(true); setErro("");
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tipo: escolhido.id, com_orientacao: comOrientacao, com_timbre: comTimbre,
-        }),
+        body: JSON.stringify(
+          escolhido
+            ? { tipo: escolhido.id, com_orientacao: comOrientacao }
+            // Sem tipo na lista, o pedido nasce OUTRO e carrega a
+            // descrição do cliente. O timbre não é perguntado aqui:
+            // vem depois do pagamento, com o resto da coleta.
+            : { tipo: "OUTRO", com_orientacao: false, servico_livre: descrito }),
       });
       const p = await r.json();
       if (!r.ok) { setErro(p.detail || "Não foi possível abrir o pedido."); return; }
@@ -316,17 +333,71 @@ export default function Balcao() {
               <button onClick={() => supabase.auth.signOut()} className="underline hover:text-white">sair</button>
             </div>
 
+            {/* A BUSCA, E O QUE FAZER QUANDO ELA NÃO ACHA NADA
+
+                A lista tem dez tipos e o mundo tem mais do que dez
+                documentos. Quem procurava "acordo de namoro" ou
+                "cessão de cota" batia numa parede: nenhum campo para
+                dizer o que queria, e ia embora sem o escritório nem
+                ficar sabendo o que ela procurava.
+
+                A busca lê nome e base legal, porque muita gente procura
+                pela lei ("inquilinato") e não pelo nome do documento. */}
+            <div className="relative mb-4">
+              <svg className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35"
+                fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path strokeLinecap="round" d="m20 20-3.5-3.5" />
+              </svg>
+              <input value={busca} onChange={(e) => setBusca(e.target.value)}
+                placeholder="Procure pelo nome do documento, por exemplo aluguel, dívida, rescisão"
+                className="w-full rounded-lg border border-white/15 bg-[#0B1F3B] py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/35 outline-none focus:border-[#C9A84C]" />
+            </div>
+
             <div className="grid gap-3 sm:grid-cols-2">
-              {tipos.map((t) => (
-                <button key={t.id} onClick={() => setEscolhido(t)}
+              {achados.map((t) => (
+                <button key={t.id} onClick={() => { setEscolhido(t); setLivre(false); }}
                   className={`rounded-xl border p-4 text-left transition ${
-                    escolhido?.id === t.id
+                    escolhido?.id === t.id && !livre
                       ? "border-[#C9A84C] bg-[#C9A84C]/10"
                       : "border-white/10 bg-[#0B1F3B] hover:border-white/25"}`}>
                   <p className="text-sm font-bold text-white/90">{t.nome}</p>
                   <p className="mt-0.5 text-[11px] text-white/45">{t.base_legal}</p>
                 </button>
               ))}
+            </div>
+
+            {/* Não achou. A porta continua aberta. */}
+            <div className={`mt-4 rounded-xl border p-4 transition ${
+              livre ? "border-[#C9A84C] bg-[#C9A84C]/10" : "border-dashed border-white/20 bg-[#0B1F3B]/60"}`}>
+              {achados.length === 0 && busca.trim() && (
+                <p className="mb-2 text-xs text-white/60">
+                  Nenhum documento da lista corresponde a <b>{busca.trim()}</b>.
+                </p>
+              )}
+              <p className="text-sm font-bold text-white/90">
+                Não encontrou o que precisa?
+              </p>
+              <p className="mt-1 text-xs text-white/55">
+                Descreva com as suas palavras. O escritório lê antes de
+                confirmar prazo e condições, e o atendimento segue normalmente.
+              </p>
+              <textarea
+                value={descricaoLivre}
+                onChange={(e) => { setDescricaoLivre(e.target.value); setLivre(true); setEscolhido(null); }}
+                rows={3}
+                placeholder="Por exemplo: um acordo entre dois sócios para dividir os lucros de uma loja que temos juntos"
+                className="mt-3 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#C9A84C]" />
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button onClick={comecar}
+                  disabled={ocupado || descricaoLivre.trim().length < 8}
+                  className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-40">
+                  {ocupado ? "Abrindo…" : "Continuar o atendimento"}
+                </button>
+                <span className="text-[11px] text-white/35">
+                  Mínimo de uma frase, para o escritório entender o pedido.
+                </span>
+              </div>
             </div>
 
             {escolhido && (
@@ -360,12 +431,12 @@ export default function Balcao() {
                       atendimento é contratado à parte.
                     </span>
                   </label>
-                  <label className="flex cursor-pointer items-start gap-2 text-xs text-white/70">
-                    <input type="checkbox" checked={!comTimbre}
-                      onChange={(e) => setComTimbre(!e.target.checked)}
-                      className="mt-0.5 h-4 w-4 accent-[#C9A84C]" />
-                    <span>Prefiro o documento em folha branca, sem o timbre do escritório.</span>
-                  </label>
+                  {/* A escolha entre papel timbrado e folha branca saiu
+                      daqui. Nesta tela a pessoa ainda não sabe quanto
+                      custa nem se vai contratar, e a pergunta não
+                      significa nada. Ela aparece depois do pagamento,
+                      junto com o resto da coleta, quando o escritório já
+                      está montando o documento dela. */}
                 </div>
 
                 <div className="mt-5 flex flex-wrap items-center gap-3">

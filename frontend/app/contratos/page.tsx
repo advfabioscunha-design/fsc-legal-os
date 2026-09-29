@@ -158,6 +158,8 @@ function PainelDoPedido({ id, fechar, recarregar }:
   const [conversa, setConversa] = useState<any[]>([]);
   const [aba, setAba] = useState<"pedido" | "minuta" | "conversa">("pedido");
   const [msg, setMsg] = useState("");
+  const [porEmail, setPorEmail] = useState(true);
+  const [porWhats, setPorWhats] = useState(false);
   const [ocupado, setOcupado] = useState("");
   const [erro, setErro] = useState("");
 
@@ -188,6 +190,28 @@ function PainelDoPedido({ id, fechar, recarregar }:
     finally { setOcupado(""); }
   }
 
+  async function excluir() {
+    const pago = Boolean(p?.pago_em);
+    const aviso = pago
+      ? `O pedido ${p?.numero} foi PAGO. Excluir tira ele da esteira e o cliente deixa de ver andamento. Escreva o motivo:`
+      : `Excluir o pedido ${p?.numero}? Ele sai da esteira. A conversa e os registros permanecem no banco.`;
+    const motivo = pago ? prompt(aviso) : (confirm(aviso) ? "" : null);
+    if (motivo === null) return;
+    if (pago && !String(motivo).trim()) return;
+
+    setOcupado("excluir"); setErro("");
+    try {
+      const r = await fetch(
+        `${API}/api/v1/contratos/pedidos/${id}?quem=escritório`
+        + `&motivo=${encodeURIComponent(String(motivo || ""))}`,
+        { method: "DELETE" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setErro(j?.detail || "Não foi possível excluir."); return; }
+      recarregar(); fechar();
+    } catch { setErro("Falha de conexão."); }
+    finally { setOcupado(""); }
+  }
+
   if (!p) {
     return (
       <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={fechar}>
@@ -214,7 +238,21 @@ function PainelDoPedido({ id, fechar, recarregar }:
               {p.urgente && " · urgente"}
             </p>
           </div>
-          <button onClick={fechar} className="text-xl text-white/40 hover:text-white">×</button>
+          <div className="flex items-center gap-3">
+            {/* EXCLUIR
+
+                Faltava, e a esteira acumulava pedido de teste, pedido
+                duplicado e gente que abriu e sumiu. A exclusão é lógica:
+                apagar de verdade levaria junto a conversa, o
+                comprovante do PIX e a ciência registrada, que são
+                exatamente as provas de que o escritório precisaria se o
+                cliente reclamasse depois. */}
+            <button onClick={excluir} disabled={ocupado === "excluir"}
+              className="rounded-lg border border-[#C0392B]/40 px-3 py-1.5 text-[11px] font-semibold text-[#ff9a8f] transition hover:border-[#C0392B] hover:bg-[#C0392B]/10 disabled:opacity-50">
+              {ocupado === "excluir" ? "Excluindo…" : "Excluir pedido"}
+            </button>
+            <button onClick={fechar} className="text-xl text-white/40 hover:text-white">×</button>
+          </div>
         </div>
 
         {/* A régua das fases */}
@@ -253,13 +291,37 @@ function PainelDoPedido({ id, fechar, recarregar }:
               onClick={() => acao("/ajustar", {}, "ajustar")}
               nota="Reescreve a minuta atendendo a revisão. A anterior fica guardada." />
           )}
+          {/* DOIS PASSOS, NÃO UM
+
+              Aprovar o texto e conferir a página são coisas diferentes.
+              O texto pode estar impecável e o PDF sair com a cláusula
+              quebrada no meio ou o timbre por cima do primeiro
+              parágrafo, e quem recebia isso era o cliente. Agora o
+              advogado abre o PDF antes, e o botão de liberar só acende
+              depois. */}
           {fase === "REVISAO_ADV" && (
             <div>
               <p className="mb-2 text-[11px] leading-relaxed text-white/60">
                 Leia a minuta na aba ao lado. Nada chega ao cliente sem esta leitura.
               </p>
-              <Botao rotulo="Aprovar e enviar ao cliente" ocupado={ocupado === "liberar"}
-                onClick={() => acao("/liberar?quem=advogado", {}, "liberar")} />
+              <div className="flex flex-wrap items-center gap-2">
+                <a href={`${API}/api/v1/contratos/pedidos/${id}/pdf`}
+                  target="_blank" rel="noreferrer"
+                  onClick={() => {
+                    fetch(`${API}/api/v1/contratos/pedidos/${id}/layout-conferido?quem=advogado`,
+                      { method: "POST" }).then(carregar);
+                  }}
+                  className="rounded-lg border border-white/20 px-4 py-2 text-xs font-semibold text-white/85 hover:border-white/45">
+                  Abrir o PDF e conferir o layout
+                </a>
+                <Botao rotulo="Aprovar e enviar ao cliente" ocupado={ocupado === "liberar"}
+                  onClick={() => acao("/liberar?quem=advogado", {}, "liberar")} />
+              </div>
+              <p className="mt-2 text-[11px] text-white/45">
+                {p.visto_advogado_em
+                  ? `Layout conferido em ${new Date(p.visto_advogado_em).toLocaleString("pt-BR")}. O cliente recebe aviso por e-mail e WhatsApp com o link da página dele.`
+                  : "O PDF sai no papel que o cliente escolheu, timbrado ou folha branca. Confira antes de liberar."}
+              </p>
             </div>
           )}
           {fase === "APROVACAO" && (
@@ -405,6 +467,16 @@ function PainelDoPedido({ id, fechar, recarregar }:
                   : "bg-[#2D7DD2]/15 text-white/80"}`}>
                 <p className="mb-0.5 text-[10px] font-bold text-white/40">
                   {m.autor === "CLIENTE" ? "Cliente" : m.autor === "AGENTE" ? "Agente" : "Escritório"}
+                  {/* Por onde saiu. É isto que responde ao "ninguém me
+                      avisou", e não a memória de quem atendeu. */}
+                  {m.autor !== "CLIENTE" && (m.canais || []).length > 0 && (
+                    <span className="ml-2 font-normal text-white/25">
+                      {(m.canais || []).map((c: string) =>
+                        c === "EMAIL" ? (m.email_em ? "e-mail" : "e-mail (falhou)")
+                        : c === "WHATSAPP" ? (m.whatsapp_em ? "WhatsApp" : "WhatsApp (falhou)")
+                        : "plataforma").join(" · ")}
+                    </span>
+                  )}
                 </p>
                 <p className="whitespace-pre-line">{m.texto}</p>
               </div>
@@ -412,19 +484,49 @@ function PainelDoPedido({ id, fechar, recarregar }:
             {conversa.length === 0 && (
               <p className="text-xs text-white/40">Sem conversa ainda.</p>
             )}
-            <div className="flex gap-2 pt-2">
-              <input value={msg} onChange={(e) => setMsg(e.target.value)}
-                placeholder="escrever para o cliente…" className={inp} />
-              <button
-                onClick={async () => {
-                  if (!msg.trim()) return;
-                  await fetch(`${API}/api/v1/contratos/pedidos/${id}/mensagem`, {
-                    method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ texto: msg, autor: "ESCRITORIO" }),
-                  });
-                  setMsg(""); carregar();
-                }}
-                className={`${btn} shrink-0 bg-[#C9A24D] text-[#0A1628]`}>Enviar</button>
+
+            {/* POR ONDE MANDAR
+
+                A plataforma é obrigatória e por isso não tem caixa: ela
+                é a própria linha da conversa, e é o único registro que
+                fica. Os outros dois são escolha de quem escreve. O
+                WhatsApp ainda não está ligado; quando o número for
+                aprovado, esta caixa passa a funcionar sozinha. */}
+            <div className="space-y-2 pt-3">
+              <div className="flex flex-wrap items-center gap-4 text-[11px] text-white/55">
+                <span className="text-white/35">Enviar também por</span>
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" checked={porEmail}
+                    onChange={(e) => setPorEmail(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[#C9A24D]" />
+                  e-mail
+                </label>
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" checked={porWhats}
+                    onChange={(e) => setPorWhats(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[#C9A24D]" />
+                  WhatsApp
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <input value={msg} onChange={(e) => setMsg(e.target.value)}
+                  placeholder="escrever para o cliente…" className={inp} />
+                <button
+                  onClick={async () => {
+                    if (!msg.trim()) return;
+                    const canais = ["PLATAFORMA"];
+                    if (porEmail) canais.push("EMAIL");
+                    if (porWhats) canais.push("WHATSAPP");
+                    const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/mensagem`, {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ texto: msg, autor: "ESCRITORIO", canais }),
+                    });
+                    const j = await r.json().catch(() => ({}));
+                    if (j?.falhas?.length) setErro(`Enviado, mas ${j.falhas.join("; ")}`);
+                    setMsg(""); carregar();
+                  }}
+                  className={`${btn} shrink-0 bg-[#C9A24D] text-[#0A1628]`}>Enviar</button>
+              </div>
             </div>
           </div>
         )}

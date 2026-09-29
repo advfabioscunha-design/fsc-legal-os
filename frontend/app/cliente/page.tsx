@@ -508,15 +508,20 @@ export default function AreaCliente() {
             />
             )}
 
-            {veContratos && (
+            {/* ACOMPANHAR PEDIDO, SEM PORTEIRO
+
+                Este cartão só aparecia para quem estava marcado como
+                cliente de contratos. Quem chegou por um processo e
+                depois encomendou um documento não via o próprio pedido:
+                ele existia, estava pago, e sumia da tela. O tipo do
+                cliente decide o que é destaque, nunca o que existe. */}
             <Cartao
               onClick={() => setVista("pedidos")}
               icone={ICONES.documento}
               contador={pedidos.filter((p: any) => !["ENTREGUE", "ARQUIVADO"].includes(p.fase)).length}
-              titulo="Meus contratos"
-              texto="Acompanhe os documentos que você encomendou, do pedido à entrega."
+              titulo="Acompanhar pedido"
+              texto="Os documentos que você encomendou, cada um com o seu número de protocolo, do pedido à entrega."
             />
-            )}
 
             <Cartao
               onClick={() => setVista("atendimento")}
@@ -543,46 +548,72 @@ export default function AreaCliente() {
           <div>
             <button onClick={() => setVista("home")}
               className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
-            <h2 className="mb-1 font-serif text-xl font-bold text-navy">Meus contratos</h2>
-            <p className="mb-4 text-sm text-charcoal/60">
-              Documentos que você encomendou ao escritório.
+            <h2 className="mb-1 font-display text-title font-bold text-navy">
+              Acompanhar pedido
+            </h2>
+            <p className="mb-5 text-body text-charcoal/60">
+              Cada pedido tem o seu próprio número de protocolo. É por ele que o
+              escritório identifica o seu documento, e você pode ter quantos
+              quiser ao mesmo tempo.
             </p>
+
+            {/* PEDIR OUTRO, A QUALQUER MOMENTO
+
+                Quem encomendou um contrato costuma encomendar o
+                segundo. O botão ficava escondido dentro da tela vazia,
+                aparecia só para quem não tinha nenhum pedido, e sumia
+                justamente para quem já era cliente. */}
+            <div className="mb-5 flex flex-wrap gap-3">
+              <a href="/balcao"
+                className="inline-flex items-center rounded-lg bg-electric px-5 py-2.5 text-small font-bold text-white shadow-card transition hover:bg-indigo">
+                Pedir outro documento
+              </a>
+              <button onClick={() => setVista("atendimento")}
+                className="inline-flex items-center rounded-lg border border-black/10 px-5 py-2.5 text-small font-semibold text-charcoal/75 transition hover:border-black/30">
+                Falar com o atendimento
+              </button>
+            </div>
+
             {pedidos.length === 0 ? (
-              <div className="rounded-2xl border border-black/5 bg-white p-6 text-sm text-charcoal/60">
-                <p>Você ainda não pediu nenhum documento.</p>
-                <a href="/balcao"
-                  className="mt-3 inline-block rounded-xl bg-gold px-5 py-2 text-sm font-bold text-navy hover:bg-amber">
-                  Pedir um contrato →
-                </a>
+              <div className="rounded-xl2 border border-black/5 bg-white p-6 text-body text-charcoal/60 shadow-card">
+                Você ainda não encomendou nenhum documento. Quando pedir, ele
+                aparece aqui com o número de protocolo e a fase em que está.
               </div>
             ) : (
               <div className="space-y-3">
                 {pedidos.map((p: any) => {
                   const entregue = p.fase === "ENTREGUE";
                   const arquivado = p.fase === "ARQUIVADO";
+                  const nome = p.tipo === "OUTRO" && p.servico_livre
+                    ? p.servico_livre
+                    : String(p.tipo || "").replaceAll("_", " ").toLowerCase();
                   return (
                     <a key={p.id} href={`/balcao/${p.id}`}
-                      className="block rounded-2xl border border-black/5 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                      <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="font-serif text-lg font-bold text-navy">
-                          {String(p.tipo || "").replaceAll("_", " ").toLowerCase()}
+                      className="block rounded-xl2 border border-black/5 bg-white p-5 shadow-card transition hover:-translate-y-0.5 hover:border-electric/30 hover:shadow-lift">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* O protocolo vem primeiro: é o que a pessoa
+                            cita quando liga ou escreve. */}
+                        <span className="rounded-md bg-mist px-2.5 py-1 font-mono text-caption tracking-wide text-navy">
+                          {p.numero}
                         </span>
-                        <span className="text-xs text-charcoal/40">{p.numero}</span>
-                        <span className={`ml-auto rounded-full px-3 py-0.5 text-[11px] font-bold ${entregue
-                          ? "bg-forest/15 text-forest"
+                        <span className={`ml-auto rounded-full px-3 py-0.5 text-caption font-bold ${entregue
+                          ? "bg-emerald/15 text-emerald"
                           : arquivado ? "bg-black/5 text-charcoal/50"
-                          : "bg-gold/20 text-navy"}`}>
+                          : "bg-electric/15 text-electric"}`}>
                           {entregue ? "Entregue" : arquivado ? "Arquivado"
                             : String(p.fase || "").replaceAll("_", " ").toLowerCase()}
                         </span>
                       </div>
-                      <p className="mt-1 text-sm text-charcoal/60">
+                      <p className="mt-2 font-display text-subtitle font-bold capitalize text-navy">
+                        {nome}
+                      </p>
+                      <p className="mt-1 text-small text-charcoal/60">
                         {Number(p.valor || 0).toLocaleString("pt-BR",
                           { style: "currency", currency: "BRL" })}
                         {p.prazo_entrega_horas ? ` · entrega em até ${p.prazo_entrega_horas}h` : ""}
                       </p>
                       {entregue && p.prazo_alteracao_ate && (
-                        <p className="mt-1 text-xs text-charcoal/50">
+                        <p className="mt-1 text-small text-charcoal/50">
                           Ajustes sem custo até{" "}
                           {String(p.prazo_alteracao_ate).slice(8, 10)}/
                           {String(p.prazo_alteracao_ate).slice(5, 7)}

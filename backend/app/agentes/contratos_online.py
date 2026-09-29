@@ -124,8 +124,18 @@ def aceitar_contratacao(pedido_id: str, termo: dict, ip: str | None = None) -> d
                      {"pedido": pedido_id, "versao": termo.get("versao")})
     return row
 
+# A ORDEM DAS FASES
+#
+# O pagamento era a terceira etapa: o cliente preenchia tudo, lia a
+# orientação e só então pagava. Isso põe o trabalho antes do sim, e o
+# escritório coletava dados de quem ainda podia desistir.
+#
+# Agora o pagamento é a primeira. Confirmado o PIX, o atendimento volta
+# e pergunta o que o documento exige. É também quando se pergunta sobre
+# timbre ou folha branca: antes disso a pergunta não significa nada
+# para quem nem sabe se vai contratar.
 FASES = [
-    "COLETA", "CIENCIA", "PAGAMENTO", "REDACAO", "REVISAO_IA", "AJUSTE",
+    "PAGAMENTO", "COLETA", "CIENCIA", "REDACAO", "REVISAO_IA", "AJUSTE",
     "REVISAO_ADV", "APROVACAO", "ASSINATURA", "ENTREGUE", "ARQUIVADO",
 ]
 
@@ -428,13 +438,39 @@ def ajustar(pedido_id: str) -> dict:
     return {"ok": True, "fase": "REVISAO_ADV", "aplicados": len(apontamentos)}
 
 
-def liberar_para_cliente(pedido_id: str, quem: str = "") -> dict:
-    """Revisão humana aprovada. É o único caminho até o cliente."""
+def liberar_para_cliente(pedido_id: str, quem: str = "",
+                         forcar: bool = False) -> dict:
+    """Revisão humana aprovada. É o único caminho até o cliente.
+
+    Exige que o advogado tenha aberto o PDF antes. Não é burocracia: o
+    texto pode estar impecável e a página sair com a cláusula quebrada
+    no meio ou o timbre em cima do primeiro parágrafo, e quem recebe
+    isso é o cliente. `forcar` existe para o dia em que o LibreOffice
+    estiver fora do ar e o documento precisar sair mesmo assim."""
     db = get_db()
+    r = db.table("pedidos_contrato").select("visto_advogado_em,numero") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    if not r[0].get("visto_advogado_em") and not forcar:
+        raise ValueError("Abra o PDF e confira o layout antes de liberar.")
+
     db.table("pedidos_contrato").update({
         "fase": "APROVACAO", "aprovado_advogado_em": _agora(),
         "aprovado_advogado_por": quem or None, "atualizado_em": _agora(),
     }).eq("id", pedido_id).execute()
+
+    try:
+        recado(pedido_id,
+               "O seu documento está pronto e já passou pela revisão do "
+               "advogado. Acesse a sua página para ler e aprovar, ou pedir "
+               "ajuste se algo não refletir o que foi combinado.",
+               canais=["EMAIL", "WHATSAPP"], autor="ESCRITORIO",
+               assunto=f"Seu documento está pronto para revisão, "
+                       f"{r[0].get('numero')}")
+    except Exception as e:
+        print(f"[balcao] cliente não avisado da liberação: {e}")
+
     registrar_evento(None, "CONTRATO_LIBERADO", {"pedido": pedido_id, "por": quem})
     return {"ok": True, "fase": "APROVACAO"}
 
@@ -467,23 +503,87 @@ DIAS_PARA_ALTERAR = 7
 
 def registrar_pagamento(pedido_id: str, txid: str = "",
                         quem: str = "") -> dict:
-    """Confirma o PIX e libera o trabalho.
+    """Confirma o PIX e devolve a conversa ao cliente.
 
     A confirmação é humana de propósito: não há integração com o banco,
     e inventar uma baixa automática seria pior do que não ter nenhuma —
     o escritório escreveria o contrato de alguém que não pagou e
-    descobriria depois."""
+    descobriria depois. Quando o banco digital entrar, é esta função que
+    passa a ser chamada pelo webhook, e o resto do rito não muda.
+
+    O pedido vai para COLETA, e não direto para REDACAO: é agora que o
+    atendimento pergunta o que o documento exige. O recado sai pelos
+    canais que o cliente tiver, porque quem acabou de pagar fecha a
+    página e vai fazer outra coisa."""
     db = get_db()
-    r = db.table("pedidos_contrato").select("fase").eq("id", pedido_id) \
-        .limit(1).execute().data
+    r = db.table("pedidos_contrato") \
+        .select("fase,numero,tipo,servico_livre,cliente_id") \
+        .eq("id", pedido_id).limit(1).execute().data
     if not r:
         raise ValueError("Pedido não encontrado.")
+    p = r[0]
+
     db.table("pedidos_contrato").update({
         "pago_em": _agora(), "pix_txid": (txid or "")[:120] or None,
-        "fase": "REDACAO", "atualizado_em": _agora(),
+        "fase": "COLETA", "atualizado_em": _agora(),
     }).eq("id", pedido_id).execute()
+
+    nome_doc = (catalogo.detalhe(p.get("tipo") or "") or {}).get("nome") \
+        or p.get("servico_livre") or "documento"
+    abertura = (
+        f"Pagamento confirmado. Obrigado pela confiança.\n\n"
+        f"Agora preciso das informações para escrever o seu {nome_doc}. "
+        f"Você pode digitar aqui ou enviar cópia dos documentos por foto "
+        f"ou PDF, o que for mais fácil, e dá para misturar os dois.\n\n"
+        f"Uma escolha antes de começar: o documento pode sair no papel "
+        f"timbrado do escritório, que mostra quem redigiu e costuma pesar "
+        f"quando a outra parte lê, ou em folha branca, sem identificação. "
+        f"Os dois têm o mesmo valor jurídico. Qual você prefere?")
+    try:
+        db.table("pedidos_mensagens").insert({
+            "pedido_id": pedido_id, "autor": "AGENTE", "texto": abertura,
+            "canais": ["PLATAFORMA"],
+        }).execute()
+    except Exception as e:
+        print(f"[balcao] abertura da coleta não registrada: {e}")
+
+    try:
+        recado(pedido_id,
+               f"Recebemos o seu pagamento do pedido {p.get('numero')}. "
+               f"Acesse a sua página para informar os dados do documento.",
+               canais=["EMAIL", "WHATSAPP"], autor="AGENTE",
+               assunto=f"Pagamento confirmado, pedido {p.get('numero')}")
+    except Exception as e:
+        print(f"[balcao] cliente não avisado do pagamento: {e}")
+
     registrar_evento(None, "BALCAO_PAGO",
                      {"pedido_id": pedido_id, "quem": quem, "txid": txid})
+    return {"ok": True, "fase": "COLETA"}
+
+
+def concluir_coleta(pedido_id: str, com_timbre: bool | None = None) -> dict:
+    """O cliente terminou de informar. Daqui o redator assume.
+
+    `com_timbre` chega agora, e não na primeira tela: é aqui que a
+    pergunta faz sentido. Quem não responde fica com o timbre, que é o
+    padrão, e `timbre_escolhido` guarda a diferença entre ter escolhido
+    e ter aceitado o padrão."""
+    db = get_db()
+    r = db.table("pedidos_contrato").select("fase,dados,pago_em") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    if not r[0].get("pago_em"):
+        raise ValueError("A coleta começa depois do pagamento confirmado.")
+
+    campos = {"fase": "REDACAO", "atualizado_em": _agora()}
+    if com_timbre is not None:
+        campos["com_timbre"] = bool(com_timbre)
+        campos["timbre_escolhido"] = True
+
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_COLETA_CONCLUIDA",
+                     {"pedido_id": pedido_id, "com_timbre": com_timbre})
     return {"ok": True, "fase": "REDACAO"}
 
 
@@ -560,3 +660,246 @@ def arquivar_vencidos() -> dict:
         except Exception as e:
             print(f"[balcao] não arquivou {p.get('numero')}: {e}")
     return {"arquivados": len(vencidos)}
+
+
+# ══════════════════════════════════════════════════════════════════
+# RECADO AO CLIENTE, PELOS CANAIS QUE ELE TIVER
+#
+# O escritório escrevia na conversa do pedido e pronto. Quem não abrisse
+# a plataforma não ficava sabendo de nada, e a plataforma é justamente o
+# lugar em que ninguém entra sem motivo.
+#
+# Três canais, com papéis diferentes:
+#
+#   PLATAFORMA  é a própria linha da tabela, e por isso nunca falha. É
+#               também o único registro que fica, com data e hora.
+#   EMAIL       o que chega a quem não está com o celular na mão.
+#   WHATSAPP    o que a pessoa realmente lê. Ainda não está ligado: a
+#               função tenta, falha com elegância e anota a falha, e no
+#               dia em que o número for aprovado nada mais muda aqui.
+#
+# A falha de um canal não derruba os outros, e fica gravada. "Ninguém me
+# avisou" se responde com a linha desta tabela, não com memória.
+# ══════════════════════════════════════════════════════════════════
+
+CANAIS = ("PLATAFORMA", "EMAIL", "WHATSAPP")
+
+
+def recado(pedido_id: str, texto: str, canais: list[str] | None = None,
+           autor: str = "ESCRITORIO", assunto: str = "") -> dict:
+    """Manda um recado ao cliente do balcão e registra por onde saiu."""
+    texto = (texto or "").strip()
+    if not texto:
+        raise ValueError("A mensagem está vazia.")
+
+    db = get_db()
+    r = db.table("pedidos_contrato") \
+        .select("numero,cliente_id,clientes(nome,email,whatsapp)") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    p = r[0]
+    cli = p.get("clientes") or {}
+
+    pedidos = [c.upper() for c in (canais or ["PLATAFORMA", "EMAIL"])
+               if c.upper() in CANAIS]
+    if "PLATAFORMA" not in pedidos:
+        pedidos.insert(0, "PLATAFORMA")
+
+    s = get_settings()
+    url = f"{s.app_url.rstrip('/')}/balcao/{pedido_id}"
+    falhas: list[str] = []
+    email_em = whats_em = None
+
+    if "EMAIL" in pedidos and cli.get("email"):
+        try:
+            from ..integracoes import avisos
+            corpo = (f"{texto}\n\n"
+                     f"Pedido {p.get('numero')}.\n"
+                     f"Acesse a sua página: {url}")
+            avisos.enviar_email(
+                cli["email"],
+                assunto or f"Sobre o seu pedido {p.get('numero')}",
+                corpo, corpo.replace("\n", "<br>"))
+            email_em = _agora()
+        except Exception as e:
+            falhas.append(f"email: {e}")
+
+    if "WHATSAPP" in pedidos and cli.get("whatsapp"):
+        try:
+            from ..integracoes import avisos
+            phone_id, _ = avisos.escolher_origem(cli.get("whatsapp"))
+            avisos.enviar_whatsapp(
+                cli["whatsapp"], f"{texto}\n\nPedido {p.get('numero')}\n{url}",
+                phone_id)
+            whats_em = _agora()
+        except Exception as e:
+            falhas.append(f"whatsapp: {e}")
+
+    linha = db.table("pedidos_mensagens").insert({
+        "pedido_id": pedido_id,
+        "autor": autor if autor in ("ESCRITORIO", "AGENTE", "CLIENTE") else "ESCRITORIO",
+        "texto": texto[:4000], "canais": pedidos,
+        "email_em": email_em, "whatsapp_em": whats_em,
+        "falha": "; ".join(falhas)[:500] or None,
+    }).execute().data
+
+    registrar_evento(None, "BALCAO_RECADO",
+                     {"pedido_id": pedido_id, "canais": pedidos,
+                      "falhas": falhas})
+    return {"ok": True, "canais": pedidos, "falhas": falhas,
+            "mensagem": linha[0] if linha else None}
+
+
+def excluir(pedido_id: str, quem: str = "", motivo: str = "") -> dict:
+    """Tira o pedido da esteira sem apagar a prova de que ele existiu.
+
+    Exclusão física levaria junto a conversa, o comprovante do PIX e a
+    ciência registrada, que são exatamente as três coisas de que o
+    escritório precisaria se o cliente reclamasse depois. O pedido sai
+    da vista e permanece no banco."""
+    db = get_db()
+    r = db.table("pedidos_contrato").select("numero,fase,pago_em") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    p = r[0]
+    if p.get("pago_em") and not motivo.strip():
+        raise ValueError("Este pedido foi pago. Explique o motivo da exclusão.")
+
+    db.table("pedidos_contrato").update({
+        "excluido_em": _agora(), "excluido_por": quem or "escritório",
+        "excluido_motivo": (motivo or "")[:500] or None,
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_EXCLUIDO",
+                     {"pedido_id": pedido_id, "numero": p.get("numero"),
+                      "fase": p.get("fase"), "quem": quem, "motivo": motivo})
+    return {"ok": True, "numero": p.get("numero")}
+
+
+def restaurar(pedido_id: str, quem: str = "") -> dict:
+    """Desfaz a exclusão. Existe porque todo botão de excluir erra um dia."""
+    get_db().table("pedidos_contrato").update({
+        "excluido_em": None, "excluido_por": None, "excluido_motivo": None,
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_RESTAURADO",
+                     {"pedido_id": pedido_id, "quem": quem})
+    return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+# O PDF QUE O ADVOGADO VÊ ANTES DO CLIENTE
+#
+# Texto aprovado e página torta chegam tortos ao cliente. Aprovar o
+# conteúdo e conferir o layout são duas coisas, e o sistema tratava como
+# uma só: a minuta ia como texto puro e ninguém via a página montada.
+#
+# Agora a aprovação do advogado gera o PDF, ele abre, confere, e só
+# então o botão de liberar fica disponível. É o mesmo cuidado de sempre,
+# com um passo a mais e uma marca de tempo para cada um.
+# ══════════════════════════════════════════════════════════════════
+
+CABECALHO = [
+    "FÁBIO SILVA CUNHA SOCIEDADE INDIVIDUAL DE ADVOCACIA",
+    "Dr. Fábio Cunha, OAB/RO 10.849",
+    "Porto Velho, RO e Florianópolis, SC",
+]
+
+
+def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
+    """Monta o .docx da minuta, com ou sem a identificação do escritório.
+
+    Sem modelo pronto de propósito: contrato de balcão não tem a
+    estrutura fixa das peças do escritório, e forçar um modelo aqui daria
+    margem esquisita em metade dos tipos."""
+    import io
+    from docx import Document
+    from docx.shared import Pt, Cm
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+    for sec in doc.sections:
+        sec.top_margin = Cm(2.5 if com_timbre else 3)
+        sec.bottom_margin = Cm(2.5)
+        sec.left_margin = Cm(3)
+        sec.right_margin = Cm(2)
+
+    normal = doc.styles["Normal"]
+    normal.font.name = "Arial"
+    normal.font.size = Pt(12)
+
+    if com_timbre:
+        for i, linha in enumerate(CABECALHO):
+            par = doc.add_paragraph()
+            par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = par.add_run(linha)
+            run.bold = i == 0
+            run.font.size = Pt(11 if i == 0 else 9)
+        doc.add_paragraph()
+
+    for bloco in (texto or "").split("\n"):
+        bloco = bloco.rstrip()
+        if not bloco:
+            doc.add_paragraph()
+            continue
+        par = doc.add_paragraph()
+        limpo = bloco.strip()
+        titulo = limpo.isupper() and len(limpo) < 90
+        par.alignment = (WD_ALIGN_PARAGRAPH.CENTER if titulo
+                         else WD_ALIGN_PARAGRAPH.JUSTIFY)
+        par.paragraph_format.first_line_indent = None if titulo else Cm(1.25)
+        par.paragraph_format.space_after = Pt(6)
+        run = par.add_run(limpo)
+        run.bold = titulo
+
+    if com_timbre and numero:
+        rodape = doc.add_paragraph()
+        rodape.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = rodape.add_run(f"Documento elaborado pelo escritório. Pedido {numero}.")
+        r.font.size = Pt(8)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def gerar_pdf(pedido_id: str) -> tuple[bytes, str]:
+    """Devolve (bytes do PDF, nome do arquivo) da minuta atual."""
+    db = get_db()
+    r = db.table("pedidos_contrato") \
+        .select("minuta,com_timbre,numero,tipo,servico_livre") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    p = r[0]
+    if not (p.get("minuta") or "").strip():
+        raise ValueError("Este pedido ainda não tem minuta.")
+
+    from . import documentos
+    docx = _docx_da_minuta(p["minuta"], p.get("com_timbre") is not False,
+                           p.get("numero") or "")
+    pdf = documentos.converter_para_pdf(docx)
+
+    db.table("pedidos_contrato").update({
+        "pdf_gerado_em": _agora(), "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    nome = (catalogo.detalhe(p.get("tipo") or "") or {}).get("nome") \
+        or p.get("servico_livre") or "documento"
+    arquivo = f"{(p.get('numero') or 'pedido')}_{nome}.pdf".replace(" ", "_")
+    registrar_evento(None, "BALCAO_PDF_GERADO",
+                     {"pedido_id": pedido_id, "bytes": len(pdf)})
+    return pdf, arquivo
+
+
+def marcar_visto(pedido_id: str, quem: str = "") -> dict:
+    """O advogado abriu o PDF e o layout está de pé."""
+    get_db().table("pedidos_contrato").update({
+        "visto_advogado_em": _agora(), "visto_advogado_por": quem or None,
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_LAYOUT_CONFERIDO",
+                     {"pedido_id": pedido_id, "quem": quem})
+    return {"ok": True}

@@ -387,8 +387,41 @@ def detalhe(tipo: str) -> dict | None:
     """
     v = CATALOGO.get(tipo)
     if not v:
-        return None
+        return dict(OUTRO, id="OUTRO") if tipo == "OUTRO" else None
     return {"id": tipo, **{k: x for k, x in v.items() if k != "preco"}}
+
+
+# ── O serviço que não está na lista ─────────────────────────────
+#
+# O catálogo tem dez tipos e o mundo tem mais do que dez documentos.
+# Quem precisava do décimo primeiro batia numa parede: nenhum campo
+# para dizer o que queria, e a pessoa ia embora sem o escritório nem
+# ficar sabendo o que ela procurava.
+#
+# OUTRO não aparece na vitrine, porque não é um produto: é a porta que
+# se abre quando a busca não encontra nada. O que o cliente digita fica
+# em `servico_livre`, e essa lista, lida de tempos em tempos, é a melhor
+# fonte que existe sobre qual deve ser o próximo tipo do catálogo.
+#
+# Preço de tabela, sem desconto embutido, porque não dá para precificar
+# o que ainda não se leu. Se o pedido for muito maior do que aparenta, o
+# escritório ajusta na conversa, antes do pagamento.
+OUTRO = {
+    "nome": "Documento sob medida",
+    "base_legal": "Código Civil e a legislação específica do objeto",
+    "campos": [],
+    "documentos": [
+        "Documento de identidade com foto das partes",
+        "CPF ou CNPJ",
+        "Comprovante de endereço",
+        "Tudo o que já existir por escrito sobre o combinado",
+    ],
+    "alerta": "Como este documento não está na lista, o escritório lê o "
+              "seu pedido antes de confirmar o prazo. Se for caso de "
+              "escritura pública ou registro em cartório, você é avisado "
+              "antes do pagamento.",
+    "regras": [],
+}
 
 
 # ── O que muda o preço depois da tabela ─────────────────────────

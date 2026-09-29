@@ -3380,6 +3380,9 @@ class NovoPedido(BaseModel):
     observacoes: str | None = None
     com_orientacao: bool = False
     com_timbre: bool = True
+    # O que o cliente digitou quando não achou o serviço na lista.
+    # Com tipo OUTRO é a única descrição que existe do pedido.
+    servico_livre: str | None = None
 
 
 class CienciaBody(BaseModel):
@@ -3514,26 +3517,58 @@ def contrato_tipo(tipo: str):
 @app.post("/api/v1/contratos/pedidos")
 def criar_pedido(body: NovoPedido):
     from .agentes import catalogo_contratos
-    if not catalogo_contratos.detalhe(body.tipo.upper()):
+    tipo = body.tipo.upper()
+    if not catalogo_contratos.detalhe(tipo):
         raise HTTPException(400, "Tipo de contrato não encontrado.")
-    valor = catalogo_contratos.preco(body.tipo.upper(), body.com_orientacao)
+    livre = (body.servico_livre or "").strip()
+    if tipo == "OUTRO" and len(livre) < 8:
+        raise HTTPException(400, "Descreva o documento que você precisa.")
+    valor = catalogo_contratos.preco(tipo, body.com_orientacao)
     row = get_db().table("pedidos_contrato").insert({
-        "tipo": body.tipo.upper(), "cliente_id": body.cliente_id,
+        "tipo": tipo, "cliente_id": body.cliente_id,
         "dados": body.dados, "observacoes": body.observacoes,
         "com_orientacao": body.com_orientacao, "com_timbre": body.com_timbre,
-        "valor": valor, "fase": "COLETA",
+        "servico_livre": livre[:400] or None,
+        # O pedido nasce em PAGAMENTO porque essa passou a ser a primeira
+        # fase do rito. Antes do aceite ele nem chega à tela do cliente:
+        # o que existe é a conversa da proposta.
+        "valor": valor, "fase": "PAGAMENTO",
     }).execute().data[0]
     return row
 
 
 @app.get("/api/v1/contratos/pedidos")
-def listar_pedidos(fase: str | None = None, cliente_id: str | None = None):
+def listar_pedidos(fase: str | None = None, cliente_id: str | None = None,
+                   incluir_excluidos: bool = False):
     q = get_db().table("pedidos_contrato").select("*, clientes(nome,email)")
     if fase:
         q = q.eq("fase", fase)
     if cliente_id:
         q = q.eq("cliente_id", cliente_id)
+    if not incluir_excluidos:
+        q = q.is_("excluido_em", "null")
     return q.order("atualizado_em", desc=True).limit(300).execute().data
+
+
+class ExclusaoPedido(BaseModel):
+    motivo: str = ""
+    quem: str = ""
+
+
+@app.delete("/api/v1/contratos/pedidos/{pedido_id}")
+def excluir_pedido(pedido_id: str, motivo: str = "", quem: str = ""):
+    """Tira o pedido da esteira. A prova de que ele existiu permanece."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.excluir(pedido_id, quem=quem, motivo=motivo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/restaurar")
+def restaurar_pedido(pedido_id: str, quem: str = ""):
+    from .agentes import contratos_online
+    return contratos_online.restaurar(pedido_id, quem=quem)
 
 
 @app.get("/api/v1/contratos/pedidos/{pedido_id}")
@@ -3619,10 +3654,13 @@ def ajustar_contrato(pedido_id: str):
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/liberar")
-def liberar_contrato(pedido_id: str, quem: str = ""):
+def liberar_contrato(pedido_id: str, quem: str = "", forcar: bool = False):
     """Revisão humana. Único caminho até o cliente."""
     from .agentes import contratos_online
-    return contratos_online.liberar_para_cliente(pedido_id, quem)
+    try:
+        return contratos_online.liberar_para_cliente(pedido_id, quem, forcar)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/alteracao")
@@ -4552,6 +4590,48 @@ def balcao_pagamento(pedido_id: str, body: BaixaDePagamento):
         raise HTTPException(404, str(e))
 
 
+class FimDaColeta(BaseModel):
+    # None significa que o cliente não respondeu e fica o padrão.
+    com_timbre: bool | None = None
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/coleta-concluida")
+def balcao_coleta_concluida(pedido_id: str, body: FimDaColeta):
+    """O cliente terminou de informar. A partir daqui o redator assume."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.concluir_coleta(pedido_id, body.com_timbre)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/pdf")
+def balcao_pdf(pedido_id: str):
+    """O PDF da minuta, montado com ou sem o timbre, como o cliente verá.
+
+    Serve a dois momentos com públicos diferentes: o advogado abre antes
+    de liberar, para conferir a página; o cliente abre depois, para ler.
+    É o mesmo arquivo de propósito, e é isso que garante que o que foi
+    conferido é o que foi enviado."""
+    from fastapi.responses import Response
+    from .agentes import contratos_online
+    try:
+        pdf, nome = contratos_online.gerar_pdf(pedido_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    return Response(
+        pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{nome}"'})
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/layout-conferido")
+def balcao_layout_conferido(pedido_id: str, quem: str = ""):
+    from .agentes import contratos_online
+    return contratos_online.marcar_visto(pedido_id, quem=quem)
+
+
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/entregar")
 def balcao_entregar(pedido_id: str, body: EntregaDoPedido):
     from .agentes import contratos_online
@@ -4577,6 +4657,10 @@ def balcao_arquivar_vencidos():
 class MensagemDoBalcao(BaseModel):
     texto: str
     autor: str = "ESCRITORIO"
+    # Plataforma entra sempre; os outros dois dependem de o cliente ter
+    # e-mail e telefone cadastrados.
+    canais: list[str] | None = None
+    assunto: str = ""
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/mensagem")
@@ -4586,16 +4670,27 @@ def balcao_mensagem(pedido_id: str, body: MensagemDoBalcao):
     Fica na conversa do pedido, não na do caso: são caixas diferentes de
     propósito, para o cliente do balcão não receber andamento processual
     e o cliente do processo não receber cobrança de documento de
-    contrato."""
-    if not body.texto.strip():
-        raise HTTPException(400, "A mensagem está vazia.")
+    contrato.
+
+    Quando o autor é o cliente, o recado não sai por e-mail nem por
+    WhatsApp: seria o escritório mandando para si mesmo uma cópia do que
+    já está na tela."""
+    from .agentes import contratos_online
     autor = body.autor.upper()
-    if autor not in ("ESCRITORIO", "AGENTE", "CLIENTE"):
-        autor = "ESCRITORIO"
-    r = get_db().table("pedidos_mensagens").insert({
-        "pedido_id": pedido_id, "autor": autor, "texto": body.texto[:4000],
-    }).execute().data
-    return r[0] if r else {"ok": True}
+    if autor == "CLIENTE":
+        if not body.texto.strip():
+            raise HTTPException(400, "A mensagem está vazia.")
+        r = get_db().table("pedidos_mensagens").insert({
+            "pedido_id": pedido_id, "autor": "CLIENTE",
+            "texto": body.texto[:4000], "canais": ["PLATAFORMA"],
+        }).execute().data
+        return r[0] if r else {"ok": True}
+    try:
+        return contratos_online.recado(
+            pedido_id, body.texto, canais=body.canais, autor=autor,
+            assunto=body.assunto)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ══════════════════════════════════════════════════════════════════
