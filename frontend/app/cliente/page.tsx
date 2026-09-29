@@ -72,6 +72,46 @@ const FALLBACK =
 const dataHora = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
+/* Os cartões da tela inicial eram emoji dentro de um quadrado colorido.
+   Emoji muda de desenho a cada aparelho, não aceita cor e passa ar de
+   rascunho justamente na tela em que o cliente decide se confia no
+   escritório. Viraram traço, na mesma espessura, com a cor do sistema. */
+const ICONES = {
+  pasta: "M3 7h6l2 2h10v10H3zM3 7V5h6l2 2",
+  documento: "M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5",
+  conversa: "M21 12a8 8 0 0 1-8 8H8l-5 2 1.4-4.2A8 8 0 1 1 21 12z",
+  caneta: "M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16zM14 6l4 4",
+  pessoa: "M20 21v-2a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+};
+
+function Cartao({
+  onClick, icone, titulo, texto, contador = 0,
+}: {
+  onClick: () => void; icone: string; titulo: string; texto: string; contador?: number;
+}) {
+  return (
+    <button onClick={onClick}
+      className="group relative flex flex-col items-start rounded-xl2 border border-black/5 bg-white p-7 text-left shadow-card transition hover:-translate-y-1 hover:border-electric/30 hover:shadow-lift">
+      <span className="flex h-12 w-12 items-center justify-center rounded-xl2 bg-mist text-electric transition group-hover:bg-electric group-hover:text-white">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}
+          strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6" aria-hidden="true">
+          <path d={icone} />
+        </svg>
+      </span>
+
+      {contador > 0 && (
+        <span className="absolute right-5 top-5 rounded-full bg-electric px-2 py-0.5 text-caption font-bold text-white">
+          {contador}
+        </span>
+      )}
+
+      <h2 className="mt-5 font-display text-subtitle font-bold text-navy">{titulo}</h2>
+      <p className="mt-2 text-small text-charcoal/60">{texto}</p>
+      <span className="mt-5 text-small font-semibold text-electric">Abrir</span>
+    </button>
+  );
+}
+
 export default function AreaCliente() {
   const router = useRouter();
   const [token, setToken] = useState("");
@@ -366,26 +406,38 @@ export default function AreaCliente() {
     <main className="min-h-screen bg-ice text-charcoal">
       <header className="sticky top-0 z-30 border-b border-black/5 bg-white/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
-          <Link href="/" className="flex items-baseline gap-2">
-            <span className="font-serif text-xl font-bold text-navy">FC</span>
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">Advocacia</span>
+          <Link href="/" className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-electric to-indigo font-display text-small font-bold text-white">
+              FC
+            </span>
+            <span className="flex flex-col leading-none">
+              <span className="font-display text-small font-bold text-navy">Advocacia</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-charcoal/45">
+                Área do cliente
+              </span>
+            </span>
           </Link>
           <div className="flex items-center gap-4">
             <a href={whatsLink} target="_blank" rel="noreferrer"
-              className="rounded-full bg-[#25D366] px-4 py-1.5 text-xs font-semibold text-white">WhatsApp</a>
-            <button onClick={sair} className="text-sm text-charcoal/50 hover:text-charcoal">Sair</button>
+              className="inline-flex items-center gap-2 rounded-lg bg-whats px-4 py-2 text-caption font-semibold text-white transition hover:brightness-95">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                <path d="M17.47 14.38c-.3-.15-1.75-.86-2.02-.96-.27-.1-.47-.15-.67.15-.2.3-.77.96-.94 1.16-.17.2-.35.22-.64.07-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.64-2.05-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.6-.92-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.63.71.22 1.36.19 1.87.12.57-.09 1.75-.72 2-1.41.25-.69.25-1.28.17-1.4-.07-.13-.27-.2-.57-.35M12.04 21.5h-.01a9.4 9.4 0 0 1-4.8-1.32l-.34-.2-3.57.94.95-3.48-.22-.36a9.38 9.38 0 0 1-1.44-5.01c0-5.18 4.22-9.4 9.42-9.4a9.34 9.34 0 0 1 6.65 2.76 9.32 9.32 0 0 1 2.76 6.65c0 5.18-4.23 9.4-9.4 9.42M20.5 3.49A11.78 11.78 0 0 0 12.04 0C5.46 0 .1 5.35.1 11.93c0 2.1.55 4.15 1.6 5.96L0 24l6.26-1.64a11.9 11.9 0 0 0 5.78 1.47h.01c6.58 0 11.93-5.35 11.94-11.93a11.86 11.86 0 0 0-3.49-8.44" />
+              </svg>
+              WhatsApp
+            </a>
+            <button onClick={sair} className="text-small text-charcoal/50 transition hover:text-charcoal">Sair</button>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-5 py-6">
-        <h1 className="font-serif text-2xl font-bold text-navy">Olá, {primeiroNome}</h1>
-        <p className="mb-6 text-sm text-charcoal/60">
+      <div className="mx-auto max-w-5xl px-5 py-8">
+        <h1 className="font-display text-title font-bold text-navy">{primeiroNome}</h1>
+        <p className="mb-8 text-body text-charcoal/60">
           {casos.length > 1
             ? `Você tem ${casos.length} atendimentos conosco. Cada um tem o seu próprio número, é por ele que identificamos o seu caso.`
             : tipoCliente === "CONTRATOS" && pedidos.length > 0
             ? `Você tem ${pedidos.length} ${pedidos.length === 1 ? "documento" : "documentos"} conosco.`
-            : "Bem-vindo(a) à sua área. Como podemos te ajudar hoje?"}
+            : "Aqui ficam o andamento do seu caso, os seus documentos e o canal direto com o escritório."}
         </p>
 
         {/* Documentos aguardando a sua assinatura */}
@@ -441,68 +493,51 @@ export default function AreaCliente() {
         )}
 
         {carregando ? (
-          <p className="text-charcoal/50">Carregando...</p>
+          <p className="text-body text-charcoal/50">Carregando</p>
         ) : vista === "home" ? (
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {veProcessos && (
-            <button onClick={() => setVista(casos.length > 1 ? "casos" : "acompanhar")}
-              className="group relative flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
-              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy text-2xl">📁</span>
-              {totalPendencias > 0 && (
-                <span className="absolute right-5 top-5 rounded-full bg-gold px-2 py-0.5 text-[11px] font-bold text-navy">{totalPendencias}</span>
-              )}
-              <h2 className="mt-4 font-serif text-xl font-bold text-navy">
-                {casos.length > 1 ? "Meus atendimentos" : "Acompanhar Demanda"}
-              </h2>
-              <p className="mt-2 text-sm text-charcoal/60">
-                {casos.length > 1
-                  ? `Escolha qual dos seus ${casos.length} atendimentos deseja acompanhar.`
-                  : "Veja a esteira do seu caso, do início ao protocolo, e as movimentações do processo."}
-              </p>
-              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
-            </button>
+            <Cartao
+              onClick={() => setVista(casos.length > 1 ? "casos" : "acompanhar")}
+              icone={ICONES.pasta}
+              contador={totalPendencias}
+              titulo={casos.length > 1 ? "Meus atendimentos" : "Acompanhar o meu caso"}
+              texto={casos.length > 1
+                ? `Escolha qual dos seus ${casos.length} atendimentos deseja acompanhar.`
+                : "Veja em que fase o seu caso está, do primeiro contato ao protocolo, e as movimentações do processo."}
+            />
             )}
 
             {veContratos && (
-            <button onClick={() => setVista("pedidos")}
-              className="group relative flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
-              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-forest text-2xl">📄</span>
-              {pedidos.filter((p: any) => !["ENTREGUE", "ARQUIVADO"].includes(p.fase)).length > 0 && (
-                <span className="absolute right-5 top-5 rounded-full bg-gold px-2 py-0.5 text-[11px] font-bold text-navy">
-                  {pedidos.filter((p: any) => !["ENTREGUE", "ARQUIVADO"].includes(p.fase)).length}
-                </span>
-              )}
-              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Meus contratos</h2>
-              <p className="mt-2 text-sm text-charcoal/60">
-                Acompanhe os documentos que você encomendou, do pedido à entrega.
-              </p>
-              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
-            </button>
+            <Cartao
+              onClick={() => setVista("pedidos")}
+              icone={ICONES.documento}
+              contador={pedidos.filter((p: any) => !["ENTREGUE", "ARQUIVADO"].includes(p.fase)).length}
+              titulo="Meus contratos"
+              texto="Acompanhe os documentos que você encomendou, do pedido à entrega."
+            />
             )}
 
-            <button onClick={() => setVista("atendimento")}
-              className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
-              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-gold text-2xl">💬</span>
-              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Atendimento e envio de documentos</h2>
-              <p className="mt-2 text-sm text-charcoal/60">Converse com o nosso atendimento, tire dúvidas e envie documentos por anexo ou foto, no próprio chat.</p>
-              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
-            </button>
+            <Cartao
+              onClick={() => setVista("atendimento")}
+              icone={ICONES.conversa}
+              titulo="Atendimento e envio de documentos"
+              texto="Fale com o escritório, tire dúvidas e envie documentos por anexo ou foto, no próprio chat."
+            />
 
-            <button onClick={() => setVista("contrato")}
-              className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
-              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-forest text-2xl">📝</span>
-              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Solicitar Elaboração de Contrato</h2>
-              <p className="mt-2 text-sm text-charcoal/60">Um especialista elabora seu contrato com segurança jurídica, preço por complexidade e documento em revisão.</p>
-              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
-            </button>
+            <Cartao
+              onClick={() => setVista("contrato")}
+              icone={ICONES.caneta}
+              titulo="Pedir um contrato"
+              texto="Contrato ou notificação escrito por advogado, sob medida para o seu caso, revisado antes da entrega."
+            />
 
-            <button onClick={() => setVista("cadastro")}
-              className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
-              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-charcoal text-2xl">👤</span>
-              <h2 className="mt-4 font-serif text-xl font-bold text-navy">Meu cadastro e meus documentos</h2>
-              <p className="mt-2 text-sm text-charcoal/60">Confira seus dados de contato e tudo o que você já nos enviou.</p>
-              <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
-            </button>
+            <Cartao
+              onClick={() => setVista("cadastro")}
+              icone={ICONES.pessoa}
+              titulo="Meu cadastro e meus documentos"
+              texto="Confira os seus dados de contato e tudo o que você já enviou ao escritório."
+            />
           </div>
         ) : vista === "pedidos" ? (
           <div>
