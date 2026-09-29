@@ -4611,18 +4611,20 @@ def ajustar_prazo(prazo_id: str, body: AjustarPrazo):
     if not campos:
         raise HTTPException(400, "Nada para alterar.")
 
-    # Mudar o prazo fatal sem mover o dia de trabalho deixaria a agenda
-    # apontando para a data antiga. Se o novo fatal ficou antes do dia
-    # de trabalho, a agenda perde o sentido — recua dois dias úteis.
+    # O dia de trabalho ACOMPANHA o prazo fatal, sempre, salvo se quem
+    # está corrigindo informar a data à mão.
+    #
+    # A primeira versão disto só recalculava quando o dia de trabalho
+    # ficava depois do novo prazo, e estava errada: estendido o fatal de
+    # setembro para dezembro, a tarefa continuava marcada para setembro —
+    # o escritório trabalharia três meses antes do necessário e, pior, a
+    # agenda passaria a mentir sobre quando aquilo vence.
     if body.prazo_fatal and not body.data:
         try:
             from .core.datas import antecipar_uteis
             from datetime import date as _d
             novo_fatal = _d.fromisoformat(body.prazo_fatal[:10])
-            trabalho = _d.fromisoformat(str(antes.get("data") or "")[:10]) \
-                if antes.get("data") else None
-            if not trabalho or trabalho >= novo_fatal:
-                campos["data"] = antecipar_uteis(novo_fatal, 2).isoformat()
+            campos["data"] = antecipar_uteis(novo_fatal, 2).isoformat()
         except Exception as e:
             print(f"[prazos] dia de trabalho não recalculado: {e}")
 
