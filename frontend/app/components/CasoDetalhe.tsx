@@ -644,8 +644,23 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   }
 
   async function excluir() {
-    if (!window.confirm("Excluir DEFINITIVAMENTE este caso? Esta ação não pode ser desfeita.")) return;
-    await fetch(`${API}/api/v1/casos/${casoId}`, { method: "DELETE" });
+    if (!window.confirm(
+      "Excluir este caso?\n\nEle vai para a lixeira, onde fica 6 meses e pode ser restaurado."
+    )) return;
+    /* A resposta era jogada fora: quando o banco recusava a exclusão, o
+       painel fechava assim mesmo e o card reaparecia na esteira — parecia
+       botão quebrado, sem nenhuma pista do motivo. */
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}`, { method: "DELETE" });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({} as any));
+        alert(`Não foi possível excluir.\n\n${e.detail || `Erro ${r.status}`}`);
+        return;
+      }
+    } catch {
+      alert("Não foi possível falar com o servidor.");
+      return;
+    }
     onMudou(); onFechar();
   }
 

@@ -423,30 +423,102 @@ def ativar_caso(caso_id: str):
     return _set_situacao(caso_id, "ATIVO", None, "CASO_ATIVADO")
 
 
-@app.delete("/api/v1/casos/{caso_id}")
-def excluir_caso(caso_id: str):
+# Tudo que pendura do caso. A lista existia pela metade, e o efeito era
+# silencioso e feio: caso importado do CNJ tem intimações e prazos, o
+# banco recusava apagar o caso por causa delas, a tela fechava o painel
+# assim mesmo e o card reaparecia — parecia que o botão não funcionava.
+FILHAS_DO_CASO = (
+    "prazos", "intimacoes", "mensagens", "documentos", "eventos",
+    "protocolos", "escalacoes", "monitoramentos", "solicitacoes",
+    "avisos", "cobrancas", "atendimentos", "peticoes",
+    "documentos_assinatura", "honorarios_historico", "prestacoes_contas",
+    "validacoes_peticionamento", "overrides_peticionamento",
+)
+# Estas vão para o backup da lixeira: são as que alguém pode querer de
+# volta. As demais se refazem sozinhas.
+GUARDAR_NO_BACKUP = ("mensagens", "documentos", "eventos", "intimacoes", "prazos")
+
+
+def _apagar_caso(caso_id: str) -> dict:
     db = get_db()
     # 1) BACKUP completo na lixeira ANTES de apagar (retenção 6 meses)
+    rotulo = caso_id[:8]
     try:
-        caso = db.table("casos").select("*, clientes(*)").eq("id", caso_id).single().execute().data
-        snap = {
-            "caso": caso,
-            "mensagens": db.table("mensagens").select("*").eq("caso_id", caso_id).execute().data,
-            "documentos": db.table("documentos").select("*").eq("caso_id", caso_id).execute().data,
-            "eventos": db.table("eventos").select("*").eq("caso_id", caso_id).execute().data,
-        }
-        rotulo = (caso.get("clientes") or {}).get("nome") or caso_id[:8]
-        db.table("lixeira").insert({"caso_id": caso_id, "rotulo": rotulo, "dados": snap}).execute()
-    except Exception:
-        pass  # se a lixeira não existir ainda, não bloqueia a exclusão
-    # 2) Apaga das tabelas operacionais
-    for t in ("mensagens", "documentos", "eventos", "protocolos"):
+        achado = db.table("casos").select("*, clientes(*)").eq("id", caso_id) \
+            .limit(1).execute().data
+        if not achado:
+            raise ValueError("Caso não encontrado.")
+        caso = achado[0]
+        snap = {"caso": caso}
+        for t in GUARDAR_NO_BACKUP:
+            try:
+                snap[t] = db.table(t).select("*").eq("caso_id", caso_id).execute().data
+            except Exception:
+                snap[t] = []
+        rotulo = ((caso.get("clientes") or {}).get("nome")
+                  or caso.get("numero_processo") or caso_id[:8])
+        db.table("lixeira").insert({"caso_id": caso_id, "rotulo": rotulo,
+                                    "dados": snap}).execute()
+    except ValueError:
+        raise
+    except Exception as e:
+        print(f"[excluir] backup falhou para {caso_id}: {e}")
+
+    # 2) Apaga as filhas. Aqui o erro NÃO é engolido: se uma tabela
+    #    resistir, a exclusão do caso vai falhar logo adiante e é melhor
+    #    saber por quê.
+    problemas = []
+    for t in FILHAS_DO_CASO:
         try:
             db.table(t).delete().eq("caso_id", caso_id).execute()
-        except Exception:
-            pass
-    db.table("casos").delete().eq("id", caso_id).execute()
-    return {"ok": True, "excluido": caso_id, "backup": "lixeira (6 meses)"}
+        except Exception as e:
+            problemas.append(f"{t}: {str(e)[:120]}")
+
+    try:
+        db.table("casos").delete().eq("id", caso_id).execute()
+    except Exception as e:
+        raise HTTPException(409, "Não foi possível excluir o caso — algo ainda "
+                                 f"aponta para ele. {str(e)[:200]}"
+                                 + (f" Tabelas que resistiram: {'; '.join(problemas)}"
+                                    if problemas else ""))
+    return {"ok": True, "excluido": caso_id, "rotulo": rotulo,
+            "backup": "lixeira (6 meses)", "avisos": problemas}
+
+
+@app.delete("/api/v1/casos/{caso_id}")
+def excluir_caso(caso_id: str):
+    try:
+        return _apagar_caso(caso_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+class ExcluirVarios(BaseModel):
+    ids: list[str]
+
+
+@app.post("/api/v1/casos/excluir-varios")
+def excluir_varios(body: ExcluirVarios):
+    """Exclusão em lote, um a um, sem parar no primeiro erro.
+
+    Importar cinco anos de acervo traz processo arquivado que não
+    interessa, e apagar de um em um é trabalho que ninguém faz — o
+    acervo velho acaba ficando lá, atrapalhando. Cada caso continua
+    indo para a lixeira antes de sumir."""
+    if not body.ids:
+        raise HTTPException(400, "Nenhum caso selecionado.")
+    if len(body.ids) > 200:
+        raise HTTPException(400, "Até 200 casos por vez.")
+    excluidos, falhas = [], []
+    for caso_id in body.ids:
+        try:
+            r = _apagar_caso(caso_id)
+            excluidos.append({"id": caso_id, "rotulo": r.get("rotulo")})
+        except HTTPException as e:
+            falhas.append({"id": caso_id, "erro": e.detail})
+        except Exception as e:
+            falhas.append({"id": caso_id, "erro": str(e)[:200]})
+    return {"excluidos": len(excluidos), "falhas": falhas, "itens": excluidos}
 
 
 @app.get("/api/v1/lixeira")

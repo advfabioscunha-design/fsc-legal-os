@@ -102,6 +102,11 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
   const [salvando, setSalvando] = useState(false);
   const [importar, setImportar] = useState(false);
   const [movendo, setMovendo] = useState<string | null>(null);
+  /* Seleção em lote. Importar cinco anos de acervo traz processo
+     arquivado que não interessa; apagar de um em um é trabalho que
+     ninguém faz, e o acervo velho acaba ficando lá atrapalhando. */
+  const [selecao, setSelecao] = useState<Record<string, boolean>>({});
+  const [excluindo, setExcluindo] = useState(false);
 
   function load() {
     setLoading(true);
@@ -162,6 +167,44 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
       }
       load();
     } finally { setMovendo(null); }
+  }
+
+  const selecionados = Object.keys(selecao).filter((k) => selecao[k]);
+
+  function alternar(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setSelecao((s) => ({ ...s, [id]: !s[id] }));
+  }
+
+  async function excluirSelecionados() {
+    if (!selecionados.length) return;
+    const nomes = casos.filter((c) => selecao[c.id]).slice(0, 5)
+      .map((c) => `• ${c.clientes?.nome ?? "—"}${c.numero_processo ? ` (${c.numero_processo})` : ""}`)
+      .join("\n");
+    const resto = selecionados.length > 5 ? `\n… e mais ${selecionados.length - 5}` : "";
+    if (!window.confirm(
+      `Excluir ${selecionados.length} caso(s)?\n\n${nomes}${resto}\n\n` +
+      "Todos vão para a lixeira, onde ficam 6 meses e podem ser restaurados."
+    )) return;
+
+    setExcluindo(true);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/excluir-varios`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selecionados }),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { alert(d.detail || `Erro ${r.status}`); return; }
+      // O que falhou é dito com nome e motivo, não escondido num contador.
+      if (d.falhas?.length) {
+        alert(`${d.excluidos} excluído(s). ${d.falhas.length} não saiu (saíram):\n\n` +
+          d.falhas.slice(0, 5).map((f: any) => `• ${f.erro}`).join("\n"));
+      }
+      setSelecao({});
+      load();
+    } catch {
+      alert("Não foi possível falar com o servidor.");
+    } finally { setExcluindo(false); }
   }
 
   async function restaurar(id: string) {
@@ -237,6 +280,27 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
         </button>
       </div>
 
+      {/* Barra da seleção — só aparece quando há algo marcado, para não
+          ocupar espaço nem sugerir exclusão o tempo todo. */}
+      {selecionados.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#C0392B]/40 bg-[#C0392B]/10 px-4 py-2.5">
+          <span className="text-sm text-white/85">
+            <b>{selecionados.length}</b> caso(s) selecionado(s)
+          </span>
+          <button onClick={() => setSelecao({})}
+            className="text-xs text-white/60 underline hover:text-white">limpar seleção</button>
+          <button
+            onClick={() => setSelecao(Object.fromEntries(casos.map((c) => [c.id, true])))}
+            className="text-xs text-white/60 underline hover:text-white">
+            selecionar os {casos.length} desta tela
+          </button>
+          <button onClick={excluirSelecionados} disabled={excluindo}
+            className="ml-auto rounded-md bg-[#C0392B] px-4 py-1.5 text-sm font-bold text-white transition hover:bg-[#d14335] disabled:opacity-50">
+            {excluindo ? "Excluindo…" : `Excluir ${selecionados.length} caso(s)`}
+          </button>
+        </div>
+      )}
+
       {/* Abas */}
       <div className="flex gap-2">
         {([["esteira", "Esteira"], ["suspensos", "Suspensos"], ["arquivados", "Arquivados"], ["lixeira", "Lixeira"]] as const).map(([k, l]) => (
@@ -265,7 +329,11 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
                     <div key={c.id} onClick={() => setSelecionado(c.id)}
                       className={`cursor-pointer rounded-lg bg-[#1A3A6B]/30 border p-3 transition-colors ${ehEscritorio(c) ? "border-[#C9A84C]/40" : "border-white/5 hover:border-[#2D7DD2]/30"}`}>
                       <div className="flex items-start justify-between gap-1">
-                        <p className="font-semibold text-white text-sm truncate">{c.clientes?.nome ?? "—"}</p>
+                        <input type="checkbox" checked={!!selecao[c.id]}
+                          onClick={(e) => alternar(c.id, e)} onChange={() => {}}
+                          title="Selecionar para excluir em lote"
+                          className="mt-0.5 mr-1 h-3.5 w-3.5 shrink-0 cursor-pointer accent-[#C0392B]" />
+                        <p className="font-semibold text-white text-sm truncate flex-1">{c.clientes?.nome ?? "—"}</p>
                         {/* A urgência agora mora no card, na coluna onde o
                             caso está — e não numa caixa que repetia os
                             mesmos casos em cima de todas as telas. */}
