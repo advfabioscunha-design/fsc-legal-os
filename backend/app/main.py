@@ -3223,6 +3223,158 @@ class FaseJudicialBody(BaseModel):
     motivo: str = ""
 
 
+# ══ Balcão de contratos ══════════════════════════════════════════
+class NovoPedido(BaseModel):
+    tipo: str
+    cliente_id: str | None = None
+    dados: dict = {}
+    observacoes: str | None = None
+    com_orientacao: bool = False
+    com_timbre: bool = True
+
+
+class CienciaBody(BaseModel):
+    regras: list[str] = []
+    escolha: str                      # PROSSEGUIR | ADEQUAR
+
+
+class AlteracaoBody(BaseModel):
+    texto: str
+
+
+@app.get("/api/v1/contratos/tipos")
+def contratos_tipos():
+    """O catálogo que o cliente vê ao escolher o serviço."""
+    from .agentes import catalogo_contratos
+    return catalogo_contratos.listar()
+
+
+@app.get("/api/v1/contratos/tipos/{tipo}")
+def contrato_tipo(tipo: str):
+    """Os campos que precisam ser coletados e os documentos aceitos."""
+    from .agentes import catalogo_contratos
+    d = catalogo_contratos.detalhe(tipo.upper())
+    if not d:
+        raise HTTPException(404, "Tipo de contrato não encontrado.")
+    return d
+
+
+@app.post("/api/v1/contratos/pedidos")
+def criar_pedido(body: NovoPedido):
+    from .agentes import catalogo_contratos
+    if not catalogo_contratos.detalhe(body.tipo.upper()):
+        raise HTTPException(400, "Tipo de contrato não encontrado.")
+    valor = catalogo_contratos.preco(body.tipo.upper(), body.com_orientacao)
+    row = get_db().table("pedidos_contrato").insert({
+        "tipo": body.tipo.upper(), "cliente_id": body.cliente_id,
+        "dados": body.dados, "observacoes": body.observacoes,
+        "com_orientacao": body.com_orientacao, "com_timbre": body.com_timbre,
+        "valor": valor, "fase": "COLETA",
+    }).execute().data[0]
+    return row
+
+
+@app.get("/api/v1/contratos/pedidos")
+def listar_pedidos(fase: str | None = None, cliente_id: str | None = None):
+    q = get_db().table("pedidos_contrato").select("*, clientes(nome,email)")
+    if fase:
+        q = q.eq("fase", fase)
+    if cliente_id:
+        q = q.eq("cliente_id", cliente_id)
+    return q.order("atualizado_em", desc=True).limit(300).execute().data
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}")
+def ver_pedido(pedido_id: str):
+    r = get_db().table("pedidos_contrato").select("*, clientes(nome,email)") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    return r[0]
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/termo")
+def montar_termo(pedido_id: str, body: CienciaBody):
+    """Monta o texto de orientação para o cliente ler antes de decidir."""
+    from .agentes import contratos_online
+    p = ver_pedido(pedido_id)
+    try:
+        return contratos_online.termo_de_ciencia(p["tipo"], body.regras, p.get("dados"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/ciencia")
+def dar_ciencia(pedido_id: str, body: CienciaBody, request: Request):
+    """Registra a decisão do cliente, com o texto inteiro que ele leu."""
+    from .agentes import contratos_online
+    p = ver_pedido(pedido_id)
+    termo = contratos_online.termo_de_ciencia(p["tipo"], body.regras, p.get("dados"))
+    ip = request.client.host if request.client else None
+    try:
+        r = contratos_online.registrar_ciencia(pedido_id, termo, body.escolha.upper(), ip)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "ciencia": r["id"],
+            "precisa_advogado": termo.get("precisa_advogado")}
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/redigir")
+def redigir_contrato(pedido_id: str):
+    from .agentes import contratos_online
+    try:
+        return contratos_online.redigir(pedido_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/revisar")
+def revisar_contrato(pedido_id: str):
+    from .agentes import contratos_online
+    try:
+        return contratos_online.revisar(pedido_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/ajustar")
+def ajustar_contrato(pedido_id: str):
+    """Só abre depois da revisão — a trava está no agente."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.ajustar(pedido_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/liberar")
+def liberar_contrato(pedido_id: str, quem: str = ""):
+    """Revisão humana. Único caminho até o cliente."""
+    from .agentes import contratos_online
+    return contratos_online.liberar_para_cliente(pedido_id, quem)
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/alteracao")
+def alteracao_contrato(pedido_id: str, body: AlteracaoBody):
+    from .agentes import contratos_online
+    if not (body.texto or "").strip():
+        raise HTTPException(400, "Escreva o que precisa ser alterado.")
+    return contratos_online.pedir_alteracao(pedido_id, body.texto.strip())
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/aprovar")
+def aprovar_contrato(pedido_id: str):
+    """O cliente aprovou o que viu: segue para assinatura."""
+    from .core.db import registrar_evento
+    from datetime import datetime as _dt, timezone as _tz2
+    agora = _dt.now(_tz2.utc).isoformat()
+    get_db().table("pedidos_contrato").update({
+        "aprovado_cliente_em": agora, "fase": "ASSINATURA", "atualizado_em": agora,
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "CONTRATO_APROVADO_CLIENTE", {"pedido": pedido_id})
+    return {"ok": True, "fase": "ASSINATURA"}
+
+
 @app.get("/api/v1/judicial/colunas")
 def judicial_colunas():
     from .agentes.fase_judicial import COLUNAS
