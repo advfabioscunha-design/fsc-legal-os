@@ -25,26 +25,33 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _agendar_radar():
-    """Liga o Radar Jurimétrico semanal (DataJud) dentro do container da API.
-    Desligar com RADAR_AUTO=false. Roda 1x/semana (padrão: segunda 06:00 UTC)."""
+    """Tudo que roda sozinho, no horário de Brasília.
+
+    O fuso está declarado de propósito. Antes o agendador rodava em UTC
+    e cada horário vinha com um comentário do tipo "10:10 UTC ~ 07:10
+    BRT" — conta feita à mão, que erra no horário de verão e que a
+    próxima pessoa teria de refazer. Agora se escreve 18h e é 18h de
+    Brasília. Em Porto Velho, que é UTC-4, isso corresponde às 17h
+    locais; os prazos processuais seguem o horário de Brasília, que é o
+    do PJe, então é ele que manda aqui."""
     s = get_settings()
     if not s.radar_auto:
         return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
-        sched = BackgroundScheduler(timezone="UTC")
+        sched = BackgroundScheduler(timezone="America/Sao_Paulo")
         sched.add_job(
             radar.radar_semanal,
             CronTrigger(day_of_week=s.radar_dia_semana, hour=s.radar_hora, minute=0),
             id="radar_semanal", replace_existing=True, max_instances=1,
         )
-        # Agente de Relacionamento: parabéns de aniversário (diário, 12:00 UTC ~ 09:00 BRT)
+        # Relacionamento: parabéns de aniversário, 9h
         try:
             from .agentes import relacionamento
             sched.add_job(
                 relacionamento.parabenizar_aniversariantes,
-                CronTrigger(hour=12, minute=0),
+                CronTrigger(hour=9, minute=0),
                 id="aniversarios", replace_existing=True, max_instances=1,
             )
         except Exception as e:
@@ -76,23 +83,56 @@ def _agendar_radar():
             from .agentes import pendencias
             sched.add_job(
                 pendencias.rodar,
-                CronTrigger(hour=9, minute=40),   # uma vez por dia, de manhã
+                CronTrigger(hour=9, minute=40),   # uma vez por dia
                 id="regua_cobranca", replace_existing=True, max_instances=1,
             )
         except Exception as e:
             print(f"[régua] job não agendado: {e}")
-        # Controladoria: varre o DJEN pela OAB, recalcula as datas de
-        # trabalho, vira as fases e manda os convites de agenda. Roda de
-        # manhã cedo para que a fila do dia já esteja pronta às 8h BRT.
+        # ── A rotina do escritório ──────────────────────────────
+        # Três relógios, cada um com a sua razão:
+        #
+        #   07:10 todo dia   a controladoria roda antes de a equipe
+        #                    chegar, então às 8h a fila do dia já existe
+        #   18:00 ter/qui    varredura do Diário. Terça e quinta porque
+        #                    é quando o DJEN concentra publicação, e às
+        #                    18h porque o Diário do dia já saiu inteiro
+        #   18:00 sexta      o plano da semana seguinte, com o que
+        #                    chegou até sexta dentro dele — a equipe
+        #                    começa a segunda com a lista pronta
         try:
-            from .agentes import controladoria
-            sched.add_job(
-                controladoria.rodar,
-                CronTrigger(hour=10, minute=10),   # 07:10 BRT
-                id="controladoria", replace_existing=True, max_instances=1,
-            )
+            from .agentes import controladoria, tarefas
+
+            def rotina_diaria():
+                controladoria.rodar()
+                tarefas.plano_do_dia()
+
+            def varredura_do_diario():
+                """Terça e quinta, 18h. Publicação nova muda a semana:
+                um prazo que nasce hoje pode ter de ser trabalhado
+                amanhã, então o plano se reajusta na sequência em vez
+                de esperar a sexta."""
+                r = controladoria.varrer_publicacoes(dias=4)
+                try:
+                    from .agentes import fase_judicial
+                    fase_judicial.recalcular_todos()
+                except Exception as e:
+                    print(f"[diario] colunas não recalculadas: {e}")
+                r["replanejamento"] = tarefas.replanejar_apos_publicacoes()
+                return r
+
+            sched.add_job(rotina_diaria, CronTrigger(hour=7, minute=10),
+                          id="controladoria", replace_existing=True,
+                          max_instances=1)
+            sched.add_job(varredura_do_diario,
+                          CronTrigger(day_of_week="tue,thu", hour=18, minute=0),
+                          id="varredura_diario", replace_existing=True,
+                          max_instances=1)
+            sched.add_job(tarefas.plano_da_semana,
+                          CronTrigger(day_of_week="fri", hour=18, minute=0),
+                          id="plano_semanal", replace_existing=True,
+                          max_instances=1)
         except Exception as e:
-            print(f"[controladoria] job não agendado: {e}")
+            print(f"[rotina] jobs não agendados: {e}")
         sched.start()
         app.state.scheduler = sched
     except Exception as e:  # API sobe mesmo sem o scheduler
@@ -3662,6 +3702,74 @@ def importar_processos(body: ImportarProcessos):
 def controladoria_rodar():
     from .agentes import controladoria
     return controladoria.rodar()
+
+
+# ══ Tarefas — o plano de trabalho ════════════════════════════════
+class TarefaAcao(BaseModel):
+    quem: str = ""
+    nota: str = ""
+    nova_data: str | None = None
+    motivo: str = ""
+    responsavel_id: str | None = None
+
+
+@app.get("/api/v1/tarefas")
+def listar_tarefas(de: str | None = None, ate: str | None = None,
+                   status: str | None = "ABERTA",
+                   responsavel_id: str | None = None):
+    from .agentes import tarefas
+    return tarefas.listar(de, ate, status, responsavel_id)
+
+
+@app.get("/api/v1/tarefas/pendentes")
+def tarefas_pendentes():
+    """O que o agente está vendo agora, antes de virar tarefa — serve
+    para conferir o critério sem esperar a rodada."""
+    from .agentes import tarefas
+    return tarefas.levantar()
+
+
+@app.post("/api/v1/tarefas/plano-do-dia")
+def tarefas_plano_dia():
+    from .agentes import tarefas
+    return tarefas.plano_do_dia()
+
+
+@app.post("/api/v1/tarefas/plano-da-semana")
+def tarefas_plano_semana():
+    from .agentes import tarefas
+    return tarefas.plano_da_semana()
+
+
+@app.post("/api/v1/tarefas/{tarefa_id}/concluir")
+def tarefa_concluir(tarefa_id: str, body: TarefaAcao):
+    from .agentes import tarefas
+    try:
+        return tarefas.concluir(tarefa_id, body.quem, body.nota)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/tarefas/{tarefa_id}/reagendar")
+def tarefa_reagendar(tarefa_id: str, body: TarefaAcao):
+    from .agentes import tarefas
+    if not body.nova_data:
+        raise HTTPException(400, "Informe a nova data.")
+    try:
+        return tarefas.reagendar(tarefa_id, body.nova_data, body.quem, body.motivo)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/tarefas/{tarefa_id}/responsavel")
+def tarefa_responsavel(tarefa_id: str, body: TarefaAcao):
+    from .agentes import tarefas
+    if not body.responsavel_id:
+        raise HTTPException(400, "Informe o responsável.")
+    try:
+        return tarefas.atribuir(tarefa_id, body.responsavel_id, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.get("/api/v1/controladoria/semana")

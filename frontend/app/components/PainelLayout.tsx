@@ -22,6 +22,7 @@ const MENU = [
   { href: "/crm", label: "Triagem", icone: "🗂️" },
   { href: "/judicial", label: "Judicializado", icone: "⚖️" },
   { href: "/recebimento", label: "Execução", icone: "💰" },
+  { href: "/tarefas", label: "Tarefas", icone: "✅" },
   { href: "/intimacoes", label: "Intimações e prazos", icone: "🔔" },
   { href: "/processos", label: "Todos os processos", icone: "📁" },
   { href: "/agenda", label: "Agenda", icone: "📅" },

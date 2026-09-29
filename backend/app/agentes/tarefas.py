@@ -1,0 +1,370 @@
+"""
+O plano de trabalho — o que fazer hoje, e o que vem na semana.
+
+De onde saem as tarefas:
+
+  PRAZOS       cada prazo em aberto vira uma tarefa no dia de trabalho
+               (prazo fatal menos dois dias úteis)
+  PUBLICAÇÕES  intimação que chegou e ninguém resolveu
+  TRIAGEM      caso parado esperando alguém do escritório agir
+  CONTRATOS    pedido do balcão parado numa fase que é do escritório
+
+PRIORIDADE — o que vai para o topo
+----------------------------------
+Não é "o que vence primeiro", só. Um recurso com dez dias pode ser mais
+urgente que um despacho com três: perder o prazo recursal encerra o
+caso, enquanto um despacho comum se resolve depois com uma petição.
+
+A ordem que este agente usa:
+
+  1. Peça que, perdida, encerra o caso — apelação, réplica,
+     contrarrazões, embargos, recurso especial. São as que levam o
+     processo ao julgamento, e é onde o escritório ganha ou perde.
+  2. Prazo fatal chegando, com peso crescente conforme encurta.
+  3. Audiência e perícia marcadas — data que não se remarca sozinha.
+  4. O resto, por data.
+
+Uma tarefa nunca é criada duas vezes para o mesmo prazo: a chave é o
+prazo de origem. Isso importa porque o plano roda toda semana e
+diariamente — sem a chave, a lista dobraria a cada rodada.
+"""
+from __future__ import annotations
+
+import re
+from datetime import date, datetime, timedelta, timezone
+
+from ..core.datas import antecipar_uteis, dias_ate, util
+from ..core.db import get_db, registrar_evento
+
+# Atos cuja perda encerra o caso. O peso alto não é exagero: é o que
+# faz a réplica de sexta aparecer antes do despacho de quarta.
+_RE_DECISIVO = re.compile(
+    r"apela[çc][ãa]o|r[ée]plica|contrarraz[õo]es|contra-?raz[õo]es|"
+    r"embargos\s+(?:de\s+declara[çc][ãa]o|infringentes|[àa]\s+execu[çc][ãa]o)|"
+    r"recurso\s+(?:especial|extraordin[áa]rio|ordin[áa]rio|inominado|"
+    r"de\s+revista|adesivo)|agravo\s+(?:de\s+instrumento|interno|em\s+recurso)|"
+    r"impugna[çc][ãa]o\s+ao\s+cumprimento|contesta[çc][ãa]o", re.I)
+
+_RE_AUDIENCIA_PERICIA = re.compile(r"audi[êe]ncia|per[íi]cia", re.I)
+
+PESO = {"ALTA": 0, "MEDIA": 1, "BAIXA": 2}
+
+
+def _agora() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def classificar(titulo: str, descricao: str | None,
+                dias_restantes: int | None, tipo: str | None = None) -> tuple[str, str]:
+    """(prioridade, motivo)."""
+    alvo = f"{titulo or ''} {tipo or ''} {(descricao or '')[:600]}"
+
+    if _RE_DECISIVO.search(alvo):
+        return "ALTA", "peça que leva o caso a julgamento — perdê-la encerra a discussão"
+    if dias_restantes is not None and dias_restantes <= 2:
+        return "ALTA", ("vence hoje" if dias_restantes == 0
+                        else "vencido" if dias_restantes < 0
+                        else f"vence em {dias_restantes} dia(s)")
+    if _RE_AUDIENCIA_PERICIA.search(alvo):
+        return "ALTA", "data marcada, não se remarca sozinha"
+    if dias_restantes is not None and dias_restantes <= 7:
+        return "MEDIA", f"vence em {dias_restantes} dias"
+    return "BAIXA", "sem urgência imediata"
+
+
+def _segunda_da_semana(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def _proximo_dia_util(d: date) -> date:
+    while not util(d):
+        d += timedelta(days=1)
+    return d
+
+
+# ── Levantamento do que está pendente ───────────────────────────
+def levantar() -> list[dict]:
+    """Tudo que exige ação do escritório, sem duplicar o que já virou
+    tarefa."""
+    db = get_db()
+    hoje = date.today()
+    pendentes: list[dict] = []
+
+    ja_tem = {t.get("prazo_id") for t in
+              db.table("tarefas").select("prazo_id")
+                .in_("status", ["ABERTA", "REAGENDADA"]).limit(2000).execute().data
+              if t.get("prazo_id")}
+
+    # 1) Prazos em aberto
+    prazos = db.table("prazos").select(
+        "id,titulo,descricao,data,prazo_fatal,tipo,caso_id,responsavel_id,"
+        "depende_do_cliente,casos(numero_processo,clientes(nome))"
+    ).eq("status", "ABERTO").order("prazo_fatal").limit(500).execute().data
+    for p in prazos:
+        if p["id"] in ja_tem:
+            continue
+        restantes = dias_ate(p.get("data"))
+        prio, motivo = classificar(p.get("titulo"), p.get("descricao"),
+                                   restantes, p.get("tipo"))
+        caso = p.get("casos") or {}
+        pendentes.append({
+            "origem": "PRAZO", "prazo_id": p["id"], "caso_id": p.get("caso_id"),
+            "titulo": p.get("titulo") or "Prazo",
+            "descricao": (p.get("descricao") or "")[:800],
+            "data": (p.get("data") or hoje.isoformat())[:10],
+            "prazo_fatal": (p.get("prazo_fatal") or "")[:10] or None,
+            "prioridade": prio, "motivo": motivo,
+            "responsavel_id": p.get("responsavel_id"),
+            "cliente": (caso.get("clientes") or {}).get("nome"),
+            "processo": caso.get("numero_processo"),
+        })
+
+    # 2) Publicações que ninguém resolveu
+    intims = db.table("intimacoes").select(
+        "id,caso_id,conteudo,tipo,numero_processo,data_movimento,prazo_em"
+    ).eq("status", "A_RESOLVER").order("data_movimento", desc=True) \
+        .limit(120).execute().data
+    for i in intims:
+        restantes = dias_ate(i.get("prazo_em"))
+        prio, motivo = classificar(i.get("tipo") or "Publicação",
+                                   i.get("conteudo"), restantes, i.get("tipo"))
+        pendentes.append({
+            "origem": "PUBLICACAO", "intimacao_id": i["id"],
+            "caso_id": i.get("caso_id"),
+            "titulo": f"Analisar {i.get('tipo') or 'publicação'} — "
+                      f"{i.get('numero_processo') or ''}".strip(),
+            "descricao": (i.get("conteudo") or "")[:800],
+            "data": (i.get("prazo_em") or hoje.isoformat())[:10],
+            "prazo_fatal": (i.get("prazo_em") or "")[:10] or None,
+            "prioridade": prio, "motivo": motivo,
+            "processo": i.get("numero_processo"),
+        })
+
+    # 3) Casos parados na triagem esperando o escritório
+    parados = db.table("casos").select(
+        "id,estado,titulo,atualizado_em,numero_processo,clientes(nome)"
+    ).eq("situacao", "ATIVO").eq("aguardando_cliente", False).in_(
+        "estado", ["PRONTO_PARA_ANALISE", "ANALISE", "PETICAO", "REVISAO",
+                   "COLETA_PROVAS"]
+    ).limit(200).execute().data
+    for c in parados:
+        parado_desde = (c.get("atualizado_em") or "")[:10]
+        dias_parado = -(dias_ate(parado_desde) or 0)
+        if dias_parado < 3:
+            continue                      # ainda é trabalho em curso
+        pendentes.append({
+            "origem": "TRIAGEM", "caso_id": c["id"],
+            "titulo": f"{c.get('estado')} parado há {dias_parado} dias",
+            "descricao": c.get("titulo") or "",
+            "data": hoje.isoformat(), "prazo_fatal": None,
+            "prioridade": "MEDIA" if dias_parado < 10 else "ALTA",
+            "motivo": f"sem movimento há {dias_parado} dias",
+            "cliente": (c.get("clientes") or {}).get("nome"),
+            "processo": c.get("numero_processo"),
+        })
+
+    # 4) Pedidos de contrato parados numa fase do escritório
+    try:
+        do_escritorio = ["PAGAMENTO", "REDACAO", "REVISAO_IA", "AJUSTE",
+                         "REVISAO_ADV"]
+        pedidos = db.table("pedidos_contrato").select(
+            "id,numero,tipo,fase,atualizado_em,clientes(nome)"
+        ).in_("fase", do_escritorio).limit(100).execute().data
+        for p in pedidos:
+            dias_parado = -(dias_ate((p.get("atualizado_em") or "")[:10]) or 0)
+            pendentes.append({
+                "origem": "CONTRATO", "pedido_id": p["id"],
+                "titulo": f"{p.get('numero')} — {p.get('fase')}",
+                "descricao": p.get("tipo") or "",
+                "data": hoje.isoformat(), "prazo_fatal": None,
+                "prioridade": "ALTA" if dias_parado >= 2 else "MEDIA",
+                "motivo": f"pedido do balcão parado há {dias_parado} dia(s)",
+                "cliente": (p.get("clientes") or {}).get("nome"),
+            })
+    except Exception:
+        pass                              # balcão ainda pode não existir
+
+    pendentes.sort(key=lambda t: (PESO.get(t["prioridade"], 9),
+                                  t.get("prazo_fatal") or "9999",
+                                  t.get("data") or "9999"))
+    return pendentes
+
+
+# ── Montagem do plano ───────────────────────────────────────────
+def planejar(de: date, ate: date, limpar_abertas: bool = False) -> dict:
+    """Cria as tarefas do período. Só cria; nunca apaga o que alguém já
+    marcou como feito."""
+    db = get_db()
+    criadas, fora_do_periodo = 0, 0
+
+    for p in levantar():
+        try:
+            quando = date.fromisoformat(p["data"])
+        except ValueError:
+            quando = de
+        # Tarefa cujo dia já passou vem para o próximo dia útil: lista
+        # com data velha some do calendário e vira dívida invisível.
+        if quando < date.today():
+            quando = _proximo_dia_util(date.today())
+        if not (de <= quando <= ate):
+            fora_do_periodo += 1
+            continue
+
+        db.table("tarefas").insert({
+            "titulo": p["titulo"][:200],
+            "descricao": p.get("descricao"),
+            "origem": p["origem"],
+            "prazo_id": p.get("prazo_id"),
+            "intimacao_id": p.get("intimacao_id"),
+            "caso_id": p.get("caso_id"),
+            "pedido_id": p.get("pedido_id"),
+            "data": quando.isoformat(),
+            "prazo_fatal": p.get("prazo_fatal"),
+            "prioridade": p["prioridade"],
+            "motivo": p.get("motivo"),
+            "responsavel_id": p.get("responsavel_id"),
+            "status": "ABERTA",
+            "criado_por": "AGENTE",
+        }).execute()
+        criadas += 1
+
+    return {"criadas": criadas, "fora_do_periodo": fora_do_periodo,
+            "de": de.isoformat(), "ate": ate.isoformat()}
+
+
+def plano_do_dia(dia: date | None = None) -> dict:
+    """Roda de manhã: garante que o que vence hoje está na lista."""
+    hoje = dia or date.today()
+    r = planejar(hoje, hoje)
+    registrar_evento(None, "PLANO_DIARIO", r)
+    return r
+
+
+def plano_da_semana(semana_de: date | None = None) -> dict:
+    """Roda na sexta às 18h para a semana seguinte.
+
+    Sexta à tarde é o momento certo: o que chegou na semana já está
+    dentro, e a equipe começa a segunda com a lista pronta em vez de
+    gastar a manhã montando-a."""
+    base = semana_de or (date.today() + timedelta(days=3))
+    segunda = _segunda_da_semana(base)
+    sexta = segunda + timedelta(days=4)
+    r = planejar(segunda, sexta)
+    r["semana"] = f"{segunda:%d/%m} a {sexta:%d/%m}"
+    registrar_evento(None, "PLANO_SEMANAL", r)
+    return r
+
+
+def replanejar_apos_publicacoes() -> dict:
+    """Chamado depois de cada varredura do Diário.
+
+    Publicação nova muda a semana: um prazo que nasce na terça pode ter
+    de ser trabalhado na quarta. Em vez de esperar a sexta, o plano se
+    ajusta na hora — é o que evita a lista envelhecer no meio da semana."""
+    hoje = date.today()
+    fim = _segunda_da_semana(hoje) + timedelta(days=11)   # até a próxima sexta
+    r = planejar(hoje, fim)
+    registrar_evento(None, "PLANO_REAJUSTADO", r)
+    return r
+
+
+# ── Consulta e operação ─────────────────────────────────────────
+def listar(de: str | None = None, ate: str | None = None,
+           status: str | None = "ABERTA", responsavel_id: str | None = None) -> list[dict]:
+    q = get_db().table("tarefas").select(
+        "*, casos(numero_processo,clientes(nome)), membros_equipe(nome)")
+    if status and status != "TODAS":
+        q = q.eq("status", status)
+    if de:
+        q = q.gte("data", de)
+    if ate:
+        q = q.lte("data", ate)
+    if responsavel_id:
+        q = q.eq("responsavel_id", responsavel_id)
+    linhas = q.order("data").limit(500).execute().data
+    linhas.sort(key=lambda t: (t.get("data") or "9999",
+                               PESO.get(t.get("prioridade"), 9)))
+    return linhas
+
+
+def concluir(tarefa_id: str, quem: str = "", nota: str = "") -> dict:
+    db = get_db()
+    achado = db.table("tarefas").select("historico,caso_id,prazo_id") \
+        .eq("id", tarefa_id).limit(1).execute().data
+    if not achado:
+        raise ValueError("Tarefa não encontrada.")
+    hist = (achado[0].get("historico") or [])
+    hist.append({"em": _agora(), "quem": quem, "acao": "CONCLUIDA", "nota": nota})
+    db.table("tarefas").update({
+        "status": "FEITA", "concluida_em": _agora(), "historico": hist,
+    }).eq("id", tarefa_id).execute()
+    # Prazo cumprido sai da fila e o caso volta à coluna de origem.
+    if achado[0].get("prazo_id"):
+        db.table("prazos").update({"status": "CONCLUIDO"}) \
+            .eq("id", achado[0]["prazo_id"]).execute()
+        if achado[0].get("caso_id"):
+            try:
+                from . import fase_judicial
+                fase_judicial.recalcular(achado[0]["caso_id"])
+            except Exception:
+                pass
+    registrar_evento(achado[0].get("caso_id"), "TAREFA_CONCLUIDA",
+                     {"tarefa": tarefa_id, "quem": quem, "nota": nota})
+    return {"ok": True}
+
+
+def reagendar(tarefa_id: str, nova_data: str, quem: str = "",
+              motivo: str = "") -> dict:
+    """Mudar o dia é normal; sumir com a tarefa não é. O histórico
+    guarda quantas vezes ela foi empurrada — três adiamentos dizem algo
+    que o card sozinho não diz."""
+    db = get_db()
+    achado = db.table("tarefas").select("data,historico,caso_id") \
+        .eq("id", tarefa_id).limit(1).execute().data
+    if not achado:
+        raise ValueError("Tarefa não encontrada.")
+    hist = (achado[0].get("historico") or [])
+    hist.append({"em": _agora(), "quem": quem, "acao": "REAGENDADA",
+                 "de": achado[0].get("data"), "para": nova_data, "motivo": motivo})
+    db.table("tarefas").update({
+        "data": nova_data, "status": "REAGENDADA", "historico": hist,
+        "adiamentos": len([h for h in hist if h.get("acao") == "REAGENDADA"]),
+    }).eq("id", tarefa_id).execute()
+    registrar_evento(achado[0].get("caso_id"), "TAREFA_REAGENDADA",
+                     {"tarefa": tarefa_id, "para": nova_data, "motivo": motivo})
+    return {"ok": True, "data": nova_data}
+
+
+def atribuir(tarefa_id: str, responsavel_id: str, quem: str = "") -> dict:
+    """Responsável definido é responsável avisado — o e-mail sai aqui."""
+    db = get_db()
+    achado = db.table("tarefas").select("titulo,data,historico,caso_id") \
+        .eq("id", tarefa_id).limit(1).execute().data
+    if not achado:
+        raise ValueError("Tarefa não encontrada.")
+    t = achado[0]
+    hist = (t.get("historico") or [])
+    hist.append({"em": _agora(), "quem": quem, "acao": "ATRIBUIDA",
+                 "para": responsavel_id})
+    db.table("tarefas").update({
+        "responsavel_id": responsavel_id, "historico": hist,
+    }).eq("id", tarefa_id).execute()
+
+    try:
+        m = db.table("membros_equipe").select("nome,email") \
+            .eq("id", responsavel_id).limit(1).execute().data
+        if m and m[0].get("email"):
+            from ..integracoes import avisos
+            quando = (t.get("data") or "")[:10]
+            avisos.enviar_email(
+                m[0]["email"], f"Tarefa para você — {t.get('titulo')}",
+                f"{t.get('titulo')}\n\nData: {quando}\n\n"
+                f"Abra a plataforma para ver os detalhes.",
+                f"<p style='font-family:Arial;font-size:14px'><b>{t.get('titulo')}</b>"
+                f"<br>Data: {quando}</p>")
+    except Exception as e:
+        print(f"[tarefas] responsável não avisado: {e}")
+
+    registrar_evento(t.get("caso_id"), "TAREFA_ATRIBUIDA",
+                     {"tarefa": tarefa_id, "responsavel": responsavel_id})
+    return {"ok": True}

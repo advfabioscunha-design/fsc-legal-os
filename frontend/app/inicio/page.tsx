@@ -24,6 +24,8 @@ const ATALHOS = [
     texto: "Protocolado e em tramitação, até o trânsito em julgado." },
   { href: "/recebimento", icone: "💰", titulo: "4 · Execução", chave: "recebimento",
     texto: "Cumprimento, alvará, RPV e prestação de contas." },
+  { href: "/tarefas", icone: "✅", titulo: "Tarefas", chave: null,
+    texto: "O que fazer hoje e o plano da semana, por prioridade." },
   { href: "/intimacoes", icone: "🔔", titulo: "Intimações e prazos", chave: "prazos_7_dias",
     texto: "O que o juízo mandou e o que vence primeiro." },
   { href: "/agenda", icone: "📅", titulo: "Agenda", chave: null,
