@@ -46,6 +46,83 @@ from ..core.db import get_db, registrar_evento
 from . import catalogo_contratos as catalogo
 
 VERSAO_TERMO = "2026-09-v1"
+VERSAO_CONTRATACAO = "2026-09-v1"
+
+
+def termo_de_contratacao(tipo: str, com_orientacao: bool = False) -> dict:
+    """As regras da contratação, em texto curto, antes de começar.
+
+    Curto de propósito: termo que ninguém lê não informa ninguém, e o
+    que interessa aqui cabe em uma tela — o que o escritório faz, por
+    quanto, em quanto tempo, e o que acontece se o cliente desistir."""
+    t = catalogo.detalhe(tipo) or {}
+    valor = catalogo.preco(tipo, com_orientacao)
+    linhas = [
+        f"CONTRATAÇÃO DE SERVIÇO — {t.get('nome', tipo)}",
+        "",
+        "O QUE O ESCRITÓRIO FAZ",
+        f"Elabora o documento conforme a legislação aplicável "
+        f"({t.get('base_legal', '—')}), com revisão por advogado antes de "
+        f"ser enviado a você, e disponibiliza assinatura eletrônica com "
+        f"validade jurídica (Lei 14.063/2020 e MP 2.200-2/2001).",
+        "",
+        "VALOR E PAGAMENTO",
+        f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        + ", por PIX, à vista. O trabalho começa depois do pagamento confirmado.",
+    ]
+    if com_orientacao:
+        linhas += ["Inclui atendimento jurídico prévio, por vídeo, com gravação "
+                   "de áudio e transcrição, mediante seu consentimento na sala."]
+    linhas += [
+        "",
+        "PRAZO",
+        "A primeira versão fica pronta em até 3 dias úteis contados do "
+        "pagamento e do recebimento de todos os dados e documentos. Cada "
+        "pedido de alteração seu reinicia a contagem de 1 dia útil.",
+        "",
+        "REVISÕES",
+        "Você recebe o documento para conferência e pode pedir alterações "
+        "quantas vezes precisar, desde que dentro do que foi contratado. "
+        "Mudar o tipo de contrato ou incluir objeto novo é outro serviço.",
+        "",
+        "O QUE NÃO ESTÁ INCLUÍDO",
+        "Custas de cartório, registro, reconhecimento de firma, taxas e "
+        "tributos da sua negociação. Representação em processo judicial "
+        "também é contratação separada.",
+        "",
+        "DESISTÊNCIA",
+        "Antes de o documento ser redigido, a devolução é integral. Depois "
+        "de redigido, o valor não é devolvido, porque o serviço foi "
+        "prestado — o documento é seu e fica disponível.",
+        "",
+        "SEUS DADOS",
+        "Seus dados e documentos são usados apenas para elaborar o que você "
+        "pediu, conforme a Política de Privacidade do escritório.",
+        "",
+        f"Versão: {VERSAO_CONTRATACAO}",
+    ]
+    return {"versao": VERSAO_CONTRATACAO, "tipo": tipo, "valor": valor,
+            "texto": "\n".join(linhas)}
+
+
+def aceitar_contratacao(pedido_id: str, termo: dict, ip: str | None = None) -> dict:
+    """Registra o aceite na mesma trilha das demais ciências: o texto
+    inteiro, a versão, a data e o IP."""
+    db = get_db()
+    row = db.table("pedidos_ciencias").insert({
+        "pedido_id": pedido_id,
+        "versao": f"CONTRATACAO-{termo.get('versao')}",
+        "texto": termo.get("texto"),
+        "pontos": None,
+        "escolha": "ACEITO",
+        "ip": ip,
+    }).execute().data[0]
+    db.table("pedidos_contrato").update({
+        "fase": "PAGAMENTO", "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "CONTRATACAO_ACEITA",
+                     {"pedido": pedido_id, "versao": termo.get("versao")})
+    return row
 
 FASES = [
     "COLETA", "CIENCIA", "PAGAMENTO", "REDACAO", "REVISAO_IA", "AJUSTE",

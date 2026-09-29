@@ -3242,6 +3242,75 @@ class AlteracaoBody(BaseModel):
     texto: str
 
 
+class TermoContratacaoBody(BaseModel):
+    aceito: bool = False
+
+
+class RecuperarPorCpf(BaseModel):
+    cpf: str
+    novo_email: str
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/termo-contratacao")
+def ver_termo_contratacao(pedido_id: str):
+    from .agentes import contratos_online
+    p = ver_pedido(pedido_id)
+    return contratos_online.termo_de_contratacao(p["tipo"], p.get("com_orientacao"))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/termo-contratacao")
+def aceitar_termo_contratacao(pedido_id: str, body: TermoContratacaoBody,
+                              request: Request):
+    """'Li e aceito' — guarda o texto inteiro, a versão, a data e o IP."""
+    from .agentes import contratos_online
+    if not body.aceito:
+        raise HTTPException(400, "É preciso aceitar para prosseguir.")
+    p = ver_pedido(pedido_id)
+    termo = contratos_online.termo_de_contratacao(p["tipo"], p.get("com_orientacao"))
+    ip = request.client.host if request.client else None
+    r = contratos_online.aceitar_contratacao(pedido_id, termo, ip)
+    return {"ok": True, "aceite": r["id"], "fase": "PAGAMENTO",
+            "valor": termo["valor"]}
+
+
+@app.post("/api/v1/contratos/recuperar-por-cpf")
+def recuperar_por_cpf(body: RecuperarPorCpf):
+    """Cliente que não lembra o e-mail cadastrado.
+
+    ATENÇÃO — trocar o e-mail de acesso só com o CPF seria abrir a
+    porta: CPF circula em cadastro de loja, boleto e vazamento, e quem
+    tivesse o número entraria na conta e leria os documentos de outra
+    pessoa. Então este endpoint NÃO troca o e-mail: ele registra um
+    PEDIDO de troca, que aparece para o escritório conferir com o
+    cliente por telefone ou WhatsApp antes de liberar.
+
+    A resposta é sempre a mesma, exista ou não o CPF — dizer 'esse CPF
+    não está cadastrado' já entrega informação a quem está tentando
+    adivinhar."""
+    from .core.cpf import cpf_valido
+    from .core.db import registrar_evento
+    import re as _re
+    cpf = _re.sub(r"\D", "", body.cpf or "")
+    email = (body.novo_email or "").strip().lower()
+    if not cpf_valido(cpf):
+        raise HTTPException(400, "CPF inválido — confira os números.")
+    if "@" not in email:
+        raise HTTPException(400, "Informe um e-mail válido.")
+
+    db = get_db()
+    achado = db.table("clientes").select("id,nome").eq("cpf_cnpj", cpf) \
+        .limit(1).execute().data
+    if achado:
+        registrar_evento(None, "PEDIDO_TROCA_EMAIL", {
+            "cliente_id": achado[0]["id"], "nome": achado[0].get("nome"),
+            "novo_email": email, "cpf_final": cpf[-4:],
+        })
+    return {"ok": True, "mensagem":
+            "Recebemos o pedido. Por segurança, o escritório vai confirmar "
+            "sua identidade por telefone ou WhatsApp antes de liberar o "
+            "novo e-mail. Isso costuma levar algumas horas em dia útil."}
+
+
 @app.get("/api/v1/contratos/tipos")
 def contratos_tipos():
     """O catálogo que o cliente vê ao escolher o serviço."""
@@ -3291,6 +3360,25 @@ def ver_pedido(pedido_id: str):
     if not r:
         raise HTTPException(404, "Pedido não encontrado.")
     return r[0]
+
+
+class DadosPedido(BaseModel):
+    dados: dict = {}
+    observacoes: str | None = None
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/dados")
+def salvar_dados_pedido(pedido_id: str, body: DadosPedido):
+    """A coleta é salva a cada passo: o cliente pode parar e voltar
+    depois sem perder o que já respondeu."""
+    from datetime import datetime as _dt, timezone as _tz2
+    r = get_db().table("pedidos_contrato").update({
+        "dados": body.dados, "observacoes": body.observacoes,
+        "atualizado_em": _dt.now(_tz2.utc).isoformat(),
+    }).eq("id", pedido_id).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    return {"ok": True}
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/termo")
