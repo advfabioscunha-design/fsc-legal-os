@@ -43,6 +43,14 @@ PRAZO_PADRAO: dict[str, int] = {
     "citacao": 15,
 }
 
+# Prazo vencido há mais de uma semana, vindo de publicação antiga, não
+# é trabalho: é história. Importar cinco anos de acervo criava um prazo
+# "em aberto" para cada despacho de 2022, e o efeito na tela era que
+# TODOS os processos apareciam na coluna de prazo — a leitura de fase
+# ficava invisível. O registro continua guardado, só não entra na fila.
+DIAS_DE_TOLERANCIA_DO_PRAZO = 7
+
+
 # Atos que não abrem prazo para a parte — não viram prazo na agenda.
 SEM_PRAZO = ("pauta de julgamento", "certidão", "certidao", "ato ordinatório",
              "ato ordinatorio", "publicação de acórdão", "edital")
@@ -380,19 +388,21 @@ def _gravar_intimacao(caso_id: str, com: dict) -> dict | None:
         "conteudo": (com.get("texto") or "")[:20000],
         "tipo": com.get("tipo_documento") or com.get("tipo"),
         "link": com.get("link"), "origem": "COMUNICA_CNJ",
-        "status": "A_RESOLVER", "data_movimento": com.get("data"),
+        # Mesma régua dos prazos: publicação cujo prazo venceu há mais
+        # de uma semana entrou como história, não como pendência. Sem
+        # isso a auditoria acusava cinco anos de acervo como "intimação
+        # não resolvida" e o alarme virava ruído — que é o mesmo que
+        # não ter alarme.
+        "status": ("HISTORICO"
+                   if (prazo_fatal
+                       and (date.today() - date.fromisoformat(prazo_fatal)).days
+                       > DIAS_DE_TOLERANCIA_DO_PRAZO)
+                   else "A_RESOLVER"),
+        "data_movimento": com.get("data"),
         "prazo_em": prazo_fatal, "prazo_dias": dias,
         "prazo_estimado": bool(dias),
         "payload": {k: v for k, v in com.items() if k != "texto"},
     }).execute().data[0]
-
-
-# Prazo vencido há mais de uma semana, vindo de publicação antiga, não
-# é trabalho: é história. Importar cinco anos de acervo criava um prazo
-# "em aberto" para cada despacho de 2022, e o efeito na tela era que
-# TODOS os processos apareciam na coluna de prazo — a leitura de fase
-# ficava invisível. O registro continua guardado, só não entra na fila.
-DIAS_DE_TOLERANCIA_DO_PRAZO = 7
 
 
 def _gravar_prazo(caso_id: str, intimacao: dict, titulo: str) -> None:
