@@ -90,10 +90,21 @@ def levantar() -> list[dict]:
     hoje = date.today()
     pendentes: list[dict] = []
 
-    ja_tem = {t.get("prazo_id") for t in
-              db.table("tarefas").select("prazo_id")
-                .in_("status", ["ABERTA", "REAGENDADA"]).limit(2000).execute().data
-              if t.get("prazo_id")}
+    # O que já virou tarefa viva. Sem isto, o plano diário recria todo dia
+    # a mesma tarefa para a mesma publicação, o mesmo caso parado e a
+    # mesma anotação — e a lista de segunda-feira tem cinco cópias de
+    # tudo. Guardamos uma chave por origem, não só o prazo.
+    vivas = db.table("tarefas").select(
+        "prazo_id,intimacao_id,anotacao_id,pedido_id,caso_id,origem"
+    ).in_("status", ["ABERTA", "REAGENDADA"]).limit(3000).execute().data
+
+    ja_tem      = {t["prazo_id"] for t in vivas if t.get("prazo_id")}
+    ja_intim    = {t["intimacao_id"] for t in vivas if t.get("intimacao_id")}
+    ja_anotacao = {t["anotacao_id"] for t in vivas if t.get("anotacao_id")}
+    ja_pedido   = {t["pedido_id"] for t in vivas if t.get("pedido_id")}
+    # Triagem não tem id próprio: a chave é o caso nessa origem.
+    ja_triagem  = {t["caso_id"] for t in vivas
+                   if t.get("origem") == "TRIAGEM" and t.get("caso_id")}
 
     # 1) Prazos em aberto
     prazos = db.table("prazos").select(
@@ -125,6 +136,8 @@ def levantar() -> list[dict]:
     ).eq("status", "A_RESOLVER").order("data_movimento", desc=True) \
         .limit(120).execute().data
     for i in intims:
+        if i["id"] in ja_intim:
+            continue
         restantes = dias_ate(i.get("prazo_em"))
         prio, motivo = classificar(i.get("tipo") or "Publicação",
                                    i.get("conteudo"), restantes, i.get("tipo"))
@@ -148,6 +161,8 @@ def levantar() -> list[dict]:
                    "COLETA_PROVAS"]
     ).limit(200).execute().data
     for c in parados:
+        if c["id"] in ja_triagem:
+            continue
         parado_desde = (c.get("atualizado_em") or "")[:10]
         dias_parado = -(dias_ate(parado_desde) or 0)
         if dias_parado < 3:
@@ -166,7 +181,8 @@ def levantar() -> list[dict]:
     # 4) Pendências anotadas à mão, com data marcada
     try:
         from . import anotacoes
-        pendentes.extend(anotacoes.para_o_plano())
+        pendentes.extend(a for a in anotacoes.para_o_plano()
+                         if a.get("anotacao_id") not in ja_anotacao)
     except Exception as e:
         print(f"[tarefas] anotações não levantadas: {e}")
 
@@ -178,6 +194,8 @@ def levantar() -> list[dict]:
             "id,numero,tipo,fase,atualizado_em,clientes(nome)"
         ).in_("fase", do_escritorio).limit(100).execute().data
         for p in pedidos:
+            if p["id"] in ja_pedido:
+                continue
             dias_parado = -(dias_ate((p.get("atualizado_em") or "")[:10]) or 0)
             pendentes.append({
                 "origem": "CONTRATO", "pedido_id": p["id"],
@@ -203,6 +221,7 @@ def planejar(de: date, ate: date, limpar_abertas: bool = False) -> dict:
     marcou como feito."""
     db = get_db()
     criadas, fora_do_periodo = 0, 0
+    recusadas: list[str] = []
 
     for p in levantar():
         try:
@@ -217,26 +236,34 @@ def planejar(de: date, ate: date, limpar_abertas: bool = False) -> dict:
             fora_do_periodo += 1
             continue
 
-        db.table("tarefas").insert({
-            "titulo": p["titulo"][:200],
-            "descricao": p.get("descricao"),
-            "origem": p["origem"],
-            "prazo_id": p.get("prazo_id"),
-            "intimacao_id": p.get("intimacao_id"),
-            "anotacao_id": p.get("anotacao_id"),
-            "caso_id": p.get("caso_id"),
-            "pedido_id": p.get("pedido_id"),
-            "data": quando.isoformat(),
-            "prazo_fatal": p.get("prazo_fatal"),
-            "prioridade": p["prioridade"],
-            "motivo": p.get("motivo"),
-            "responsavel_id": p.get("responsavel_id"),
-            "status": "ABERTA",
-            "criado_por": "AGENTE",
-        }).execute()
-        criadas += 1
+        # Uma tarefa que o banco recusa (índice único, caso apagado) não
+        # pode derrubar o plano inteiro: o resto do dia continua valendo.
+        try:
+            db.table("tarefas").insert({
+                "titulo": p["titulo"][:200],
+                "descricao": p.get("descricao"),
+                "origem": p["origem"],
+                "prazo_id": p.get("prazo_id"),
+                "intimacao_id": p.get("intimacao_id"),
+                "anotacao_id": p.get("anotacao_id"),
+                "caso_id": p.get("caso_id"),
+                "pedido_id": p.get("pedido_id"),
+                "data": quando.isoformat(),
+                "prazo_fatal": p.get("prazo_fatal"),
+                "prioridade": p["prioridade"],
+                "motivo": p.get("motivo"),
+                "responsavel_id": p.get("responsavel_id"),
+                "status": "ABERTA",
+                "criado_por": "AGENTE",
+            }).execute()
+            criadas += 1
+        except Exception as e:
+            recusadas.append(f"{p.get('titulo', '')[:60]}: {e}")
 
+    if recusadas:
+        print(f"[tarefas] {len(recusadas)} recusadas: {recusadas[:5]}")
     return {"criadas": criadas, "fora_do_periodo": fora_do_periodo,
+            "recusadas": len(recusadas),
             "de": de.isoformat(), "ate": ate.isoformat()}
 
 
