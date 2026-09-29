@@ -34,6 +34,7 @@ export default function Balcao() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [cpf, setCpf] = useState("");
+  const [nascimento, setNascimento] = useState("");
   const [aviso, setAviso] = useState("");
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -79,6 +80,20 @@ export default function Balcao() {
 
   async function recuperarSenha() {
     setOcupado(true); setErro(""); setAviso("");
+    /* O limite fica no servidor: sem ele, o 'esqueci a senha' vira
+       máquina de encher a caixa de entrada de outra pessoa. */
+    try {
+      const lim = await fetch(`${API}/api/v1/acesso/limite`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (lim.status === 429) {
+        const d = await lim.json().catch(() => ({} as any));
+        setErro(d.detail || "Muitas tentativas. Aguarde uma hora.");
+        setOcupado(false); return;
+      }
+    } catch { /* contador fora do ar não pode travar quem precisa */ }
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/balcao`,
     });
@@ -94,9 +109,9 @@ export default function Balcao() {
   async function recuperarSemEmail() {
     setOcupado(true); setErro(""); setAviso("");
     try {
-      const r = await fetch(`${API}/api/v1/contratos/recuperar-por-cpf`, {
+      const r = await fetch(`${API}/api/v1/acesso/trocar-email`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cpf, novo_email: email }),
+        body: JSON.stringify({ cpf, nascimento, novo_email: email }),
       });
       const d = await r.json().catch(() => ({} as any));
       if (!r.ok) setErro(d.detail || "Não foi possível registrar o pedido.");
@@ -191,9 +206,22 @@ export default function Balcao() {
                   className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
               )}
               {modo === "semEmail" && (
-                <input value={cpf} onChange={(e) => setCpf(e.target.value)}
-                  placeholder="Seu CPF"
-                  className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
+                <>
+                  <p className="rounded-lg border border-[#E5A44C]/40 bg-[#E5A44C]/10 px-3 py-2 text-[11px] leading-relaxed text-white/75">
+                    Como o e-mail cadastrado é o único canal já confirmado, a troca
+                    não é automática: vamos ligar no telefone que você cadastrou
+                    para confirmar que é você. É o mesmo cuidado que o banco toma.
+                  </p>
+                  <input value={cpf} onChange={(e) => setCpf(e.target.value)}
+                    placeholder="Seu CPF"
+                    className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
+                  <label className="text-xs text-white/50">
+                    Data de nascimento
+                    <input value={nascimento} onChange={(e) => setNascimento(e.target.value)}
+                      type="date"
+                      className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm text-white outline-none focus:border-[#C9A84C]" />
+                  </label>
+                </>
               )}
               <input value={email} onChange={(e) => setEmail(e.target.value)}
                 type="email"

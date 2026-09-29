@@ -3273,42 +3273,76 @@ def aceitar_termo_contratacao(pedido_id: str, body: TermoContratacaoBody,
             "valor": termo["valor"]}
 
 
-@app.post("/api/v1/contratos/recuperar-por-cpf")
-def recuperar_por_cpf(body: RecuperarPorCpf):
-    """Cliente que não lembra o e-mail cadastrado.
+class RecuperarAcesso(BaseModel):
+    cpf: str
+    nascimento: str | None = None
+    novo_email: str
 
-    ATENÇÃO — trocar o e-mail de acesso só com o CPF seria abrir a
-    porta: CPF circula em cadastro de loja, boleto e vazamento, e quem
-    tivesse o número entraria na conta e leria os documentos de outra
-    pessoa. Então este endpoint NÃO troca o e-mail: ele registra um
-    PEDIDO de troca, que aparece para o escritório conferir com o
-    cliente por telefone ou WhatsApp antes de liberar.
 
-    A resposta é sempre a mesma, exista ou não o CPF — dizer 'esse CPF
-    não está cadastrado' já entrega informação a quem está tentando
-    adivinhar."""
-    from .core.cpf import cpf_valido
-    from .core.db import registrar_evento
-    import re as _re
-    cpf = _re.sub(r"\D", "", body.cpf or "")
-    email = (body.novo_email or "").strip().lower()
-    if not cpf_valido(cpf):
-        raise HTTPException(400, "CPF inválido — confira os números.")
-    if "@" not in email:
-        raise HTTPException(400, "Informe um e-mail válido.")
+class DecidirAcesso(BaseModel):
+    aprovar: bool
+    quem: str = ""
+    observacao: str = ""
 
-    db = get_db()
-    achado = db.table("clientes").select("id,nome").eq("cpf_cnpj", cpf) \
-        .limit(1).execute().data
-    if achado:
-        registrar_evento(None, "PEDIDO_TROCA_EMAIL", {
-            "cliente_id": achado[0]["id"], "nome": achado[0].get("nome"),
-            "novo_email": email, "cpf_final": cpf[-4:],
-        })
-    return {"ok": True, "mensagem":
-            "Recebemos o pedido. Por segurança, o escritório vai confirmar "
-            "sua identidade por telefone ou WhatsApp antes de liberar o "
-            "novo e-mail. Isso costuma levar algumas horas em dia útil."}
+
+class SenhaAlterada(BaseModel):
+    email: str
+    nome: str | None = None
+
+
+@app.post("/api/v1/acesso/limite")
+def acesso_limite(body: SenhaAlterada, request: Request):
+    """A tela pergunta antes de disparar o e-mail de recuperação.
+
+    Serve para não transformar o 'esqueci a senha' em máquina de enviar
+    e-mail para a caixa de outra pessoa: cinco por endereço e quinze por
+    IP na hora. A resposta não diz se a conta existe."""
+    from .integracoes import acesso
+    ip = request.client.host if request.client else None
+    email = (body.email or "").strip().lower()
+    if not acesso.dentro_do_limite(email, ip):
+        raise HTTPException(429, "Muitas tentativas. Aguarde uma hora e "
+                                 "tente de novo, ou fale com o escritório.")
+    acesso.registrar_tentativa(email, ip)
+    return {"ok": True}
+
+
+@app.post("/api/v1/acesso/senha-alterada")
+def acesso_senha_alterada(body: SenhaAlterada):
+    """Avisa o dono da conta que a senha mudou. É o que transforma um
+    acesso indevido em algo descoberto no mesmo dia."""
+    from .integracoes import acesso
+    enviado = acesso.avisar_senha_alterada((body.email or "").strip().lower(),
+                                           body.nome)
+    return {"ok": True, "avisado": enviado}
+
+
+@app.post("/api/v1/acesso/trocar-email")
+def acesso_trocar_email(body: RecuperarAcesso, request: Request):
+    """Cliente que perdeu o acesso ao e-mail. Não troca nada aqui:
+    entra na fila para o escritório confirmar por telefone."""
+    from .integracoes import acesso
+    ip = request.client.host if request.client else None
+    try:
+        return acesso.pedir_troca_de_email(body.cpf, body.nascimento,
+                                           body.novo_email, ip)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/acesso/pedidos")
+def acesso_pedidos(status: str = "PENDENTE"):
+    from .integracoes import acesso
+    return acesso.listar_pedidos(status.upper())
+
+
+@app.post("/api/v1/acesso/pedidos/{pedido_id}")
+def acesso_decidir(pedido_id: str, body: DecidirAcesso):
+    from .integracoes import acesso
+    try:
+        return acesso.decidir(pedido_id, body.aprovar, body.quem, body.observacao)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/v1/contratos/tipos")
