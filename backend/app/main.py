@@ -3867,6 +3867,16 @@ def tarefas_plano_dia():
     return tarefas.plano_do_dia()
 
 
+@app.post("/api/v1/tarefas/puxar-atrasadas")
+def tarefas_puxar_atrasadas():
+    """Traz para hoje as tarefas abertas que ficaram no passado.
+
+    O plano do dia já faz isso na abertura; este botão serve para quando
+    o escritório quer ver o atraso agora, sem esperar as 07h10."""
+    from .agentes import tarefas
+    return tarefas.puxar_atrasadas()
+
+
 @app.post("/api/v1/tarefas/plano-da-semana")
 def tarefas_plano_semana():
     from .agentes import tarefas

@@ -267,10 +267,57 @@ def planejar(de: date, ate: date, limpar_abertas: bool = False) -> dict:
             "de": de.isoformat(), "ate": ate.isoformat()}
 
 
+def puxar_atrasadas(para: date | None = None) -> dict:
+    """Traz para hoje as tarefas abertas que ficaram no passado.
+
+    Aqui estava a dívida invisível de verdade.
+
+    `planejar` só cria tarefas NOVAS — nunca toca nas que já existem. Uma
+    tarefa criada na sexta para um prazo de quinta fica marcada na sexta
+    para sempre. Quando alguém abre a lista de hoje, ela não está lá: o
+    que ficou para trás não aparece em dia nenhum, e o prazo vencido
+    some da tela justamente quando mais precisava ser visto.
+
+    Puxar para hoje é o comportamento certo. O que está atrasado é para
+    agora, não para o próximo dia útil: empurrar para amanhã seria
+    repetir o erro que criou o atraso.
+
+    Cada puxada fica no histórico da tarefa — três puxadas seguidas
+    dizem algo que a lista sozinha não diz.
+    """
+    db = get_db()
+    hoje = para or date.today()
+    atrasadas = db.table("tarefas").select("id,data,titulo,historico,prazo_fatal") \
+        .in_("status", ["ABERTA", "REAGENDADA"]) \
+        .lt("data", hoje.isoformat()).limit(1000).execute().data or []
+
+    movidas, falhas = 0, 0
+    for t in atrasadas:
+        h = list(t.get("historico") or [])
+        h.append({"em": datetime.utcnow().isoformat(), "o_que": "PUXADA_PARA_HOJE",
+                  "quem": "agente", "de": t.get("data"), "para": hoje.isoformat()})
+        try:
+            db.table("tarefas").update({
+                "data": hoje.isoformat(), "historico": h[-60:],
+            }).eq("id", t["id"]).execute()
+            movidas += 1
+        except Exception as e:
+            falhas += 1
+            print(f"[tarefas] não puxou {t.get('titulo', '')[:40]}: {e}")
+
+    return {"puxadas": movidas, "falhas": falhas, "para": hoje.isoformat()}
+
+
 def plano_do_dia(dia: date | None = None) -> dict:
-    """Roda de manhã: garante que o que vence hoje está na lista."""
+    """Roda de manhã: garante que o que vence hoje está na lista.
+
+    Puxa o atrasado ANTES de criar o novo. Na outra ordem, a tarefa
+    recém-criada para um prazo vencido entraria hoje e a antiga
+    continuaria escondida no passado — duas linhas para a mesma coisa."""
     hoje = dia or date.today()
+    atrasadas = puxar_atrasadas(hoje)
     r = planejar(hoje, hoje)
+    r["atrasadas_puxadas"] = atrasadas["puxadas"]
     registrar_evento(None, "PLANO_DIARIO", r)
     return r
 
