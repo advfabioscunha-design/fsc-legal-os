@@ -368,6 +368,74 @@ def detalhe(tipo: str) -> dict | None:
     return {"id": tipo, **v}
 
 
+# ── O que muda o preço depois da tabela ─────────────────────────
+#
+# Três coisas, e cada uma tem um motivo que dá para explicar ao cliente
+# sem constrangimento:
+#
+#   urgência          entregar em 4 a 6 horas exige tirar alguém do que
+#                     está fazendo. O acréscimo paga esse remanejo.
+#   sem assinatura    a assinatura eletrônica tem custo por documento.
+#                     Quem dispensa não paga por ela.
+#   desconto          margem de negociação, com teto. O teto existe para
+#                     o agente não descer indefinidamente conversando.
+ADICIONAL_URGENCIA = 30.00
+DESCONTO_SEM_ASSINATURA = 10.00
+HORAS_PADRAO = 24
+HORAS_URGENTE = 6
+DESCONTO_RESISTENCIA = 10     # %
+DESCONTO_SAIDA = 20           # %, a última proposta
+
+
 def preco(tipo: str, com_orientacao: bool = False) -> float:
     base = (CATALOGO.get(tipo) or {}).get("preco", PRECO_PADRAO)
     return round(base + (PRECO_ORIENTACAO if com_orientacao else 0), 2)
+
+
+def precificar(tipo: str, com_orientacao: bool = False,
+               desconto_pct: float = 0, urgente: bool = False,
+               assinatura_digital: bool = True) -> dict:
+    """A conta aberta, item a item.
+
+    Devolve as parcelas separadas, e não só o total, porque o cliente
+    tem direito de ver de onde veio o número — e porque, meses depois,
+    alguém vai precisar saber se aqueles R$ 200 foram desconto, urgência
+    ou engano de digitação.
+
+    O desconto incide só sobre o serviço. Não incide sobre a urgência
+    (que é custo de remanejar alguém) nem sobre o abatimento da
+    assinatura (descontar duas vezes a mesma coisa)."""
+    base = (CATALOGO.get(tipo) or {}).get("preco", PRECO_PADRAO)
+    orientacao = PRECO_ORIENTACAO if com_orientacao else 0.0
+    servico = base + orientacao
+
+    pct = max(0.0, min(float(desconto_pct or 0), float(DESCONTO_SAIDA)))
+    desconto = round(servico * pct / 100, 2)
+    urgencia = ADICIONAL_URGENCIA if urgente else 0.0
+    sem_assinatura = DESCONTO_SEM_ASSINATURA if not assinatura_digital else 0.0
+
+    total = round(servico - desconto + urgencia - sem_assinatura, 2)
+    # Piso de segurança: nenhuma combinação pode zerar ou inverter o
+    # preço. Com os números de hoje isso não acontece, mas a conta não
+    # deve depender de os números de hoje continuarem sendo estes.
+    total = max(total, 49.90)
+
+    itens = [{"rotulo": (CATALOGO.get(tipo) or {}).get("nome", "Contrato"),
+              "valor": base}]
+    if orientacao:
+        itens.append({"rotulo": "Atendimento jurídico prévio", "valor": orientacao})
+    if desconto:
+        itens.append({"rotulo": f"Desconto de {pct:.0f}%", "valor": -desconto})
+    if urgencia:
+        itens.append({"rotulo": f"Entrega em até {HORAS_URGENTE}h", "valor": urgencia})
+    if sem_assinatura:
+        itens.append({"rotulo": "Sem assinatura eletrônica", "valor": -sem_assinatura})
+
+    return {
+        "base": round(base, 2), "servico": round(servico, 2),
+        "desconto_pct": pct, "desconto": desconto,
+        "urgencia": urgencia, "sem_assinatura": sem_assinatura,
+        "total": total,
+        "horas": HORAS_URGENTE if urgente else HORAS_PADRAO,
+        "itens": itens,
+    }

@@ -17,13 +17,18 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
 
    Misturar os dois, como estava, fazia o advogado que ia redigir uma
    petição atravessar dez colunas de negociação para chegar no caso dele. */
-const COLUNAS_CONTRATOS = [
-  { id: "LEAD",           label: "Novos contatos",     cor: "border-[#8899AA]", hdr: "bg-[#8899AA]/10" },
+/* A ENTRADA DO CASO — do primeiro contato ao protocolo.
+   Estas colunas já tiveram tela própria, chamada "Contratos". Eram duas
+   esteiras para um caminho só: o caso nascia numa tela e continuava em
+   outra, e ninguém via o percurso inteiro. Agora são as primeiras
+   colunas da Triagem, e "Contratos" ficou livre para o que de fato é —
+   o balcão de contratos de prestação de serviço, que é outro negócio. */
+const COLUNAS_ENTRADA = [
+  { id: "LEAD",           label: "Chegou agora",       cor: "border-[#8899AA]", hdr: "bg-[#8899AA]/10" },
   { id: "QUALIFICACAO",   label: "Qualificação",       cor: "border-[#8899AA]", hdr: "bg-[#8899AA]/10" },
-  { id: "PROPOSTA",       label: "Negociação/Proposta", cor: "border-[#4361EE]", hdr: "bg-[#4361EE]/10" },
+  { id: "PROPOSTA",       label: "Proposta",           cor: "border-[#4361EE]", hdr: "bg-[#4361EE]/10" },
   { id: "CONTRATO",       label: "Assinatura",         cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/10" },
   { id: "PAGAMENTO",      label: "Pagamento",          cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/10" },
-  { id: "LEAD_FRIO",      label: "Sem retorno",        cor: "border-[#5A6B7C]", hdr: "bg-[#5A6B7C]/10" },
 ];
 
 /* JUDICIALIZADO segue o caminho real do processo, não etapas de
@@ -56,6 +61,7 @@ const COLUNAS_RECEBIMENTO = [
 ];
 
 const COLUNAS_PRODUCAO = [
+  ...COLUNAS_ENTRADA,
   { id: "COLETA_DOCS",    label: "Coleta Docs",        cor: "border-[#F39C12]", hdr: "bg-[#F39C12]/10" },
   { id: "AGUARDANDO_DOCUMENTOS", label: "Aguardando Cliente", cor: "border-[#E5A44C]", hdr: "bg-[#E5A44C]/15" },
   { id: "PRONTO_PARA_ANALISE",   label: "Pronto p/ Análise",  cor: "border-[#1DB954]", hdr: "bg-[#1DB954]/15" },
@@ -64,6 +70,8 @@ const COLUNAS_PRODUCAO = [
   { id: "PETICAO",        label: "Peticionamento",     cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/10" },
   { id: "REVISAO",        label: "Revisão",            cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/10" },
   { id: "PROTOCOLO_RPA",  label: "Protocolo",          cor: "border-[#1DB954]", hdr: "bg-[#1DB954]/10" },
+  // Fim da linha da triagem: protocolado, o caso vai para Judicializado.
+  { id: "LEAD_FRIO",      label: "Sem retorno",        cor: "border-[#5A6B7C]", hdr: "bg-[#5A6B7C]/10" },
   // Protocolado não fica aqui: protocolar é o fim da produção e o
   // começo do judicial. O card aparece na primeira coluna daquela tela
   // — em duas esteiras ao mesmo tempo, ninguém sabe de quem é a vez.
@@ -94,18 +102,18 @@ type Caso = {
 
 const formVazio = { nome: "", cpf: "", contato: "", grupo: "", fase: "PETICAO", numero_processo: "", honorarios: "", descricao: "" };
 
-export type ModoEsteira = "contratos" | "producao" | "judicial" | "recebimento";
+export type ModoEsteira = "producao" | "judicial" | "recebimento";
 
-const POR_MODO: Record<ModoEsteira, { titulo: string; colunas: typeof COLUNAS_CONTRATOS }> = {
-  contratos:   { titulo: "Contratos",    colunas: COLUNAS_CONTRATOS },
+const POR_MODO: Record<ModoEsteira, { titulo: string; colunas: typeof COLUNAS_ENTRADA }> = {
   producao:    { titulo: "Triagem",      colunas: COLUNAS_PRODUCAO },
   judicial:    { titulo: "Judicializado", colunas: COLUNAS_JUDICIAL },
   recebimento: { titulo: "Execução",     colunas: COLUNAS_RECEBIMENTO },
 };
 
 export default function Esteira({ modo }: { modo: ModoEsteira }) {
-  const contratos = modo === "contratos";
+  const contratos = false;   // a entrada virou parte da Triagem
   const judicial = modo === "judicial";
+  const producao = modo === "producao";
   const recebimento = modo === "recebimento";
   const processual = judicial || recebimento;
   const COLUNAS = POR_MODO[modo].colunas;
@@ -250,6 +258,39 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
     await fetch(`${API}/api/v1/casos/${id}/fase-judicial/automatico`, { method: "POST" });
     load();
   }
+
+  /* MUDAR DE COLUNA À MÃO.
+
+     O card só tinha "voltar": dava para recuar de fase e não para
+     avançar, e o caso ficava preso esperando um automático que nem
+     sempre vem — a qualificação que terminou no telefone, a proposta
+     aceita no WhatsApp, o pagamento que caiu na conta. Quem está
+     olhando a tela sabe o que aconteceu; faltava o botão.
+
+     Fora do judicial a coluna é o `estado` do caso, e é isso que muda
+     aqui. No judicial a coluna é lida das publicações, e mexer nela é
+     `corrigirColuna`, que marca a correção como MANUAL. */
+  async function mudarEstado(id: string, estado: string) {
+    setMovendo(id);
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado }),
+      });
+      if (!r.ok) { alert("Não consegui mudar a fase."); return; }
+      load();
+    } catch { alert("Falha de conexão."); }
+    finally { setMovendo(null); }
+  }
+
+  /* A próxima coluna da esteira. LEAD_FRIO fica de fora do "avançar":
+     "sem retorno" não é etapa do caminho, é desvio — se alguém quiser
+     mandar o caso para lá, usa o seletor. */
+  const proximaColuna = (atual: string) => {
+    const fila = POR_MODO[modo].colunas.filter((c) => c.id !== "LEAD_FRIO");
+    const i = fila.findIndex((c) => c.id === atual);
+    return i >= 0 && i < fila.length - 1 ? fila[i + 1] : null;
+  };
 
   async function reclassificarTudo() {
     setRecalculando(true);
@@ -434,6 +475,40 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
                             : c.fase_judicial_motivo}
                         </p>
                       )}
+                      {/* Avançar uma casa. No judicial a coluna vem das
+                          publicações, então avançar ali é correção
+                          manual e passa pelo mesmo caminho. */}
+                      {(() => {
+                        const prox = proximaColuna(colunaDoCaso(c));
+                        if (!prox) return null;
+                        return (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!confirm(`Avançar este caso para "${prox.label}"?`)) return;
+                              judicial ? corrigirColuna(c.id, prox.id) : mudarEstado(c.id, prox.id);
+                            }}
+                            disabled={movendo === c.id}
+                            className="mt-2 w-full rounded-md bg-[#2D7DD2] py-1.5 text-xs font-bold text-white transition hover:bg-[#2468b0] disabled:opacity-40">
+                            {movendo === c.id ? "movendo…" : `Avançar → ${prox.label}`}
+                          </button>
+                        );
+                      })()}
+
+                      {/* Mover para qualquer coluna desta esteira. Antes
+                          só o judicial tinha seletor, e as outras telas
+                          não tinham como corrigir um card fora de lugar. */}
+                      {!judicial && (
+                        <select value={colunaDoCaso(c)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => { e.stopPropagation(); mudarEstado(c.id, e.target.value); }}
+                          title="Mover para outra fase"
+                          className="mt-1.5 w-full rounded border border-white/10 bg-[#0A1628] px-1.5 py-1 text-[10px] text-white/70 outline-none focus:border-[#C9A84C]">
+                          {POR_MODO[modo].colunas.map((k) => (
+                            <option key={k.id} value={k.id}>{k.label}</option>
+                          ))}
+                        </select>
+                      )}
                       {judicial && (
                         <select value={colunaDoCaso(c)}
                           onClick={(e) => e.stopPropagation()}
@@ -466,6 +541,14 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
                           disabled={movendo === c.id}
                           className="mt-2 w-full rounded-md border border-white/20 py-1.5 text-xs font-semibold text-white/70 transition hover:bg-white/5 disabled:opacity-40">
                           {movendo === c.id ? "movendo…" : "← Voltar para o judicializado"}
+                        </button>
+                      )}
+                      {/* Protocolado, o caso sai da triagem. */}
+                      {producao && col.id === "PROTOCOLO_RPA" && (
+                        <button onClick={(e) => { e.stopPropagation(); moverFase(c.id, "JUDICIAL"); }}
+                          disabled={movendo === c.id}
+                          className="mt-2 w-full rounded-md border border-[#C9A84C]/60 py-1.5 text-xs font-bold text-[#C9A84C] transition hover:bg-[#C9A84C]/10 disabled:opacity-40">
+                          {movendo === c.id ? "movendo…" : "Mover para judicializado →"}
                         </button>
                       )}
                       {col.id === "REVISAO" && (

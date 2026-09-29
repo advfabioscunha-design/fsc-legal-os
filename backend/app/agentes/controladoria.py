@@ -492,6 +492,11 @@ def marcar_vencidos() -> int:
 
 
 # ── Rodada diária ───────────────────────────────────────────────
+def _arquivar_pedidos_vencidos() -> dict:
+    from . import contratos_online
+    return contratos_online.arquivar_vencidos()
+
+
 def _espelhar_prazos_na_agenda() -> dict:
     from . import agenda
     return agenda.espelhar_prazos()
@@ -516,6 +521,10 @@ def rodar() -> dict:
                          # livre.
                          ("prazos_na_agenda", _espelhar_prazos_na_agenda),
                          ("convites", enviar_convites),
+                         # A coluna Entregue do balcão vira depósito se
+                         # ninguém tirar de lá o que já passou dos sete
+                         # dias de alteração.
+                         ("balcao_arquivados", _arquivar_pedidos_vencidos),
                          ("vencidos_em_aberto", marcar_vencidos),
                          ("auditoria", auditoria)):
         try:

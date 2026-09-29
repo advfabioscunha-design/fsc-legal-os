@@ -16,13 +16,11 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
 /* As quatro fases do caso, na ordem, e depois as ferramentas que
    atravessam todas elas. */
 const ATALHOS = [
-  { href: "/contratos", icone: "🤝", titulo: "1 · Contratos", chave: "contratos_abertos",
-    texto: "Quem chegou, proposta, assinatura e pagamento." },
-  { href: "/crm", icone: "🗂️", titulo: "2 · Triagem", chave: "producao",
-    texto: "Documentos, análise, peça, revisão e protocolo." },
-  { href: "/judicial", icone: "⚖️", titulo: "3 · Judicializado", chave: "judicial",
+  { href: "/crm", icone: "🗂️", titulo: "1 · Triagem", chave: "producao",
+    texto: "Do primeiro contato ao protocolo: proposta, documentos, peça e revisão." },
+  { href: "/judicial", icone: "⚖️", titulo: "2 · Judicializado", chave: "judicial",
     texto: "Protocolado e em tramitação, até o trânsito em julgado." },
-  { href: "/recebimento", icone: "💰", titulo: "4 · Execução", chave: "recebimento",
+  { href: "/recebimento", icone: "💰", titulo: "3 · Execução", chave: "recebimento",
     texto: "Cumprimento, alvará, RPV e prestação de contas." },
   { href: "/tarefas", icone: "✅", titulo: "Tarefas", chave: null,
     texto: "O que fazer hoje e o plano da semana, por prioridade." },
@@ -34,6 +32,8 @@ const ATALHOS = [
     texto: "Audiências, perícias e prazos de trabalho." },
   { href: "/processos", icone: "📁", titulo: "Todos os processos", chave: null,
     texto: "Busca em qualquer fase, por número, cliente ou tribunal." },
+  { href: "/contratos", icone: "📄", titulo: "Contratos (balcão)", chave: null,
+    texto: "Pedidos de redação de contrato. Outro serviço, outro rito." },
   { href: "/admin", icone: "📊", titulo: "Administração", chave: null,
     texto: "Financeiro, equipe e indicadores." },
 ];

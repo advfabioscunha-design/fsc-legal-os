@@ -454,3 +454,109 @@ def pedir_alteracao(pedido_id: str, texto: str) -> dict:
     registrar_evento(None, "CONTRATO_ALTERACAO_PEDIDA",
                      {"pedido": pedido_id, "texto": texto[:300]})
     return {"ok": True, "fase": "REDACAO"}
+
+
+# ── O fim do rito: entrega, janela de alteração e arquivo ───────
+#
+# As fases ENTREGUE e ARQUIVADO existiam na lista desde o começo e
+# nenhuma função levava o pedido até elas — o pedido chegava a
+# ASSINATURA e parava ali para sempre. É isto que faltava.
+
+DIAS_PARA_ALTERAR = 7
+
+
+def registrar_pagamento(pedido_id: str, txid: str = "",
+                        quem: str = "") -> dict:
+    """Confirma o PIX e libera o trabalho.
+
+    A confirmação é humana de propósito: não há integração com o banco,
+    e inventar uma baixa automática seria pior do que não ter nenhuma —
+    o escritório escreveria o contrato de alguém que não pagou e
+    descobriria depois."""
+    db = get_db()
+    r = db.table("pedidos_contrato").select("fase").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    db.table("pedidos_contrato").update({
+        "pago_em": _agora(), "pix_txid": (txid or "")[:120] or None,
+        "fase": "REDACAO", "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_PAGO",
+                     {"pedido_id": pedido_id, "quem": quem, "txid": txid})
+    return {"ok": True, "fase": "REDACAO"}
+
+
+def entregar(pedido_id: str, link: str = "", quem: str = "") -> dict:
+    """Entrega ao cliente e abre a janela de sete dias.
+
+    A janela é contada a partir daqui, e não da aprovação: o prazo de
+    reclamar começa quando a pessoa tem o documento na mão."""
+    from datetime import date, timedelta
+    db = get_db()
+    r = db.table("pedidos_contrato").select("*,clientes(nome,email)") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    pedido = r[0]
+    ate = (date.today() + timedelta(days=DIAS_PARA_ALTERAR)).isoformat()
+
+    db.table("pedidos_contrato").update({
+        "fase": "ENTREGUE", "entregue_em": _agora(),
+        "prazo_alteracao_ate": ate,
+        "entrega_link": (link or "")[:600] or None,
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    cliente = pedido.get("clientes") or {}
+    if cliente.get("email"):
+        try:
+            from ..integracoes import avisos
+            s = get_settings()
+            url = link or f"{s.app_url.rstrip('/')}/balcao/{pedido_id}"
+            texto = (
+                f"Seu contrato está pronto.\n\n"
+                f"Pedido {pedido.get('numero')}.\n"
+                f"Acesse: {url}\n\n"
+                f"Você tem até {ate[8:10]}/{ate[5:7]}/{ate[:4]} para pedir "
+                f"ajustes sem custo. Depois dessa data o pedido é arquivado.")
+            avisos.enviar_email(
+                cliente["email"], f"Seu contrato está pronto — {pedido.get('numero')}",
+                texto, texto.replace("\n", "<br>"))
+        except Exception as e:
+            print(f"[balcao] entrega não avisada por e-mail: {e}")
+
+    registrar_evento(None, "BALCAO_ENTREGUE",
+                     {"pedido_id": pedido_id, "quem": quem, "ate": ate})
+    return {"ok": True, "fase": "ENTREGUE", "prazo_alteracao_ate": ate}
+
+
+def arquivar(pedido_id: str, quem: str = "") -> dict:
+    db = get_db()
+    db.table("pedidos_contrato").update({
+        "fase": "ARQUIVADO", "arquivado_em": _agora(),
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_ARQUIVADO",
+                     {"pedido_id": pedido_id, "quem": quem})
+    return {"ok": True, "fase": "ARQUIVADO"}
+
+
+def arquivar_vencidos() -> dict:
+    """Tira da vista o que passou dos sete dias.
+
+    Roda com a controladoria. Sem isto a coluna Entregue vira depósito:
+    em três meses ninguém distingue o que foi entregue ontem do que foi
+    entregue em março."""
+    from datetime import date
+    db = get_db()
+    hoje = date.today().isoformat()
+    vencidos = db.table("pedidos_contrato").select("id,numero") \
+        .eq("fase", "ENTREGUE").lt("prazo_alteracao_ate", hoje) \
+        .limit(200).execute().data or []
+    for p in vencidos:
+        try:
+            arquivar(p["id"], quem="sistema")
+        except Exception as e:
+            print(f"[balcao] não arquivou {p.get('numero')}: {e}")
+    return {"arquivados": len(vencidos)}

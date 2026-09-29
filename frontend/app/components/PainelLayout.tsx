@@ -18,7 +18,6 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
    agenda, administração. "Início" abre a visão geral. */
 const MENU = [
   { href: "/inicio", label: "Início", icone: "🏠" },
-  { href: "/contratos", label: "Contratos", icone: "🤝" },
   { href: "/crm", label: "Triagem", icone: "🗂️" },
   { href: "/judicial", label: "Judicializado", icone: "⚖️" },
   { href: "/recebimento", label: "Execução", icone: "💰" },
@@ -31,13 +30,22 @@ const MENU = [
   { href: "/assistente", label: "Assistente", icone: "💡" },
 ];
 
+/* O balcão não é uma fase do caso: é outro serviço. Fica separado no
+   menu, abaixo da linha, para ninguém confundir "contrato de honorários
+   do caso" com "contrato que o cliente encomendou". */
+const MENU_BALCAO = [
+  { href: "/contratos", label: "Contratos", icone: "📄" },
+];
+
 /* Onde mora cada caso, agora que são quatro telas. A busca global
    precisa disso: antes ela mandava todo resultado para a Produção, e um
    processo já em juízo não aparecia lá — quem buscava concluía que o
    caso havia sumido. */
 const TELA_POR_ESTADO: Record<string, string> = {
-  LEAD: "/contratos", QUALIFICACAO: "/contratos", PROPOSTA: "/contratos",
-  CONTRATO: "/contratos", PAGAMENTO: "/contratos", LEAD_FRIO: "/contratos",
+  // A entrada do caso agora é a Triagem: todas as fases do primeiro
+  // contato ao protocolo moram na mesma esteira.
+  LEAD: "/crm", QUALIFICACAO: "/crm", PROPOSTA: "/crm",
+  CONTRATO: "/crm", PAGAMENTO: "/crm", LEAD_FRIO: "/crm",
   JUDICIAL: "/judicial", PROTOCOLADO: "/judicial", TRANSITO_JULGADO: "/judicial",
   RECEBIMENTO: "/recebimento", CONCLUIDO: "/recebimento",
 };
@@ -97,6 +105,17 @@ export default function PainelLayout({ children, titulo }: { children: React.Rea
               </Link>
             );
           })}
+          <div className="my-2 border-t border-white/5 pt-2">
+            {MENU_BALCAO.map((m) => {
+              const ativo = pathname === m.href || pathname?.startsWith(m.href + "/");
+              return (
+                <Link key={m.href} href={m.href}
+                  className={`mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${ativo ? "bg-[#C9A24D] font-bold text-[#0A1628]" : "text-[#8899AA] hover:bg-white/5 hover:text-white"}`}>
+                  <span>{m.icone}</span>{m.label}
+                </Link>
+              );
+            })}
+          </div>
         </nav>
         <button onClick={async () => { await supabase.auth.signOut(); router.push("/entrar"); }}
           className="m-3 rounded-lg border border-white/10 px-3 py-2 text-sm text-[#8899AA] hover:text-white">Sair</button>

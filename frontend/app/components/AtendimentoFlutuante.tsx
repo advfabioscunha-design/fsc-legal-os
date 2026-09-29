@@ -17,8 +17,14 @@ const INTERNAS = new Set([
   "inicio", "crm", "contratos", "judicial", "recebimento", "processos",
   "intimacoes", "agenda", "admin", "assistente", "equipe", "documento",
   "entrar",
-  // a sala de atendimento também fica de fora: dois círculos por cima
-  // do vídeo, durante uma conversa gravada, só atrapalham.
+  // Telas de trabalho acrescentadas depois. Toda tela nova da equipe
+  // precisa entrar aqui, senão os dois círculos voltam a aparecer por
+  // cima dos botões de ação — foi o que aconteceu com estas duas.
+  "tarefas", "pendencias",
+  // "atendimento" tem dois sentidos: a esteira da primeira fase do caso
+  // (tela da equipe) e a sala de telepresença em /atendimento/<id>. As
+  // duas ficam de fora — na sala, dois círculos por cima do vídeo
+  // durante uma conversa gravada só atrapalham.
   "atendimento",
 ]);
 

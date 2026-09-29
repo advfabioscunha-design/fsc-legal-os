@@ -4185,3 +4185,282 @@ def agenda_feed(token: str):
         headers={"Content-Disposition": 'inline; filename="fsc-agenda.ics"',
                  "Cache-Control": "max-age=900"},
     )
+
+
+# ══════════════════════════════════════════════════════════════════
+# BALCÃO DE CONTRATOS — negociação, documentos, pagamento e entrega
+#
+# O balcão é outro serviço, com outro rito. Quem pede um contrato de
+# locação não entra no funil de quem tem uma ação para propor: não tem
+# caso, não tem processo, não tem prazo processual. Estas rotas são as
+# que faltavam para o rito fechar de ponta a ponta.
+# ══════════════════════════════════════════════════════════════════
+
+class FalaDoBalcao(BaseModel):
+    mensagem: str
+    # A tela avisa quando o cliente está fechando a página. Quem sabe
+    # disso é o navegador, não o modelo — pedir a uma IA que adivinhe
+    # intenção de saída é pedir que ela invente.
+    vai_sair: bool = False
+
+
+class EscolhaDoPedido(BaseModel):
+    urgente: bool | None = None
+    assinatura_digital: bool | None = None
+    com_orientacao: bool | None = None
+    clausulas_extras: str | None = None
+    modo_coleta: str | None = None
+
+
+class BaixaDePagamento(BaseModel):
+    txid: str = ""
+    quem: str = ""
+
+
+class EntregaDoPedido(BaseModel):
+    link: str = ""
+    quem: str = ""
+
+
+def _pedido_do_cliente(pedido_id: str, ids: list[str]) -> dict:
+    """O pedido existe E é deste login. Sem isso, id adivinhado abre
+    pedido alheio — com o contrato e os documentos dentro."""
+    r = get_db().table("pedidos_contrato").select("*") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    if r[0].get("cliente_id") and r[0]["cliente_id"] not in ids:
+        raise HTTPException(403, "Este pedido é de outro cadastro.")
+    return r[0]
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/negociar/abrir")
+def balcao_abrir_negociacao(pedido_id: str):
+    from .agentes import negociador
+    try:
+        return negociador.abrir(pedido_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/negociar")
+def balcao_negociar(pedido_id: str, body: FalaDoBalcao):
+    from .agentes import negociador
+    try:
+        return negociador.conversar(pedido_id, body.mensagem, body.vai_sair)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/conversa")
+def balcao_conversa(pedido_id: str):
+    from .agentes import negociador
+    return negociador.historico(pedido_id)
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/escolhas")
+def balcao_escolhas(pedido_id: str, body: EscolhaDoPedido):
+    """Urgência, assinatura, orientação e cláusula específica.
+
+    Recalcula o preço mantendo o desconto que já foi combinado — quem
+    escolheu urgência depois de negociar não perde o desconto por isso.
+    """
+    from .agentes import catalogo_contratos
+    db = get_db()
+    r = db.table("pedidos_contrato").select("*").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    p = r[0]
+
+    novo = {k: v for k, v in {
+        "urgente": body.urgente,
+        "assinatura_digital": body.assinatura_digital,
+        "com_orientacao": body.com_orientacao,
+        "clausulas_extras": body.clausulas_extras,
+        "modo_coleta": body.modo_coleta,
+    }.items() if v is not None}
+
+    conta = catalogo_contratos.precificar(
+        p["tipo"],
+        com_orientacao=novo.get("com_orientacao", p.get("com_orientacao")),
+        desconto_pct=float(p.get("desconto_pct") or 0),
+        urgente=novo.get("urgente", p.get("urgente")),
+        assinatura_digital=novo.get("assinatura_digital",
+                                    p.get("assinatura_digital", True)),
+    )
+    novo.update({"valor": conta["total"], "valor_base": conta["base"],
+                 "prazo_entrega_horas": conta["horas"],
+                 "atualizado_em": datetime.utcnow().isoformat()})
+    db.table("pedidos_contrato").update(novo).eq("id", pedido_id).execute()
+    return {"ok": True, "conta": conta}
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/vincular")
+def balcao_vincular(pedido_id: str, authorization: str | None = Header(default=None)):
+    """Amarra o pedido ao cadastro de quem está logado.
+
+    Existia um buraco aqui: a tela nunca mandava `cliente_id` e o backend
+    não o derivava do token, então TODO pedido nascia órfão — o cliente
+    não tinha como listar os seus, e o painel do escritório mostrava
+    pedido sem nome. Agora o vínculo vem do token, que é a única fonte
+    confiável de quem é a pessoa.
+
+    Marca também o tipo do cliente: quem chega pelo balcão vê a área de
+    contratos. Se já era LITIGIOSO, vira AMBOS — nunca se apaga o lado
+    que já existia."""
+    cli, ids = _clientes_do_token(authorization)
+    db = get_db()
+    r = db.table("pedidos_contrato").select("cliente_id").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    if r[0].get("cliente_id") and r[0]["cliente_id"] not in ids:
+        raise HTTPException(403, "Este pedido é de outro cadastro.")
+
+    db.table("pedidos_contrato").update({"cliente_id": cli["id"]}) \
+        .eq("id", pedido_id).execute()
+
+    # Quem já tinha processo e agora pede um contrato passa a ver as duas
+    # áreas. Trocar LITIGIOSO por CONTRATOS esconderia o processo dele.
+    atual = (cli.get("tipo") or "LITIGIOSO").upper()
+    novo_tipo = "AMBOS" if atual in ("LITIGIOSO", "AMBOS") else "CONTRATOS"
+    if atual != novo_tipo:
+        db.table("clientes").update({"tipo": novo_tipo}) \
+            .eq("id", cli["id"]).execute()
+    return {"ok": True, "cliente_id": cli["id"], "tipo": novo_tipo}
+
+
+@app.get("/api/v1/contratos/meus-pedidos")
+def balcao_meus_pedidos(authorization: str | None = Header(default=None)):
+    _, ids = _clientes_do_token(authorization)
+    if not ids:
+        return []
+    return get_db().table("pedidos_contrato").select(
+        "id,numero,tipo,fase,valor,prazo_entrega_horas,prazo_alteracao_ate,"
+        "entregue_em,criado_em"
+    ).in_("cliente_id", ids).order("criado_em", desc=True) \
+        .limit(100).execute().data or []
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/documentos")
+async def balcao_enviar_documentos(
+    pedido_id: str,
+    arquivos: list[UploadFile] = File(...),
+    rotulo: str | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """PDF ou foto do documento, com o rol do tipo como referência.
+
+    O cliente pode mandar cópia ou digitar tudo — são caminhos
+    alternativos, não um obrigatório e outro opcional."""
+    import re, uuid
+    _, ids = _clientes_do_token(authorization)
+    _pedido_do_cliente(pedido_id, ids)
+    s, db = get_settings(), get_db()
+
+    salvos, falhas = [], []
+    for arq in arquivos or []:
+        conteudo = await arq.read()
+        if not conteudo:
+            continue
+        if len(conteudo) > 25 * 1024 * 1024:
+            falhas.append(f"{arq.filename}: acima de 25 MB")
+            continue
+        base = (arq.filename or "documento").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", base) or "documento"
+        path = f"pedidos/{pedido_id}/{uuid.uuid4().hex}_{safe}"
+        try:
+            db.storage.from_(s.bucket_documentos).upload(
+                path, conteudo,
+                {"content-type": arq.content_type or "application/octet-stream",
+                 "upsert": "true"})
+        except Exception as e:
+            falhas.append(f"{base}: {e}")
+            continue
+        row = db.table("pedidos_documentos").insert({
+            "pedido_id": pedido_id, "nome": base,
+            "tipo_mime": arq.content_type, "tamanho": len(conteudo),
+            "url": path, "enviado_por": "CLIENTE",
+            "rotulo": (rotulo or "")[:200] or None,
+        }).execute().data
+        if row:
+            salvos.append(row[0])
+
+    if salvos:
+        db.table("pedidos_contrato").update({
+            "modo_coleta": "DOCUMENTOS",
+            "atualizado_em": datetime.utcnow().isoformat(),
+        }).eq("id", pedido_id).execute()
+    return {"salvos": len(salvos), "documentos": salvos, "falhas": falhas}
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/documentos")
+def balcao_listar_documentos(pedido_id: str):
+    return get_db().table("pedidos_documentos").select("*") \
+        .eq("pedido_id", pedido_id).order("criado_em").execute().data or []
+
+
+@app.get("/api/v1/contratos/pix")
+def balcao_pix():
+    """Os dados do PIX vivem num lugar só.
+
+    Quando a conta passar a ser do CNPJ, muda aqui e em nenhuma tela."""
+    from .agentes import negociador
+    return negociador.PIX
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/pagamento")
+def balcao_pagamento(pedido_id: str, body: BaixaDePagamento):
+    """Baixa manual do PIX, dada por quem conferiu o extrato."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.registrar_pagamento(pedido_id, body.txid, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/entregar")
+def balcao_entregar(pedido_id: str, body: EntregaDoPedido):
+    from .agentes import contratos_online
+    try:
+        return contratos_online.entregar(pedido_id, body.link, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/arquivar")
+def balcao_arquivar(pedido_id: str, quem: str = ""):
+    from .agentes import contratos_online
+    return contratos_online.arquivar(pedido_id, quem)
+
+
+@app.post("/api/v1/contratos/arquivar-vencidos")
+def balcao_arquivar_vencidos():
+    """Tira da coluna Entregue o que passou dos sete dias."""
+    from .agentes import contratos_online
+    return contratos_online.arquivar_vencidos()
+
+
+class MensagemDoBalcao(BaseModel):
+    texto: str
+    autor: str = "ESCRITORIO"
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/mensagem")
+def balcao_mensagem(pedido_id: str, body: MensagemDoBalcao):
+    """Recado do escritório para o cliente dentro do pedido.
+
+    Fica na conversa do pedido, não na do caso: são caixas diferentes de
+    propósito, para o cliente do balcão não receber andamento processual
+    e o cliente do processo não receber cobrança de documento de
+    contrato."""
+    if not body.texto.strip():
+        raise HTTPException(400, "A mensagem está vazia.")
+    autor = body.autor.upper()
+    if autor not in ("ESCRITORIO", "AGENTE", "CLIENTE"):
+        autor = "ESCRITORIO"
+    r = get_db().table("pedidos_mensagens").insert({
+        "pedido_id": pedido_id, "autor": autor, "texto": body.texto[:4000],
+    }).execute().data
+    return r[0] if r else {"ok": True}

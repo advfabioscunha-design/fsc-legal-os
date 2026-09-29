@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -41,6 +41,27 @@ export default function Balcao() {
 
   const [termo, setTermo] = useState<any>(null);
   const [pedidoId, setPedidoId] = useState<string | null>(null);
+  // tipo → negociar → conta → termo. A conta só entra depois do sim.
+  const [etapa, setEtapa] = useState<"tipo" | "negociar" | "conta" | "termo">("tipo");
+  const [combinado, setCombinado] = useState<any>(null);
+
+  // Fechado o preço e havendo sessão, amarra o pedido ao cadastro e
+  // busca o termo. O vínculo vem do token, e não de um cliente_id que a
+  // tela mandaria — era isso que fazia todo pedido nascer órfão.
+  useEffect(() => {
+    if (etapa !== "conta" || !sessao || !pedidoId) return;
+    (async () => {
+      try {
+        await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/vincular`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${sessao.access_token}` },
+        });
+        const t = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/termo-contratacao`)
+          .then((x) => x.json());
+        setTermo(t); setEtapa("termo");
+      } catch { setErro("Não consegui continuar. Tente de novo."); }
+    })();
+  }, [etapa, sessao, pedidoId]);
 
   useEffect(() => {
     fetch(`${API}/api/v1/contratos/tipos`).then((r) => r.json())
@@ -135,9 +156,10 @@ export default function Balcao() {
       const p = await r.json();
       if (!r.ok) { setErro(p.detail || "Não foi possível abrir o pedido."); return; }
       setPedidoId(p.id);
-      const t = await fetch(`${API}/api/v1/contratos/pedidos/${p.id}/termo-contratacao`)
-        .then((x) => x.json());
-      setTermo(t);
+      // A proposta vem ANTES do cadastro. Pedir CPF e endereço de quem
+      // ainda não decidiu contratar é o jeito mais rápido de perder a
+      // pessoa — e são dados que não deveríamos ter guardado.
+      setEtapa("negociar");
     } catch { setErro("Não foi possível falar com o servidor."); }
     finally { setOcupado(false); }
   }
@@ -167,8 +189,12 @@ export default function Balcao() {
           </p>
         </header>
 
-        {/* PASSO 3 — termo de contratação */}
-        {termo ? (
+        {/* Depois do sim: negociação → conta → termo */}
+        {etapa === "negociar" && pedidoId ? (
+          <Negociacao pedidoId={pedidoId} escolhido={escolhido}
+            aoFechar={(c) => { setCombinado(c); setEtapa("conta"); }}
+            aoVoltar={() => { setEtapa("tipo"); setPedidoId(null); }} />
+        ) : etapa === "termo" && termo ? (
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6">
             <h2 className="text-sm font-bold text-[#C9A24D]">Antes de começar</h2>
             <pre className="mt-3 max-h-[46vh] overflow-y-auto whitespace-pre-wrap rounded-xl bg-[#0A1628] p-4 text-xs leading-relaxed text-white/80">
@@ -189,9 +215,22 @@ export default function Balcao() {
               </span>
             </div>
           </section>
-        ) : !sessao ? (
-          /* PASSO 2 — conta */
+        ) : etapa === "conta" && !sessao ? (
+          /* Conta — só agora, com o preço já combinado */
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6">
+            {combinado && (
+              <div className="mb-4 rounded-xl border border-[#1DB954]/40 bg-[#1DB954]/10 p-3">
+                <p className="text-xs text-white/80">
+                  Combinado: <b>{escolhido?.nome}</b> por{" "}
+                  <b className="text-[#1DB954]">{reais(combinado.total)}</b>
+                  {combinado.desconto_pct > 0 && ` (com ${combinado.desconto_pct}% de desconto)`}
+                  , entrega em até {combinado.horas} horas.
+                </p>
+                <p className="mt-1 text-[10px] text-white/45">
+                  Falta só criar seu acesso para guardarmos o pedido com segurança.
+                </p>
+              </div>
+            )}
             <h2 className="text-sm font-bold text-[#C9A24D]">
               {modo === "criar" ? "Criar conta"
                 : modo === "recuperar" ? "Esqueci a senha"
@@ -345,5 +384,151 @@ export default function Balcao() {
         )}
       </div>
     </main>
+  );
+}
+
+
+/* ── A proposta e a conversa sobre ela ─────────────────────────────
+
+   O agente dá valor ao serviço antes de falar de preço, escuta a
+   objeção antes de descontar, e tem dois degraus de desconto — 10% na
+   resistência, 20% quando a pessoa sinaliza que vai embora.
+
+   Quem calcula o preço é o servidor, não o modelo: um modelo instruído
+   a negociar, se lhe derem a calculadora, acaba concedendo mais do que
+   devia para agradar quem insiste.
+
+   A saída da página é detectada aqui, no navegador, e mandada como um
+   sinal — não se pede a uma IA que adivinhe intenção de saída. */
+function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
+  pedidoId: string;
+  escolhido: Tipo | null;
+  aoFechar: (conta: any) => void;
+  aoVoltar: () => void;
+}) {
+  const [falas, setFalas] = useState<{ de: "agente" | "cliente"; texto: string }[]>([]);
+  const [conta, setConta] = useState<any>(null);
+  const [texto, setTexto] = useState("");
+  const [pensando, setPensando] = useState(false);
+  const [usouSaida, setUsouSaida] = useState(false);
+  const fim = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    (async () => {
+      setPensando(true);
+      try {
+        const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/negociar/abrir`,
+          { method: "POST" });
+        const d = await r.json();
+        if (d?.texto) setFalas([{ de: "agente", texto: d.texto }]);
+        if (d?.conta) setConta(d.conta);
+      } finally { setPensando(false); }
+    })();
+  }, [pedidoId]);
+
+  useEffect(() => { fim.current?.scrollIntoView({ behavior: "smooth" }); }, [falas]);
+
+  const enviar = useCallback(async (msg: string, vaiSair = false) => {
+    if (!msg.trim() && !vaiSair) return;
+    if (msg.trim()) setFalas((f) => [...f, { de: "cliente", texto: msg }]);
+    setTexto(""); setPensando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/negociar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mensagem: msg || "(fechando a página)", vai_sair: vaiSair }),
+      });
+      const d = await r.json();
+      if (d?.texto) setFalas((f) => [...f, { de: "agente", texto: d.texto }]);
+      if (d?.conta) setConta(d.conta);
+      if (d?.fechou) aoFechar(d.conta);
+    } catch {
+      setFalas((f) => [...f, { de: "agente", texto: "Tive um problema de conexão. Pode repetir?" }]);
+    } finally { setPensando(false); }
+  }, [pedidoId, aoFechar]);
+
+  // Intenção de saída: o mouse indo para fora da janela pela borda de
+  // cima é o gesto de quem vai fechar a aba. Uma vez só por sessão —
+  // repetir a última proposta a cada movimento de mouse é perseguição,
+  // não venda.
+  useEffect(() => {
+    if (usouSaida) return;
+    const sair = (e: MouseEvent) => {
+      if (e.clientY > 0) return;
+      setUsouSaida(true);
+      enviar("", true);
+    };
+    document.addEventListener("mouseleave", sair);
+    return () => document.removeEventListener("mouseleave", sair);
+  }, [usouSaida, enviar]);
+
+  const reais = (v: number) =>
+    Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-[#C9A24D]">{escolhido?.nome}</h2>
+          <p className="text-[11px] text-white/45">{escolhido?.base_legal}</p>
+        </div>
+        {conta && (
+          <div className="text-right">
+            <p className="text-lg font-bold text-white">{reais(conta.total)}</p>
+            {conta.desconto_pct > 0 && (
+              <p className="text-[10px] text-[#1DB954]">com {conta.desconto_pct}% de desconto</p>
+            )}
+            <p className="text-[10px] text-white/40">entrega em até {conta.horas}h</p>
+          </div>
+        )}
+      </div>
+
+      <div className="max-h-[42vh] space-y-2 overflow-y-auto rounded-xl bg-[#0A1628] p-3">
+        {falas.map((f, i) => (
+          <div key={i}
+            className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${f.de === "agente"
+              ? "bg-white/5 text-white/85"
+              : "ml-auto bg-[#C9A84C]/15 text-white/90"}`}>
+            <p className="whitespace-pre-line">{f.texto}</p>
+          </div>
+        ))}
+        {pensando && <p className="text-[11px] text-white/35">digitando…</p>}
+        <div ref={fim} />
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <input value={texto} onChange={(e) => setTexto(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && enviar(texto)}
+          placeholder="pergunte, ou diga o que achou do valor"
+          className="flex-1 rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
+        <button onClick={() => enviar(texto)} disabled={pensando}
+          className="rounded-lg border border-white/20 px-4 text-sm text-white/70 hover:border-white/40 disabled:opacity-40">
+          Enviar
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button onClick={() => enviar("Quero contratar por esse valor.")}
+          disabled={pensando}
+          className="rounded-lg bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#17a349] disabled:opacity-50">
+          Quero contratar
+        </button>
+        <button onClick={() => enviar("Preciso para hoje, em poucas horas. Dá?")}
+          disabled={pensando}
+          className="rounded-lg border border-white/20 px-4 py-2.5 text-xs text-white/70 hover:border-white/40">
+          Preciso com urgência
+        </button>
+        <button onClick={aoVoltar}
+          className="ml-auto text-xs text-white/40 underline hover:text-white">
+          escolher outro documento
+        </button>
+      </div>
+
+      {escolhido?.alerta && (
+        <div className="mt-4 rounded-xl border border-[#E5A44C]/40 bg-[#E5A44C]/10 p-3">
+          <p className="text-[11px] font-bold text-[#E5A44C]">Importante, leia antes de contratar</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-white/75">{escolhido.alerta}</p>
+        </div>
+      )}
+    </section>
   );
 }
