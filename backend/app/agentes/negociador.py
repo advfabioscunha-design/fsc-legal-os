@@ -329,12 +329,26 @@ def conversar(pedido_id: str, mensagem: str,
     t = catalogo.detalhe(pedido["tipo"]) or {}
     db = get_db()
 
-    _guardar_mensagem(pedido_id, "CLIENTE", mensagem[:4000])
+    # O sinal de saída chega sem texto: o cliente não escreveu nada, só
+    # moveu o mouse para fora da janela. Gravar isso como fala dele
+    # encheria a conversa de mensagens em branco — e a API recusa bloco
+    # de texto vazio, que era o 500 que aparecia aqui.
+    mensagem = (mensagem or "").strip()
+    if mensagem:
+        _guardar_mensagem(pedido_id, "CLIENTE", mensagem[:4000])
 
     historico = db.table("pedidos_mensagens").select("autor,texto") \
         .eq("pedido_id", pedido_id).order("criado_em").limit(40).execute().data or []
     mensagens = [{"role": "user" if m["autor"] == "CLIENTE" else "assistant",
-                  "content": m["texto"]} for m in historico]
+                  "content": m["texto"]}
+                 for m in historico if (m.get("texto") or "").strip()]
+
+    # A conversa precisa terminar com a vez do cliente, senão não há o
+    # que responder. Na saída sem texto, a "fala" é o próprio gesto.
+    if not mensagens or mensagens[-1]["role"] != "user":
+        mensagens.append({"role": "user",
+                          "content": "[o cliente está fechando a página]"
+                          if vai_sair else "[sem resposta]"})
 
     contexto = (
         f"Tipo de contrato pedido: {t.get('nome')}.\n"
