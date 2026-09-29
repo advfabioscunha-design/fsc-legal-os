@@ -127,8 +127,53 @@ def _agendar_radar():
                           CronTrigger(day_of_week="tue,thu", hour=18, minute=0),
                           id="varredura_diario", replace_existing=True,
                           max_instances=1)
+            def fechamento_do_dia():
+                """Segunda a sexta, 18h: deixa tudo pronto para amanhã.
+
+                A rotina das 07h10 monta o dia que começa; esta fecha o
+                dia que termina. São coisas diferentes e as duas
+                precisam existir: sem o fechamento, o que sobrou de hoje
+                só é notado amanhã de manhã, com a pessoa já sentada
+                para trabalhar — tarde demais para remanejar.
+
+                Na ordem: recalcula as datas (publicação de hoje pode ter
+                mexido num prazo), puxa para o dia o que ficou atrasado,
+                espelha os prazos novos na agenda e monta a lista do
+                próximo dia útil."""
+                from datetime import date as _d, timedelta as _td
+                r = {}
+                try:
+                    r["datas"] = controladoria.recalcular_datas()
+                except Exception as e:
+                    r["datas"] = {"erro": str(e)}
+                try:
+                    from .agentes import agenda as _ag
+                    r["agenda"] = _ag.espelhar_prazos()
+                except Exception as e:
+                    r["agenda"] = {"erro": str(e)}
+                try:
+                    r["atrasadas"] = tarefas.puxar_atrasadas()
+                except Exception as e:
+                    r["atrasadas"] = {"erro": str(e)}
+                # O próximo dia útil, e não "amanhã": na sexta às 18h o
+                # que interessa é a segunda.
+                try:
+                    from .core.datas import util as _util
+                    d = _d.today() + _td(days=1)
+                    while not _util(d):
+                        d += _td(days=1)
+                    r["amanha"] = tarefas.planejar(d, d)
+                except Exception as e:
+                    r["amanha"] = {"erro": str(e)}
+                print(f"[fechamento 18h] {r}")
+                return r
+
+            sched.add_job(fechamento_do_dia,
+                          CronTrigger(day_of_week="mon-fri", hour=18, minute=0),
+                          id="fechamento_do_dia", replace_existing=True,
+                          max_instances=1)
             sched.add_job(tarefas.plano_da_semana,
-                          CronTrigger(day_of_week="fri", hour=18, minute=0),
+                          CronTrigger(day_of_week="fri", hour=18, minute=30),
                           id="plano_semanal", replace_existing=True,
                           max_instances=1)
         except Exception as e:
@@ -3865,6 +3910,19 @@ def tarefas_pendentes():
 def tarefas_plano_dia():
     from .agentes import tarefas
     return tarefas.plano_do_dia()
+
+
+@app.post("/api/v1/controladoria/fechamento-do-dia")
+def controladoria_fechamento():
+    """O que o agendador roda às 18h, de segunda a sexta.
+
+    Recalcula datas, espelha prazos na agenda, puxa o atrasado e monta
+    a lista do próximo dia útil. Este botão é para rodar fora de hora."""
+    sched = getattr(app.state, "scheduler", None)
+    job = sched.get_job("fechamento_do_dia") if sched else None
+    if not job:
+        raise HTTPException(503, "Agendador não iniciado no servidor.")
+    return job.func()
 
 
 @app.post("/api/v1/tarefas/puxar-atrasadas")

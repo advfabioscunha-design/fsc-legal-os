@@ -90,13 +90,21 @@ def levantar() -> list[dict]:
     hoje = date.today()
     pendentes: list[dict] = []
 
-    # O que já virou tarefa viva. Sem isto, o plano diário recria todo dia
-    # a mesma tarefa para a mesma publicação, o mesmo caso parado e a
-    # mesma anotação — e a lista de segunda-feira tem cinco cópias de
-    # tudo. Guardamos uma chave por origem, não só o prazo.
+    # O que JÁ VIROU TAREFA — em qualquer status, não só as vivas.
+    #
+    # A primeira versão disto só olhava ABERTA e REAGENDADA, e tinha um
+    # furo grande: concluída a tarefa, ela saía da lista e a origem
+    # voltava a gerar outra igual no dia seguinte. O escritório fazia o
+    # trabalho, marcava como feito, e no dia seguinte a mesma tarefa
+    # estava lá de novo — não há jeito mais rápido de fazer alguém
+    # parar de confiar na lista.
+    #
+    # Tarefa CANCELADA também conta: cancelar é dizer "isto não era para
+    # ser feito". Ressuscitá-la sozinha desfaria a decisão de quem
+    # cancelou.
     vivas = db.table("tarefas").select(
         "prazo_id,intimacao_id,anotacao_id,pedido_id,caso_id,origem"
-    ).in_("status", ["ABERTA", "REAGENDADA"]).limit(3000).execute().data
+    ).limit(5000).execute().data
 
     ja_tem      = {t["prazo_id"] for t in vivas if t.get("prazo_id")}
     ja_intim    = {t["intimacao_id"] for t in vivas if t.get("intimacao_id")}
@@ -371,7 +379,8 @@ def listar(de: str | None = None, ate: str | None = None,
 
 def concluir(tarefa_id: str, quem: str = "", nota: str = "") -> dict:
     db = get_db()
-    achado = db.table("tarefas").select("historico,caso_id,prazo_id") \
+    achado = db.table("tarefas").select(
+        "historico,caso_id,prazo_id,intimacao_id,titulo") \
         .eq("id", tarefa_id).limit(1).execute().data
     if not achado:
         raise ValueError("Tarefa não encontrada.")
@@ -380,19 +389,38 @@ def concluir(tarefa_id: str, quem: str = "", nota: str = "") -> dict:
     db.table("tarefas").update({
         "status": "FEITA", "concluida_em": _agora(), "historico": hist,
     }).eq("id", tarefa_id).execute()
-    # Prazo cumprido sai da fila e o caso volta à coluna de origem.
+    # CONCLUIR A TAREFA TEM DE FECHAR A ORIGEM.
+    #
+    # Não basta marcar a tarefa como feita: o prazo continuava ABERTO e
+    # a intimação continuava A_RESOLVER, então no dia seguinte o
+    # levantamento encontrava tudo de novo e criava a tarefa outra vez.
+    # Fechar a origem é o que faz o trabalho ficar feito de verdade.
+    fechados = []
     if achado[0].get("prazo_id"):
         db.table("prazos").update({"status": "CONCLUIDO"}) \
             .eq("id", achado[0]["prazo_id"]).execute()
+        fechados.append("prazo")
         if achado[0].get("caso_id"):
             try:
                 from . import fase_judicial
                 fase_judicial.recalcular(achado[0]["caso_id"])
             except Exception:
                 pass
+    if achado[0].get("intimacao_id"):
+        try:
+            db.table("intimacoes").update({"status": "RESOLVIDA"}) \
+                .eq("id", achado[0]["intimacao_id"]).execute()
+            fechados.append("intimação")
+        except Exception as e:
+            print(f"[tarefas] intimação não fechada: {e}")
+
+    # `resultado` e não só `nota`: é esta chave que o histórico do caso
+    # lê para mostrar O QUE foi feito, e não apenas que foi feito.
     registrar_evento(achado[0].get("caso_id"), "TAREFA_CONCLUIDA",
-                     {"tarefa": tarefa_id, "quem": quem, "nota": nota})
-    return {"ok": True}
+                     {"tarefa": tarefa_id, "quem": quem, "nota": nota,
+                      "resultado": nota, "titulo": achado[0].get("titulo"),
+                      "fechou": fechados})
+    return {"ok": True, "fechou": fechados}
 
 
 def reagendar(tarefa_id: str, nova_data: str, quem: str = "",

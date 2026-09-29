@@ -170,8 +170,8 @@ def _detalhe(tipo: str, p: dict) -> str:
     audiência — e é exatamente o que interessa saber depois."""
     if not isinstance(p, dict):
         return ""
-    for chave in ("resultado", "o_que_foi_feito", "motivo", "descricao",
-                  "titulo", "observacao", "texto", "nome"):
+    for chave in ("resultado", "o_que_foi_feito", "nota", "motivo",
+                  "descricao", "titulo", "observacao", "texto", "nome"):
         v = p.get(chave)
         if isinstance(v, str) and v.strip():
             base = v.strip()
