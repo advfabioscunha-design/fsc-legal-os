@@ -23,6 +23,7 @@ const MENU = [
   { href: "/judicial", label: "Judicializado", icone: "⚖️" },
   { href: "/recebimento", label: "Execução", icone: "💰" },
   { href: "/tarefas", label: "Tarefas", icone: "✅" },
+  { href: "/pendencias", label: "Pendências", icone: "📌" },
   { href: "/intimacoes", label: "Intimações e prazos", icone: "🔔" },
   { href: "/processos", label: "Todos os processos", icone: "📁" },
   { href: "/agenda", label: "Agenda", icone: "📅" },

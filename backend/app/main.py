@@ -3704,6 +3704,74 @@ def controladoria_rodar():
     return controladoria.rodar()
 
 
+# ══ Pendências anotadas ══════════════════════════════════════════
+class NovaAnotacao(BaseModel):
+    texto: str
+    data_resolver: str | None = None
+    caso_id: str | None = None
+    cliente_id: str | None = None
+    numero_processo: str | None = None
+    prioridade: str = "MEDIA"
+    responsavel_id: str | None = None
+    quem: str = ""
+
+
+class AcaoAnotacao(BaseModel):
+    resultado: str = ""
+    motivo: str = ""
+    nova_data: str | None = None
+    quem: str = ""
+
+
+@app.get("/api/v1/anotacoes")
+def listar_anotacoes(status: str = "ABERTA", caso_id: str | None = None,
+                     responsavel_id: str | None = None, ate: str | None = None):
+    from .agentes import anotacoes
+    return anotacoes.listar(status.upper(), caso_id, responsavel_id, ate)
+
+
+@app.post("/api/v1/anotacoes")
+def criar_anotacao(body: NovaAnotacao):
+    from .agentes import anotacoes
+    try:
+        return anotacoes.criar(body.texto, body.data_resolver, body.caso_id,
+                               body.cliente_id, body.numero_processo,
+                               body.prioridade.upper(), body.responsavel_id,
+                               body.quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/anotacoes/{anotacao_id}/resolver")
+def resolver_anotacao(anotacao_id: str, body: AcaoAnotacao):
+    from .agentes import anotacoes
+    try:
+        return anotacoes.resolver(anotacao_id, body.resultado, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/anotacoes/{anotacao_id}/reagendar")
+def reagendar_anotacao(anotacao_id: str, body: AcaoAnotacao):
+    from .agentes import anotacoes
+    if not body.nova_data:
+        raise HTTPException(400, "Informe a nova data.")
+    try:
+        return anotacoes.reagendar(anotacao_id, body.nova_data, body.motivo,
+                                   body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/anotacoes/{anotacao_id}/cancelar")
+def cancelar_anotacao(anotacao_id: str, body: AcaoAnotacao):
+    from .agentes import anotacoes
+    try:
+        return anotacoes.cancelar(anotacao_id, body.motivo, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 # ══ Tarefas — o plano de trabalho ════════════════════════════════
 class TarefaAcao(BaseModel):
     quem: str = ""

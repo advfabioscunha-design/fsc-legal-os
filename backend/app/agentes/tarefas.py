@@ -163,7 +163,14 @@ def levantar() -> list[dict]:
             "processo": c.get("numero_processo"),
         })
 
-    # 4) Pedidos de contrato parados numa fase do escritório
+    # 4) Pendências anotadas à mão, com data marcada
+    try:
+        from . import anotacoes
+        pendentes.extend(anotacoes.para_o_plano())
+    except Exception as e:
+        print(f"[tarefas] anotações não levantadas: {e}")
+
+    # 5) Pedidos de contrato parados numa fase do escritório
     try:
         do_escritorio = ["PAGAMENTO", "REDACAO", "REVISAO_IA", "AJUSTE",
                          "REVISAO_ADV"]
@@ -216,6 +223,7 @@ def planejar(de: date, ate: date, limpar_abertas: bool = False) -> dict:
             "origem": p["origem"],
             "prazo_id": p.get("prazo_id"),
             "intimacao_id": p.get("intimacao_id"),
+            "anotacao_id": p.get("anotacao_id"),
             "caso_id": p.get("caso_id"),
             "pedido_id": p.get("pedido_id"),
             "data": quando.isoformat(),
