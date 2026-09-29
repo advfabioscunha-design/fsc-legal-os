@@ -387,12 +387,21 @@ def _gravar_intimacao(caso_id: str, com: dict) -> dict | None:
     }).execute().data[0]
 
 
+# Prazo vencido há mais de uma semana, vindo de publicação antiga, não
+# é trabalho: é história. Importar cinco anos de acervo criava um prazo
+# "em aberto" para cada despacho de 2022, e o efeito na tela era que
+# TODOS os processos apareciam na coluna de prazo — a leitura de fase
+# ficava invisível. O registro continua guardado, só não entra na fila.
+DIAS_DE_TOLERANCIA_DO_PRAZO = 7
+
+
 def _gravar_prazo(caso_id: str, intimacao: dict, titulo: str) -> None:
     """Prazo de trabalho = prazo fatal recuado dois dias úteis."""
     if not intimacao.get("prazo_em"):
         return
     db = get_db()
     fatal = date.fromisoformat(intimacao["prazo_em"][:10])
+    vencido = (date.today() - fatal).days > DIAS_DE_TOLERANCIA_DO_PRAZO
     db.table("prazos").upsert({
         "caso_id": caso_id, "intimacao_id": intimacao["id"],
         "titulo": titulo[:140],
@@ -402,6 +411,9 @@ def _gravar_prazo(caso_id: str, intimacao: dict, titulo: str) -> None:
         "tipo": intimacao.get("tipo"),
         "origem": "CONTROLADORIA",
         "depende_do_cliente": False,
+        # HISTORICO sai da fila do dia e das colunas de prazo, mas fica
+        # no caso: dá para ver que aquele ato teve prazo e quando.
+        "status": "HISTORICO" if vencido else "ABERTO",
         "atualizado_em": _agora(),
     }, on_conflict="intimacao_id").execute()
 
