@@ -71,12 +71,21 @@ MARCOS: list[tuple[str, re.Pattern]] = [
     ("TRANSITO", re.compile(
         r"tr[âa]nsit(?:o|ou)\s+em\s+julgado|certid[ãa]o\s+de\s+tr[âa]nsito|"
         r"certifico\s+o\s+tr[âa]nsito", re.I)),
+    # STF e STJ exigem AÇÃO, não menção. Sentença e acórdão citam esses
+    # tribunais o tempo todo ("conforme entendimento do STJ..."), e a
+    # primeira versão mandou para lá processos que estavam na 2ª Vara
+    # Federal e no Núcleo 4.0 do TJRO. O padrão agora pede um verbo de
+    # tramitação perto do termo.
     ("STF", re.compile(
-        r"supremo\s+tribunal\s+federal|\bSTF\b|recurso\s+extraordin[áa]rio|"
-        r"\bRE\s+n[ºo°]", re.I)),
+        r"(?:interpos|admit|inadmit|remet|encaminh|distribu|subir?am?|sobrest)\w*"
+        r"[^.]{0,90}(?:recurso\s+extraordin[áa]rio|supremo\s+tribunal\s+federal|\bSTF\b)"
+        r"|(?:recurso\s+extraordin[áa]rio|\bARE\b)[^.]{0,80}"
+        r"(?:interpost|admitid|inadmitid|provid|conhecid|distribu)", re.I)),
     ("STJ", re.compile(
-        r"superior\s+tribunal\s+de\s+justi[çc]a|\bSTJ\b|"
-        r"recurso\s+especial|\bREsp\b", re.I)),
+        r"(?:interpos|admit|inadmit|remet|encaminh|distribu|subir?am?|sobrest)\w*"
+        r"[^.]{0,90}(?:recurso\s+especial|superior\s+tribunal\s+de\s+justi[çc]a|\bSTJ\b)"
+        r"|(?:recurso\s+especial|\bREsp\b|\bAREsp\b)[^.]{0,80}"
+        r"(?:interpost|admitid|inadmitid|provid|conhecid|distribu)", re.I)),
     ("ACORDAO", re.compile(
         r"ac[óo]rd[ãa]o|ementa\s*:|vistos,?\s+relatados|"
         r"deram\s+provimento|negaram\s+provimento|"
@@ -156,6 +165,15 @@ def classificar(publicacoes: list[dict]) -> tuple[str, str]:
         # e isso vale mais que qualquer palavra no corpo: "Sentença" dita
         # pelo tribunal é sentença; "sentença" no meio de um despacho é
         # só uma palavra. Quando o tipo é claro, ele decide.
+        # A CLASSE do processo, quando o Diário informa, é o sinal mais
+        # forte de todos: "RECURSO ESPECIAL" é o processo, não uma
+        # citação dentro dele.
+        classe = (pub.get("classe") or "").upper()
+        if "EXTRAORDIN" in classe:
+            return "STF", "classe do processo: recurso extraordinário"
+        if "RECURSO ESPECIAL" in classe:
+            return "STJ", "classe do processo: recurso especial"
+
         tipo = (pub.get("tipo") or "").lower()
         if tipo:
             if "acórdão" in tipo or "acordao" in tipo:
@@ -223,9 +241,10 @@ def recalcular(caso_id: str, respeitar_manual: bool = True) -> dict:
     if respeitar_manual and caso.get("fase_judicial_fonte") == "MANUAL":
         return {"ok": True, "fase": caso.get("fase_judicial"), "manual": True}
 
-    pubs = db.table("intimacoes").select("conteudo,data_movimento,tipo") \
+    pubs = db.table("intimacoes").select("conteudo,data_movimento,tipo,payload") \
         .eq("caso_id", caso_id).order("data_movimento").limit(200).execute().data
     publicacoes = [{"texto": p.get("conteudo"), "tipo": p.get("tipo"),
+                    "classe": (p.get("payload") or {}).get("classe"),
                     "data": (p.get("data_movimento") or "")[:10]} for p in pubs]
 
     base, motivo = classificar(publicacoes)
