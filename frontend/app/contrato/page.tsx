@@ -13,11 +13,12 @@ import { IlustraContrato } from "../components/ui/Ilustracoes";
  *    organiza o trabalho por dentro. A ferramenta é assunto do
  *    escritório; o cliente contrata o escritório.
  *
- * 2. Os valores não batiam com o sistema. A página anunciava faixas de
- *    R$ 69,90, R$ 99,90 e R$ 249,90 por "complexidade"; o balcão cobra
- *    R$ 99,90 pela notificação extrajudicial e R$ 250,00 pelos demais
- *    documentos. Preço anunciado que não é o preço praticado é problema
- *    de consumidor, não detalhe de texto.
+ * 2. A página anunciava uma tabela de preços, e ainda por cima uma
+ *    tabela que não batia com o que o sistema cobra. Os valores saíram
+ *    do site inteiro: anunciar honorário ao público é mercantilização
+ *    da advocacia, que o Provimento 205/2021 da OAB não admite. O preço
+ *    continua existindo e continua sendo dito com todas as letras, só
+ *    que no atendimento, a quem já descreveu o que precisa.
  *
  * 3. Havia dois botões concorrendo no mesmo lugar, e um deles era de
  *    WhatsApp, que já existe fixo no canto da tela. Duas portas para a
@@ -154,47 +155,40 @@ export default function ContratoLanding() {
         </div>
       </section>
 
-      {/* VALORES */}
+      {/* PRAZO E CUIDADO
+           Esta secao ficava com a tabela de valores. Saiu: anunciar
+           honorario ao publico e o tipo de mercantilizacao que o
+           Provimento 205/2021 da OAB nao admite, e um site de
+           escritorio nao e vitrine de loja. O valor existe, e dito com
+           clareza, mas no atendimento, para a pessoa que ja descreveu o
+           que precisa. Ali ele e resposta a uma pergunta concreta, nao
+           preco em prateleira. */}
       <section className="border-y border-white/10 bg-petrol py-20">
         <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="font-display text-display font-bold">Valores</h2>
+          <h2 className="font-display text-display font-bold">
+            Quanto tempo leva
+          </h2>
           <p className="mx-auto mt-4 max-w-xl text-subtitle text-white/65">
-            O valor depende do documento, e você vê o preço antes de informar
-            qualquer dado pessoal.
+            O documento fica pronto em até 24 horas depois que você enviar as
+            informações. Se precisar para hoje, há entrega em até 6 horas.
           </p>
 
-          <div className="mt-10 grid gap-5 sm:grid-cols-2">
-            <div className="rounded-xl2 border border-white/10 bg-navy p-8">
-              <p className="text-caption font-semibold uppercase tracking-wider text-slate">
-                Notificação extrajudicial
-              </p>
-              <p className="mt-3 font-display text-display font-bold text-white">
-                R$ 99,90
-              </p>
-              <p className="mt-3 text-small text-white/60">
-                Cobrança, aviso ou rescisão com prazo e consequência definidos.
-              </p>
-            </div>
-
-            <div className="rounded-xl2 border border-gold/30 bg-navy p-8">
-              <p className="text-caption font-semibold uppercase tracking-wider text-gold">
-                Demais contratos
-              </p>
-              <p className="mt-3 font-display text-display font-bold text-white">
-                R$ 250,00
-              </p>
-              <p className="mt-3 text-small text-white/60">
-                Locação, compra e venda, prestação de serviço, comodato,
-                confissão de dívida, trabalho e rescisão.
-              </p>
-            </div>
+          <div className="mt-10 grid gap-5 sm:grid-cols-3 text-left">
+            {[
+              ["Você descreve", "Conta o que precisa e o escritório informa as condições do serviço."],
+              ["O escritório escreve", "Texto conforme a lei daquele contrato, revisado por advogado."],
+              ["Você aprova", "Lê com calma, pede ajuste se precisar e só então assina."],
+            ].map(([t, d]) => (
+              <div key={t} className="rounded-xl2 border border-white/10 bg-navy p-6">
+                <h3 className="font-display text-body font-bold text-white">{t}</h3>
+                <p className="mt-2 text-small text-white/60">{d}</p>
+              </div>
+            ))}
           </div>
 
-          <p className="mt-6 text-small text-slate">
-            Entrega em até 6 horas: acréscimo de R$ 30,00. Sem assinatura
-            eletrônica: desconto de R$ 10,00. Se quiser conversar com um
-            advogado sobre o caso antes da redação, o atendimento é contratado
-            à parte.
+          <p className="mt-8 text-small text-slate">
+            As condições do serviço são apresentadas no atendimento, antes de
+            você informar qualquer dado pessoal.
           </p>
         </div>
       </section>

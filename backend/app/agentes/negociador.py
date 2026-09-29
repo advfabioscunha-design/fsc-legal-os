@@ -259,7 +259,7 @@ def _executar_propor(pedido: dict, args: dict) -> dict:
     resposta["pode_descontar_mais"] = pedido_desconto < catalogo.DESCONTO_SAIDA
     if recusado:
         resposta["aviso"] = (
-            "Este é o melhor valor. Não há outro desconto disponível — "
+            "Este é o melhor valor. Não há outro desconto disponível, "
             "diga isso com franqueza e volte a falar do serviço.")
     return resposta
 
@@ -303,8 +303,8 @@ def abrir(pedido_id: str) -> dict:
     texto = (
         f"Você está pedindo um {t.get('nome', 'contrato')} feito sob medida.\n\n"
         f"Quem escreve é advogado inscrito na OAB, que responde pelo que "
-        f"assina. O texto é redigido a partir do seu caso — não é modelo "
-        f"preenchido — segue a legislação aplicável a esse tipo de contrato, "
+        f"assina. O texto é redigido a partir do seu caso, não é modelo "
+        f"preenchido, segue a legislação aplicável a esse tipo de contrato, "
         f"passa por revisão e é conferido por advogado antes de chegar até "
         f"você. Fica pronto em até 24 horas.\n\n"
         f"O investimento é de R$ {conta['total']:.2f}."
@@ -359,7 +359,7 @@ def conversar(pedido_id: str, mensagem: str,
     if vai_sair:
         contexto += (
             "\n\nSINAL DA TELA: o cliente está saindo da página agora. Se "
-            "ele ainda não ouviu o desconto de 20%, é o momento — faça a "
+            "ele ainda não ouviu o desconto de 20%, é o momento, faça a "
             "última proposta com `propor_valor` e desconto 20, em uma "
             "frase curta e sem drama. Se ele já ouviu, apenas agradeça e "
             "diga que o pedido fica guardado.")
@@ -397,7 +397,7 @@ def conversar(pedido_id: str, mensagem: str,
         resposta_final = texto or resposta_final
 
     if not resposta_final:
-        resposta_final = ("Me diga o que você achou do valor — quero entender "
+        resposta_final = ("Me diga o que você achou do valor, quero entender "
                           "o que está te segurando.")
 
     _guardar_mensagem(pedido_id, "AGENTE", resposta_final,

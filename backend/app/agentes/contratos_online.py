@@ -58,11 +58,11 @@ def termo_de_contratacao(tipo: str, com_orientacao: bool = False) -> dict:
     t = catalogo.detalhe(tipo) or {}
     valor = catalogo.preco(tipo, com_orientacao)
     linhas = [
-        f"CONTRATAÇÃO DE SERVIÇO — {t.get('nome', tipo)}",
+        f"CONTRATAÇÃO DE SERVIÇO, {t.get('nome', tipo)}",
         "",
         "O QUE O ESCRITÓRIO FAZ",
         f"Elabora o documento conforme a legislação aplicável "
-        f"({t.get('base_legal', '—')}), com revisão por advogado antes de "
+        f"({t.get('base_legal', ',')}), com revisão por advogado antes de "
         f"ser enviado a você, e disponibiliza assinatura eletrônica com "
         f"validade jurídica (Lei 14.063/2020 e MP 2.200-2/2001).",
         "",
@@ -93,7 +93,7 @@ def termo_de_contratacao(tipo: str, com_orientacao: bool = False) -> dict:
         "DESISTÊNCIA",
         "Antes de o documento ser redigido, a devolução é integral. Depois "
         "de redigido, o valor não é devolvido, porque o serviço foi "
-        "prestado — o documento é seu e fica disponível.",
+        "prestado, o documento é seu e fica disponível.",
         "",
         "SEUS DADOS",
         "Seus dados e documentos são usados apenas para elaborar o que você "
@@ -162,7 +162,7 @@ def termo_de_ciencia(tipo: str, regras_violadas: list[str],
     alerta = t.get("alerta")
 
     partes = [
-        f"CIÊNCIA E DECISÃO — {t['nome']}",
+        f"CIÊNCIA E DECISÃO, {t['nome']}",
         "",
         f"Base legal aplicável: {t['base_legal']}.",
         "",
@@ -353,7 +353,7 @@ def revisar(pedido_id: str) -> dict:
         raise ValueError("Pedido não encontrado.")
     p = achado[0]
     if not p.get("minuta"):
-        raise ValueError("Não há minuta para revisar — redija primeiro.")
+        raise ValueError("Não há minuta para revisar, redija primeiro.")
     t = catalogo.detalhe(p["tipo"]) or {}
     s = get_settings()
 
@@ -441,7 +441,7 @@ def liberar_para_cliente(pedido_id: str, quem: str = "") -> dict:
 
 def pedir_alteracao(pedido_id: str, texto: str) -> dict:
     """O cliente leu e quer mudança. Volta para ajuste, com o pedido
-    dele junto — e a fila do escritório mostra que voltou."""
+    dele junto, e a fila do escritório mostra que voltou."""
     db = get_db()
     achado = db.table("pedidos_contrato").select("pedidos_alteracao") \
         .eq("id", pedido_id).limit(1).execute().data
@@ -521,7 +521,7 @@ def entregar(pedido_id: str, link: str = "", quem: str = "") -> dict:
                 f"Você tem até {ate[8:10]}/{ate[5:7]}/{ate[:4]} para pedir "
                 f"ajustes sem custo. Depois dessa data o pedido é arquivado.")
             avisos.enviar_email(
-                cliente["email"], f"Seu contrato está pronto — {pedido.get('numero')}",
+                cliente["email"], f"Seu contrato está pronto, {pedido.get('numero')}",
                 texto, texto.replace("\n", "<br>"))
         except Exception as e:
             print(f"[balcao] entrega não avisada por e-mail: {e}")

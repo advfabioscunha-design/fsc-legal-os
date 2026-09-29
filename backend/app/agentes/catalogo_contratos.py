@@ -124,7 +124,7 @@ CATALOGO: dict[str, dict] = {
             {"quando": "multas_locador",
              "diz": "As infrações são do condutor. O CTB (art. 257, §7º) permite a "
                     "indicação do real infrator, e o contrato deve obrigar o locatário a "
-                    "isso — senão os pontos ficam no prontuário do proprietário.",
+                    "isso, senão os pontos ficam no prontuário do proprietário.",
              "adequar": "Incluir obrigação de indicação do condutor no prazo legal."},
         ],
         "alerta": None,
@@ -145,7 +145,7 @@ CATALOGO: dict[str, dict] = {
         "regras": [
             {"quando": "comodato_com_pagamento",
              "diz": "Comodato é, por definição, GRATUITO (art. 579). Se há pagamento, o "
-                    "contrato é locação — e será tratado como locação em juízo, com todas "
+                    "contrato é locação, e será tratado como locação em juízo, com todas "
                     "as regras da locação.",
              "adequar": "Ou retirar a contraprestação, ou mudar para contrato de locação."},
         ],
@@ -340,7 +340,7 @@ CATALOGO: dict[str, dict] = {
             "IPTU do ano corrente",
         ],
         "regras": [],
-        "alerta": "ATENÇÃO — este é o ponto mais importante deste contrato. A transferência "
+        "alerta": "ATENÇÃO, este é o ponto mais importante deste contrato. A transferência "
                   "da propriedade de imóvel acima de 30 salários mínimos exige ESCRITURA "
                   "PÚBLICA lavrada em cartório de notas (CC, art. 108) e registro na "
                   "matrícula (Lei 6.015/1973). O instrumento particular assinado aqui vale "
@@ -352,20 +352,43 @@ CATALOGO: dict[str, dict] = {
 
 
 def listar() -> list[dict]:
-    """Para a tela de escolha do cliente."""
+    """A vitrine do balcão, SEM preço.
+
+    O preço não sai daqui de propósito. Esta lista alimenta a tela
+    pública, aberta a qualquer visitante, e honorário anunciado ao
+    público é mercantilização da advocacia, que o Provimento 205/2021 da
+    OAB não admite. Tirar só da tela e deixar no JSON não resolveria: o
+    dado continuaria publicado, bastando abrir as ferramentas do
+    navegador.
+
+    O valor continua existindo e continua sendo dito com todas as
+    letras, no atendimento, a quem já escolheu o documento e ouviu o que
+    está incluído. É `precificar()` quem responde, e só depois do pedido
+    aberto.
+    """
     return [{
         "id": k, "nome": v["nome"], "base_legal": v["base_legal"],
-        "preco": v["preco"],
         "campos": len(v["campos"]), "documentos": v["documentos"],
         "alerta": v.get("alerta"),
     } for k, v in CATALOGO.items()]
 
 
 def detalhe(tipo: str) -> dict | None:
+    """Os campos e as regras do tipo, também sem preço.
+
+    Esta rota é aberta como a lista. Tirar o valor de uma e deixar na
+    outra seria fechar a porta e esquecer a janela: bastaria chamar
+    /tipos/LOCACAO_IMOVEL para ver a tabela inteira.
+
+    Quem precisa do número é `precificar()`, que roda no servidor
+    durante o atendimento e já considera desconto, urgência e assinatura.
+    A tela do pedido mostra `pedido.valor`, que é o combinado, não o de
+    tabela.
+    """
     v = CATALOGO.get(tipo)
     if not v:
         return None
-    return {"id": tipo, **v}
+    return {"id": tipo, **{k: x for k, x in v.items() if k != "preco"}}
 
 
 # ── O que muda o preço depois da tabela ─────────────────────────

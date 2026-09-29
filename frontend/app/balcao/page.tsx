@@ -17,7 +17,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
    formulário anônimo que ninguém sabe de quem é. */
 
 type Tipo = {
-  id: string; nome: string; base_legal: string; preco: number;
+  id: string; nome: string; base_legal: string;
   documentos: string[]; alerta?: string | null;
 };
 
@@ -325,7 +325,6 @@ export default function Balcao() {
                       : "border-white/10 bg-[#0B1F3B] hover:border-white/25"}`}>
                   <p className="text-sm font-bold text-white/90">{t.nome}</p>
                   <p className="mt-0.5 text-[11px] text-white/45">{t.base_legal}</p>
-                  <p className="mt-2 text-sm font-bold text-[#C9A24D]">{reais(t.preco)}</p>
                 </button>
               ))}
             </div>
@@ -356,8 +355,9 @@ export default function Balcao() {
                       onChange={(e) => setComOrientacao(e.target.checked)}
                       className="mt-0.5 h-4 w-4 accent-[#C9A84C]" />
                     <span>
-                      Quero <b>orientação jurídica antes</b> (+ R$ 250,00), atendimento por
-                      vídeo com um advogado, agendado por aqui, antes da elaboração.
+                      Quero <b>orientação jurídica antes</b>: atendimento por vídeo com
+                      um advogado, agendado por aqui, antes da elaboração. Esse
+                      atendimento é contratado à parte.
                     </span>
                   </label>
                   <label className="flex cursor-pointer items-start gap-2 text-xs text-white/70">
@@ -369,12 +369,19 @@ export default function Balcao() {
                 </div>
 
                 <div className="mt-5 flex flex-wrap items-center gap-3">
-                  <span className="text-lg font-bold text-[#C9A24D]">
-                    {reais(escolhido.preco + (comOrientacao ? 250 : 0))}
-                  </span>
+                  {/* O valor NÃO aparece aqui.
+
+                      Preço em cima da escolha transforma a página em
+                      prateleira de loja, e advocacia não é isso: o
+                      Provimento 205/2021 da OAB não admite anúncio de
+                      honorário ao público. Além disso, número antes de
+                      contexto faz a pessoa comparar o que ainda não
+                      entendeu. O valor é dito no atendimento, a quem já
+                      escolheu o documento, com a explicação do que está
+                      incluído. */}
                   <button onClick={comecar} disabled={ocupado}
                     className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
-                    {ocupado ? "Abrindo…" : "Continuar"}
+                    {ocupado ? "Abrindo…" : "Falar sobre este documento"}
                   </button>
                   {erro && <span className="text-xs text-[#C0392B]">{erro}</span>}
                 </div>
