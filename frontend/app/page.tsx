@@ -1,20 +1,86 @@
 import Link from "next/link";
+import Image from "next/image";
 import Header from "./components/Header";
 import AtendimentoChat from "./components/AtendimentoChat";
 import AtendimentoWhats from "./components/AtendimentoWhats";
+import {
+  IlustraBancario, IlustraImobiliario, IlustraFiscal,
+  IlustraEnergia, IlustraContrato, MalhaHero,
+} from "./components/ui/Ilustracoes";
+
+/* PÁGINA INICIAL
+ *
+ * Duas coisas guiaram a reescrita.
+ *
+ * A primeira: o texto anterior falava do escritório. "Atendimento
+ * especializado", "experiência e credibilidade", "soluções jurídicas
+ * estratégicas". São frases que qualquer escritório do país poderia
+ * assinar sem mudar uma vírgula, e por isso não dizem nada. Quem chega
+ * aqui não está procurando um escritório bom em abstrato: está com um
+ * problema concreto e quer saber se aquele problema tem solução. O
+ * texto agora começa pelo problema dele.
+ *
+ * A segunda: nada de travessão. É pontuação correta, mas virou marca
+ * registrada de texto de máquina, e quem lê percebe. Onde havia
+ * travessão agora há ponto, vírgula ou dois pontos, que é como as
+ * pessoas escrevem.
+ */
 
 const AREAS = [
-  { slug: "direito-bancario", titulo: "Direito Bancário", desc: "Juros abusivos, tarifas indevidas, cartão RMC/RCC, fraudes PIX e busca e apreensão." },
-  { slug: "distrato-imobiliario", titulo: "Distrato Imobiliário", desc: "Atraso de obra e retenção abusiva de valores na rescisão." },
-  { slug: "execucao-fiscal", titulo: "Execução Fiscal", desc: "Desbloqueio de patrimônio e defesa tributária." },
-  { slug: "recuperacao-consumo", titulo: "Recuperação de Consumo de Energia", desc: "Multa e cobrança de recuperação de consumo de energia elétrica." },
+  {
+    slug: "direito-bancario",
+    titulo: "Direito bancário",
+    gancho: "A parcela não bate com o contrato?",
+    desc: "Juros acima do combinado, tarifas que ninguém explicou, cartão consignado que você não pediu, PIX de fraude e busca e apreensão de veículo.",
+    Icone: IlustraBancario,
+  },
+  {
+    slug: "distrato-imobiliario",
+    titulo: "Distrato imobiliário",
+    gancho: "A obra atrasou ou você quer sair do contrato?",
+    desc: "Atraso na entrega das chaves e retenção de valores acima do que a lei permite quando o comprador desiste.",
+    Icone: IlustraImobiliario,
+  },
+  {
+    slug: "execucao-fiscal",
+    titulo: "Execução fiscal",
+    gancho: "Bloquearam sua conta por uma dívida antiga?",
+    desc: "Defesa em cobrança de tributos, desbloqueio de valores e discussão de débitos já prescritos.",
+    Icone: IlustraFiscal,
+  },
+  {
+    slug: "recuperacao-consumo",
+    titulo: "Recuperação de consumo",
+    gancho: "A concessionária cobrou meses de energia de uma vez?",
+    desc: "Defesa contra o TOI e contra a cobrança retroativa de consumo de energia elétrica.",
+    Icone: IlustraEnergia,
+  },
 ];
 
-const DIFERENCIAIS = [
-  { t: "Atendimento Especializado", d: "Soluções jurídicas estratégicas e personalizadas." },
-  { t: "Experiência e Credibilidade", d: "Atuação sólida e comprometida com resultados." },
-  { t: "Transparência e Compromisso", d: "Ética, clareza e dedicação em cada caso." },
-  { t: "Atendimento Humanizado", d: "Escuta ativa e foco nas suas necessidades." },
+/* O que muda para quem contrata. Nenhum item é adjetivo sobre o
+   escritório: todos são fatos verificáveis sobre como o trabalho
+   acontece. Adjetivo qualquer um escreve. */
+const COMO_TRABALHAMOS = [
+  {
+    t: "Você acompanha pela internet",
+    d: "Uma área só sua, com cada etapa do caso registrada e os documentos guardados no mesmo lugar.",
+    n: "01",
+  },
+  {
+    t: "Quem assina responde",
+    d: "Advogado inscrito na OAB revisa e assina cada peça antes de ir ao processo.",
+    n: "02",
+  },
+  {
+    t: "Prazo controlado todo dia",
+    d: "As publicações são lidas diariamente e cada prazo entra na agenda no dia em que precisa ser trabalhado.",
+    n: "03",
+  },
+  {
+    t: "Atendimento de onde você estiver",
+    d: "Conversa por vídeo, WhatsApp e e-mail. O escritório atende em todo o país sem exigir deslocamento.",
+    n: "04",
+  },
 ];
 
 export default function Home() {
@@ -22,134 +88,315 @@ export default function Home() {
     <main className="bg-navy text-white">
       <Header />
 
-      {/* ── HERO ── */}
+      {/* HERO */}
       <section className="relative overflow-hidden">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-6 pb-20 pt-32 md:grid-cols-2 md:pt-40">
-          {/* Texto + CTA central */}
-          <div className="text-center md:text-left">
-            <span className="mb-5 inline-block rounded-full border border-gold/40 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-gold">
-              Advocacia com Propósito
+        <MalhaHero className="pointer-events-none absolute -right-40 -top-32 h-[680px] w-[680px] opacity-60" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-navy/40 to-navy" />
+
+        <div className="relative mx-auto grid max-w-content grid-cols-1 items-center gap-14 px-6 pb-24 pt-32 md:grid-cols-[1.1fr_.9fr] md:pt-40">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-electric/30 bg-electric/10 px-4 py-1.5 text-caption font-semibold uppercase tracking-[0.16em] text-electric">
+              <span className="h-1.5 w-1.5 rounded-full bg-electric" />
+              Advocacia digital, atendimento em todo o Brasil
             </span>
-            <h1 className="font-serif text-4xl font-bold leading-[1.1] md:text-6xl">
-              Você tem <span className="text-gold">direitos</span>.<br />Nós provamos.
+
+            <h1 className="mt-6 font-display text-display-lg font-bold">
+              Cobraram de você
+              <br />
+              <span className="bg-gradient-to-r from-electric to-indigo bg-clip-text text-transparent">
+                o que não deviam?
+              </span>
             </h1>
-            <p className="mx-auto mt-6 max-w-md text-base leading-relaxed text-white/70 md:mx-0">
-              Direito Bancário, Distrato Imobiliário, Execução Fiscal, Recuperação de Consumo de Energia
-              e Busca e Apreensão. Conheça seus direitos com quem entende da lei.
+
+            <p className="mt-6 max-w-xl text-subtitle text-white/70">
+              Bancos, construtoras, concessionárias e o próprio Fisco erram, e o
+              erro costuma sair do seu bolso. O primeiro passo é entender o que
+              aconteceu no seu caso. Esse passo não custa nada.
             </p>
 
-            {/* CTA principal — Atendimento (centralizado e chamativo) */}
-            <div className="mt-9 flex flex-col items-center gap-4 md:items-start">
-              <AtendimentoChat variant="inline" label="Tire suas dúvidas agora"
-                className="w-full rounded-full bg-gold px-10 py-5 text-center text-base font-bold text-navy shadow-xl shadow-gold/20 transition hover:bg-amber sm:w-auto" />
-              <div className="flex flex-wrap items-center justify-center gap-4 md:justify-start">
-                <Link href="/contrato" className="text-sm font-semibold text-gold underline-offset-4 hover:underline">
-                  Solicitar Elaboração de Contrato →
-                </Link>
-                <a href="#areas" className="text-sm font-medium text-white/60 hover:text-white">Conhecer as áreas</a>
-              </div>
+            <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <AtendimentoChat
+                variant="inline"
+                label="Analisar meu caso"
+                className="inline-flex w-full items-center justify-center rounded-lg bg-electric px-8 py-4 text-subtitle font-semibold text-white shadow-glow transition-all hover:bg-indigo sm:w-auto"
+              />
+              <Link
+                href="#areas"
+                className="inline-flex w-full items-center justify-center rounded-lg border border-white/25 px-8 py-4 text-subtitle font-medium text-white transition hover:border-white/60 hover:bg-white/5 sm:w-auto"
+              >
+                Ver as áreas de atuação
+              </Link>
             </div>
+
+            <dl className="mt-12 grid max-w-lg grid-cols-3 gap-6 border-t border-white/10 pt-7">
+              {[
+                ["OAB/RO", "10.849"],
+                ["Atuação", "Nacional"],
+                ["Atendimento", "Digital"],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <dt className="text-caption uppercase tracking-wider text-slate">{k}</dt>
+                  <dd className="mt-1 font-display text-body font-bold text-white">{v}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
 
-          {/* Foto + Falar com Especialista abaixo */}
-          <div className="flex flex-col items-center gap-5">
-            <div className="relative aspect-[4/5] w-full max-w-sm overflow-hidden rounded-2xl bg-petrol shadow-2xl ring-1 ring-white/10">
-              <img src="/dr-fabio-hero.jpg" alt="Dr. Fábio Cunha" className="h-full w-full object-cover" />
+          <div className="relative mx-auto w-full max-w-sm">
+            <div className="absolute -inset-3 rounded-xl2 bg-gradient-to-br from-electric/25 to-transparent blur-2xl" />
+            <div className="relative overflow-hidden rounded-xl2 border border-white/10 shadow-lift">
+              <Image
+                src="/dr-fabio-hero.jpg"
+                alt="Dr. Fábio Cunha, advogado responsável pelo escritório"
+                width={520}
+                height={640}
+                priority
+                className="h-auto w-full object-cover"
+              />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-navy via-navy/80 to-transparent p-5">
+                <p className="font-display text-body font-bold">Dr. Fábio Cunha</p>
+                <p className="text-small text-slate">Advogado responsável, OAB/RO 10.849</p>
+              </div>
             </div>
-            <AtendimentoWhats variant="inline" label="Falar com um Especialista"
-              className="w-full max-w-sm rounded-full border border-gold/40 bg-white/5 px-8 py-3.5 text-center text-sm font-semibold text-white transition hover:border-gold hover:bg-white/10" />
           </div>
         </div>
       </section>
 
-      {/* ── ÁREAS ── */}
-      <section id="areas" className="bg-petrol py-20">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mb-12 text-center">
-            <h2 className="font-serif text-3xl font-bold md:text-4xl">Áreas de <span className="text-gold">Atuação</span></h2>
-          </div>
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {AREAS.map((a) => (
-              <Link key={a.slug} href={`/areas/${a.slug}`}
-                className="group flex flex-col rounded-2xl border border-white/10 bg-navy/60 p-6 transition hover:-translate-y-1 hover:border-gold/40">
-                <h3 className="font-serif text-xl font-bold text-white">{a.titulo}</h3>
-                <p className="mt-3 flex-1 text-sm text-white/60">{a.desc}</p>
-                <span className="mt-5 text-sm font-semibold text-gold transition group-hover:translate-x-1">Saiba mais →</span>
+      {/* ÁREAS */}
+      <section id="areas" className="scroll-mt-24 bg-ice py-24 text-charcoal">
+        <div className="mx-auto max-w-content px-6">
+          <span className="text-caption font-semibold uppercase tracking-[0.16em] text-electric">
+            Áreas de atuação
+          </span>
+          <h2 className="mt-3 max-w-2xl font-display text-display font-bold text-navy">
+            Quatro situações em que o dinheiro sai do lugar errado
+          </h2>
+          <p className="mt-4 max-w-2xl text-subtitle text-charcoal/65">
+            Veja em qual delas o seu caso se encaixa. Se não se encaixar em
+            nenhuma, fale com o escritório mesmo assim.
+          </p>
+
+          <div className="mt-14 grid gap-6 sm:grid-cols-2">
+            {AREAS.map(({ slug, titulo, gancho, desc, Icone }) => (
+              <Link
+                key={slug}
+                href={`/areas/${slug}`}
+                className="group relative flex gap-5 rounded-xl2 border border-navy/[.07] bg-white p-7 shadow-card transition-all hover:-translate-y-1 hover:border-electric/40 hover:shadow-lift"
+              >
+                <Icone className="h-14 w-14 shrink-0 text-navy" />
+                <div className="min-w-0">
+                  <h3 className="font-display text-title font-bold text-navy">{titulo}</h3>
+                  <p className="mt-1.5 text-body font-semibold text-electric">{gancho}</p>
+                  <p className="mt-2.5 text-body text-charcoal/65">{desc}</p>
+                  <span className="mt-4 inline-flex items-center gap-1.5 text-small font-semibold text-navy transition group-hover:gap-2.5 group-hover:text-electric">
+                    Entender esse caso
+                    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </div>
               </Link>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── DIFERENCIAIS ── */}
-      <section className="py-16">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 sm:grid-cols-2 lg:grid-cols-4">
-          {DIFERENCIAIS.map((d) => (
-            <div key={d.t} className="text-center">
-              <h3 className="font-semibold text-gold">{d.t}</h3>
-              <p className="mt-2 text-sm text-white/60">{d.d}</p>
-            </div>
-          ))}
+      {/* CONTRATOS */}
+      <section className="bg-white py-24 text-charcoal">
+        <div className="mx-auto grid max-w-content items-center gap-12 px-6 md:grid-cols-[1fr_auto]">
+          <div>
+            <span className="text-caption font-semibold uppercase tracking-[0.16em] text-gold">
+              Serviço avulso
+            </span>
+            <h2 className="mt-3 font-display text-display font-bold text-navy">
+              Precisa de um contrato, não de um processo?
+            </h2>
+            <p className="mt-4 max-w-xl text-subtitle text-charcoal/65">
+              Aluguel, compra e venda, prestação de serviço, comodato,
+              notificação. O escritório redige sob medida para o seu caso,
+              revisa e entrega em até 24 horas.
+            </p>
+            <Link
+              href="/contrato"
+              className="mt-8 inline-flex items-center justify-center rounded-lg bg-gold px-8 py-4 text-subtitle font-bold text-navy shadow-card transition hover:brightness-95"
+            >
+              Ver os documentos e valores
+            </Link>
+          </div>
+          <IlustraContrato className="mx-auto hidden h-52 w-52 text-navy md:block" />
         </div>
       </section>
 
-      {/* ── SOBRE ── */}
-      <section id="sobre" className="bg-petrol py-20">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-6 md:grid-cols-5">
-          <div className="md:col-span-2">
-            <div className="relative mx-auto aspect-square w-full max-w-xs overflow-hidden rounded-2xl shadow-xl ring-1 ring-white/10">
-              <img src="/dr-fabio-bio.jpg" alt="Dr. Fábio Cunha" className="h-full w-full object-cover" />
-            </div>
-          </div>
-          <div className="md:col-span-3">
-            <span className="mb-3 inline-block text-xs font-semibold uppercase tracking-[0.2em] text-gold">Quem está à frente da sua defesa</span>
-            <h2 className="font-serif text-3xl font-bold md:text-4xl">Dr. Fábio Cunha</h2>
-            <p className="mt-5 leading-relaxed text-white/70">
-              Especialista em <b className="text-white">Direito Tributário</b> e com
-              <b className="text-white"> Curso Prático Avançado em Direito Bancário</b>.
-            </p>
-            <p className="mt-4 leading-relaxed text-white/70">
-              Ao longo de <b className="text-white">7 anos de prática jurídica</b>, dedica-se a combater abusos
-              institucionais e a defender o patrimônio de pessoas e empresas — sempre com atendimento humano,
-              ético e próximo do cliente em cada etapa.
-            </p>
-          </div>
-        </div>
-      </section>
+      {/* COMO TRABALHAMOS */}
+      <section className="bg-navy py-24">
+        <div className="mx-auto max-w-content px-6">
+          <span className="text-caption font-semibold uppercase tracking-[0.16em] text-electric">
+            Como o escritório trabalha
+          </span>
+          <h2 className="mt-3 max-w-2xl font-display text-display font-bold">
+            Você não precisa ligar para saber do seu processo
+          </h2>
 
-      {/* ── CTA AJUDA ── */}
-      <section id="contato" className="py-20">
-        <div className="mx-auto max-w-4xl px-6">
-          <div className="rounded-3xl border border-gold/30 bg-petrol p-10 text-center">
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">Precisa de ajuda?</span>
-            <h2 className="mt-3 font-serif text-3xl font-bold">Fale agora com a nossa equipe</h2>
-            <p className="mx-auto mt-3 max-w-xl text-white/65">
-              Tire suas dúvidas e receba orientação com agilidade, segurança e total cuidado com você.
-            </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <AtendimentoChat variant="inline" label="Tire suas dúvidas agora"
-                className="rounded-full bg-gold px-10 py-4 text-sm font-bold text-navy shadow-lg transition hover:bg-amber" />
-              <AtendimentoWhats variant="inline" label="Falar no WhatsApp"
-                className="rounded-full border border-white/20 px-8 py-4 text-sm font-semibold text-white hover:border-gold" />
-            </div>
-            <p className="mt-6 text-sm text-white/55">
-              📍 Bases em <b className="text-white">Porto Velho/RO</b> &nbsp;•&nbsp; <b className="text-white">Florianópolis/SC</b> · Atuação em todo o território nacional
-            </p>
+          <div className="mt-14 grid gap-px overflow-hidden rounded-xl2 bg-white/10 sm:grid-cols-2">
+            {COMO_TRABALHAMOS.map(({ t, d, n }) => (
+              <div key={t} className="bg-navy p-8 transition hover:bg-petrol">
+                <span className="font-mono text-caption font-bold text-electric">{n}</span>
+                <h3 className="mt-3 font-display text-title font-bold">{t}</h3>
+                <p className="mt-2.5 text-body text-white/65">{d}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* ── RODAPÉ ── */}
-      <footer className="border-t border-white/10 bg-navy py-10">
-        <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-center">
-          <div className="font-serif text-2xl font-bold">FC <span className="text-gold">Advocacia</span></div>
-          <p className="text-sm text-white/55">Dr. Fábio Cunha · OAB/RO 10.849</p>
-          <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
-            <Link href="/contrato" className="text-gold hover:underline">Elaboração de Contrato</Link>
-            <Link href="/entrar?next=/cliente" className="text-white/70 hover:text-white">Área do Cliente</Link>
-            <Link href="/entrar?next=/crm" className="text-white/70 hover:text-white">Área da Equipe</Link>
+      {/* SOBRE */}
+      <section id="sobre" className="scroll-mt-24 bg-ice py-24 text-charcoal">
+        <div className="mx-auto grid max-w-content items-center gap-14 px-6 md:grid-cols-[.8fr_1.2fr]">
+          <div className="relative mx-auto w-full max-w-xs">
+            <div className="absolute -inset-2 rounded-xl2 bg-gradient-to-br from-electric/20 to-transparent blur-xl" />
+            <Image
+              src="/dr-fabio-bio.jpg"
+              alt="Dr. Fábio Cunha"
+              width={420}
+              height={520}
+              className="relative h-auto w-full rounded-xl2 object-cover shadow-lift"
+            />
           </div>
-          <p className="mt-4 text-xs text-white/40">© {new Date().getFullYear()} FC Advocacia. Todos os direitos reservados.</p>
+
+          <div>
+            <span className="text-caption font-semibold uppercase tracking-[0.16em] text-electric">
+              Quem responde pelo trabalho
+            </span>
+            <h2 className="mt-3 font-display text-display font-bold text-navy">
+              Dr. Fábio Cunha
+            </h2>
+            <p className="mt-6 text-subtitle text-charcoal/70">
+              Advogado inscrito na OAB de Rondônia sob o número 10.849. Atua em
+              direito bancário, imobiliário, tributário e do consumidor,
+              defendendo pessoas e empresas contra cobranças que não se
+              sustentam.
+            </p>
+            <p className="mt-4 text-subtitle text-charcoal/70">
+              O escritório funciona de forma digital, com bases em Porto Velho e
+              Florianópolis e atuação em todo o território nacional. Isso
+              significa que o seu caso é acompanhado de perto sem que você
+              precise sair de casa, e que você vê cada movimentação assim que
+              ela acontece.
+            </p>
+
+            <div className="mt-8 flex flex-wrap gap-3">
+              <AtendimentoChat
+                variant="inline"
+                label="Conversar sobre o meu caso"
+                className="inline-flex items-center justify-center rounded-lg bg-electric px-7 py-3.5 text-body font-semibold text-white shadow-card transition hover:bg-indigo"
+              />
+              <AtendimentoWhats
+                variant="inline"
+                label="Chamar no WhatsApp"
+                className="inline-flex items-center justify-center rounded-lg border border-navy/15 px-7 py-3.5 text-body font-semibold text-navy transition hover:border-navy/40 hover:bg-navy/[.03]"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* CONTATO */}
+      <section id="contato" className="scroll-mt-24 border-t border-white/10 bg-navy py-24">
+        <div className="mx-auto max-w-2xl px-6 text-center">
+          <h2 className="font-display text-display font-bold">
+            Conte o que aconteceu
+          </h2>
+          <p className="mx-auto mt-4 max-w-xl text-subtitle text-white/65">
+            Descreva a sua situação e receba uma orientação sobre o que pode ser
+            feito. Sem compromisso e sem custo para entender o caso.
+          </p>
+
+          <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
+            <AtendimentoChat
+              variant="inline"
+              label="Analisar meu caso"
+              className="inline-flex items-center justify-center rounded-lg bg-electric px-8 py-4 text-subtitle font-semibold text-white shadow-glow transition hover:bg-indigo"
+            />
+            <AtendimentoWhats
+              variant="inline"
+              label="Chamar no WhatsApp"
+              className="inline-flex items-center justify-center rounded-lg border border-white/25 px-8 py-4 text-subtitle font-medium text-white transition hover:border-white/60 hover:bg-white/5"
+            />
+          </div>
+
+          <p className="mt-10 text-small text-slate">
+            Porto Velho, Rondônia e Florianópolis, Santa Catarina.
+            <br />
+            Atendimento em todo o território nacional.
+          </p>
+        </div>
+      </section>
+
+      {/* RODAPÉ */}
+      <footer className="border-t border-white/10 bg-navy py-14">
+        <div className="mx-auto grid max-w-content gap-10 px-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-electric to-indigo font-display text-body font-bold text-white">
+                FC
+              </span>
+              <span className="font-display text-body font-bold text-white">Advocacia</span>
+            </div>
+            <p className="mt-4 text-small text-slate">
+              Dr. Fábio Cunha
+              <br />
+              OAB/RO 10.849
+            </p>
+          </div>
+
+          <div>
+            <h3 className="text-caption font-semibold uppercase tracking-wider text-white">
+              Áreas
+            </h3>
+            <ul className="mt-4 space-y-2.5">
+              {AREAS.map((a) => (
+                <li key={a.slug}>
+                  <Link href={`/areas/${a.slug}`} className="text-small text-slate transition hover:text-white">
+                    {a.titulo}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-caption font-semibold uppercase tracking-wider text-white">
+              Serviços
+            </h3>
+            <ul className="mt-4 space-y-2.5">
+              <li><Link href="/contrato" className="text-small text-slate transition hover:text-white">Elaboração de contratos</Link></li>
+              <li><Link href="/entrar?next=/cliente" className="text-small text-slate transition hover:text-white">Área do cliente</Link></li>
+              <li><Link href="/privacidade" className="text-small text-slate transition hover:text-white">Política de privacidade</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-caption font-semibold uppercase tracking-wider text-white">
+              Atendimento
+            </h3>
+            <ul className="mt-4 space-y-2.5">
+              <li className="text-small text-slate">Porto Velho, RO</li>
+              <li className="text-small text-slate">Florianópolis, SC</li>
+              <li>
+                <Link href="/entrar?next=/crm" className="text-small text-slate/60 transition hover:text-slate">
+                  Acesso da equipe
+                </Link>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="mx-auto mt-12 max-w-content border-t border-white/10 px-6 pt-7">
+          <p className="text-caption text-slate">
+            © {new Date().getFullYear()} FC Advocacia. Conteúdo informativo, nos
+            termos do Provimento 205/2021 da OAB. Este site não substitui a
+            consulta a um advogado sobre o seu caso concreto.
+          </p>
         </div>
       </footer>
     </main>

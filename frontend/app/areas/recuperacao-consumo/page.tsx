@@ -7,7 +7,7 @@ export default function Page() {
     <AreaLanding
       titulo="Recuperação de Consumo de Energia Elétrica"
       subnichos="Multa por Irregularidade • Recuperação de Consumo • TOI • Corte Indevido"
-      chamada="A concessionária aplicou uma cobrança retroativa enorme alegando 'recuperação de consumo' ou irregularidade no medidor? Essa cobrança pode ser ilegal — e você não precisa pagar para ter a energia religada."
+      chamada="A concessionária aplicou uma cobrança retroativa enorme alegando 'recuperação de consumo' ou irregularidade no medidor? Essa cobrança pode ser ilegal, e você não precisa pagar para ter a energia religada."
       dores={[
         "Conta retroativa de milhares de reais por suposta 'recuperação de consumo'.",
         "Acusação de fraude/irregularidade no medidor com base só no TOI (Termo de Ocorrência) feito pela própria distribuidora.",

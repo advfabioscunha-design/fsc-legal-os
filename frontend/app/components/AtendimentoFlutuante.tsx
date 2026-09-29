@@ -35,10 +35,21 @@ export default function AtendimentoFlutuante() {
   const raiz = pathname.split("/")[1] || "";
   if (INTERNAS.has(raiz)) return null;
 
+  /* UMA COLUNA, NÃO DOIS BOTÕES SOLTOS.
+
+     Cada componente posicionava a si mesmo com `fixed`, e os valores
+     escolhidos deixavam dezesseis pixels entre eles, com quatro de
+     desalinhamento lateral. Na tela do cliente os dois pareciam um
+     borrão só, e no celular um cobria o outro.
+
+     Agora existe um contêiner: alinhamento à direita idêntico para os
+     dois, respiro de doze pixels entre eles, e uma margem inferior
+     maior no celular para não brigar com a barra do navegador. */
   return (
-    <>
+    <div className="fixed bottom-5 right-4 z-50 flex flex-col items-end gap-3
+                    sm:bottom-6 sm:right-6">
       <AtendimentoChat variant="floating" />
       <AtendimentoWhats variant="floating" />
-    </>
+    </div>
   );
 }

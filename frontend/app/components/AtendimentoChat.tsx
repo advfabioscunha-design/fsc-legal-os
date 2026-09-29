@@ -11,12 +11,12 @@ const SAUDACAO: Msg = {
   conteudo:
     "Olá! Seja muito bem-vindo(a) à FC Advocacia. Muito obrigado pela sua preferência! " +
     "Estou aqui para te ajudar a resolver o seu problema com toda atenção e cuidado. " +
-    "Me conte, com suas palavras, o que está acontecendo — vou te orientar agora mesmo.",
+    "Me conte, com suas palavras, o que está acontecendo, vou te orientar agora mesmo.",
 };
 
 const FALLBACK =
   "Recebi sua mensagem e já estou cuidando do seu caso. Me dê só mais um detalhe enquanto " +
-  "preparo o próximo passo. Não vou te deixar sem resposta — se preferir, também posso te " +
+  "preparo o próximo passo. Não vou te deixar sem resposta, se preferir, também posso te " +
   "encaminhar para o nosso WhatsApp.";
 
 type Variant = "inline" | "floating";
@@ -39,7 +39,7 @@ export default function AtendimentoChat({
 
   /* Conversa interligada: o cadastro e o caso ficam guardados neste
      navegador, então ao voltar ao site o atendimento CONTINUA de onde
-     parou — sem pedir nome, telefone ou e-mail outra vez. */
+     parou, sem pedir nome, telefone ou e-mail outra vez. */
   const CHAVE = "fsc_atendimento";
   useEffect(() => {
     try {
@@ -60,7 +60,7 @@ export default function AtendimentoChat({
       localStorage.setItem(CHAVE, JSON.stringify({
         nome, telefone, email, casoId, msgs, iniciado: true, ...extra,
       }));
-    } catch { /* navegador sem armazenamento — a conversa segue na sessão */ }
+    } catch { /* navegador sem armazenamento, a conversa segue na sessão */ }
   }
 
   function iniciarConversa(e: React.FormEvent) {
@@ -139,13 +139,13 @@ export default function AtendimentoChat({
       <button
         onClick={() => setAberto(true)}
         aria-label="Atendimento"
-        className="fixed bottom-24 right-5 z-40 flex items-center gap-2 rounded-full bg-gold px-5 py-3 text-sm font-bold text-navy shadow-xl transition hover:bg-amber"
+        className="flex items-center gap-2.5 rounded-full bg-electric px-5 py-3.5 text-small font-semibold text-white shadow-lift transition hover:bg-indigo"
       >
         <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.8 9.8 0 01-4-.8L3 20l.8-4A8 8 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
         </svg>
-        Tire suas dúvidas
+        <span className="hidden sm:inline">Tire suas dúvidas</span>
       </button>
     ) : (
       <button onClick={() => setAberto(true)} className={className || "rounded-full bg-gold px-8 py-4 text-sm font-bold text-navy transition hover:bg-amber"}>

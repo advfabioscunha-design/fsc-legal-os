@@ -6,7 +6,7 @@ import { supabase } from "../../lib/supabaseClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
-/* BALCÃO DE CONTRATOS — a porta de entrada do cliente.
+/* BALCÃO DE CONTRATOS, a porta de entrada do cliente.
 
    Uma tela, três passos: escolher o serviço, entrar (ou criar conta) e
    aceitar as regras da contratação. Só depois disso o pedido existe e a
@@ -47,7 +47,7 @@ export default function Balcao() {
 
   // Fechado o preço e havendo sessão, amarra o pedido ao cadastro e
   // busca o termo. O vínculo vem do token, e não de um cliente_id que a
-  // tela mandaria — era isso que fazia todo pedido nascer órfão.
+  // tela mandaria, era isso que fazia todo pedido nascer órfão.
   useEffect(() => {
     if (etapa !== "conta" || !sessao || !pedidoId) return;
     (async () => {
@@ -158,7 +158,7 @@ export default function Balcao() {
       setPedidoId(p.id);
       // A proposta vem ANTES do cadastro. Pedir CPF e endereço de quem
       // ainda não decidiu contratar é o jeito mais rápido de perder a
-      // pessoa — e são dados que não deveríamos ter guardado.
+      // pessoa, e são dados que não deveríamos ter guardado.
       setEtapa("negociar");
     } catch { setErro("Não foi possível falar com o servidor."); }
     finally { setOcupado(false); }
@@ -216,7 +216,7 @@ export default function Balcao() {
             </div>
           </section>
         ) : etapa === "conta" && !sessao ? (
-          /* Conta — só agora, com o preço já combinado */
+          /* Conta, só agora, com o preço já combinado */
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6">
             {combinado && (
               <div className="mb-4 rounded-xl border border-[#1DB954]/40 bg-[#1DB954]/10 p-3">
@@ -309,7 +309,7 @@ export default function Balcao() {
             </div>
           </section>
         ) : (
-          /* PASSO 1 — escolher o serviço */
+          /* PASSO 1, escolher o serviço */
           <section>
             <div className="mb-4 flex items-center justify-between text-xs text-white/50">
               <span>Escolha o documento que você precisa</span>
@@ -356,7 +356,7 @@ export default function Balcao() {
                       onChange={(e) => setComOrientacao(e.target.checked)}
                       className="mt-0.5 h-4 w-4 accent-[#C9A84C]" />
                     <span>
-                      Quero <b>orientação jurídica antes</b> (+ R$ 250,00) — atendimento por
+                      Quero <b>orientação jurídica antes</b> (+ R$ 250,00), atendimento por
                       vídeo com um advogado, agendado por aqui, antes da elaboração.
                     </span>
                   </label>
@@ -390,8 +390,8 @@ export default function Balcao() {
 
 /* ── A proposta e a conversa sobre ela ─────────────────────────────
 
-   O agente dá valor ao serviço antes de falar de preço, escuta a
-   objeção antes de descontar, e tem dois degraus de desconto — 10% na
+   O escritório dá valor ao serviço antes de falar de preço, escuta a
+   objeção antes de descontar, e tem dois degraus de desconto, 10% na
    resistência, 20% quando a pessoa sinaliza que vai embora.
 
    Quem calcula o preço é o servidor, não o modelo: um modelo instruído
@@ -399,7 +399,7 @@ export default function Balcao() {
    devia para agradar quem insiste.
 
    A saída da página é detectada aqui, no navegador, e mandada como um
-   sinal — não se pede a uma IA que adivinhe intenção de saída. */
+   sinal, não se pede a uma IA que adivinhe intenção de saída. */
 function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
   pedidoId: string;
   escolhido: Tipo | null;
@@ -447,7 +447,7 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
   }, [pedidoId, aoFechar]);
 
   // Intenção de saída: o mouse indo para fora da janela pela borda de
-  // cima é o gesto de quem vai fechar a aba. Uma vez só por sessão —
+  // cima é o gesto de quem vai fechar a aba. Uma vez só por sessão ,
   // repetir a última proposta a cada movimento de mouse é perseguição,
   // não venda.
   useEffect(() => {

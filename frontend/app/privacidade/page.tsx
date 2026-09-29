@@ -1,8 +1,8 @@
 /* POLÍTICA DE PRIVACIDADE
 
    Este é o documento onde a informação sobre a infraestrutura mora. Ela
-   saiu do termo de gravação e da cláusula de honorários — onde assustava
-   sem informar —, mas não podia deixar de existir: sem informação sobre o
+   saiu do termo de gravação e da cláusula de honorários, onde assustava
+   sem informar ,, mas não podia deixar de existir: sem informação sobre o
    caráter internacional do tratamento, o consentimento do cliente não
    alcança essa parte (LGPD, art. 33). Aqui ela fica disponível a quem
    quiser conferir, e o contrato remete a esta página. */
@@ -77,15 +77,15 @@ export default function Privacidade() {
         <section>
           <h2 className="text-lg font-bold text-navy">5. Com quem compartilhamos</h2>
           <p className="mt-2">
-            Com ninguém, salvo quando indispensável ao cumprimento do mandato — tribunais,
-            partes e peritos, no que o processo exigir — ou por determinação legal ou
+            Com ninguém, salvo quando indispensável ao cumprimento do mandato, tribunais,
+            partes e peritos, no que o processo exigir, ou por determinação legal ou
             judicial. Não vendemos, cedemos nem usamos os seus dados para publicidade.
           </p>
           <p className="mt-2">
             Utilizamos fornecedores de tecnologia para hospedagem, envio de e-mails e
             videochamada, que atuam como <b>operadores</b> e só podem tratar os dados
             conforme nossas instruções. <b>A infraestrutura que hospeda o sistema está
-            localizada no exterior</b>, em data centers profissionais — hipótese de
+            localizada no exterior</b>, em data centers profissionais, hipótese de
             transferência internacional admitida pelo art. 33 da LGPD, sem redução das
             garantias descritas no item 4.
           </p>

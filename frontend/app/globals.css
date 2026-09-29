@@ -2,18 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
+/* As mesmas cores do Tailwind, disponíveis em CSS puro para as poucas
+   coisas que o utilitário não alcança: barra de rolagem, seleção de
+   texto, anel de foco. Ter os valores em dois lugares foi justamente o
+   que criou os três dourados diferentes. */
+:root {
+  --navy: #0A1628;
+  --blue: #1A3A6B;
+  --electric: #2D7DD2;
+  --indigo: #4361EE;
+  --slate: #8899AA;
+  --mist: #EBF0F7;
+  --ice: #F7F9FC;
+  --gold: #C9A84C;
+  --charcoal: #1F2933;
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 
 body {
   background-color: #FFFFFF;
-  color: #1A1A1A;
+  color: var(--charcoal);
   font-family: var(--font-inter), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-h1, h2, h3, .font-serif { font-family: var(--font-playfair), Georgia, serif; }
+h1, h2, h3, .font-serif, .font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
 
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #F8F9FA; }
-::-webkit-scrollbar-thumb { background: #C5A880; border-radius: 4px; }
+/* Foco visível de verdade. O padrão do navegador some em fundo escuro,
+   e quem navega por teclado fica sem saber onde está. */
+:focus-visible {
+  outline: 2px solid var(--electric);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+::selection { background: rgba(45, 125, 210, .25); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--ice); }
+::-webkit-scrollbar-thumb {
+  background: #C6D2E2;
+  border-radius: 8px;
+  border: 2px solid var(--ice);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--slate); }
+
+/* Quem pediu menos animação no sistema operacional está pedindo por um
+   motivo. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -183,7 +183,7 @@ export default function Portal() {
 
         <p className="text-center text-xs text-[#8899AA]/60">
           Canal informativo. Nao constitui contratacao de servicos juridicos.
-          Dr. Fabio Silva Cunha — OAB/RO 10.849
+          Dr. Fabio Silva Cunha, OAB/RO 10.849
         </p>
       </main>
     </div>

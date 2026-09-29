@@ -66,7 +66,7 @@ const WHATS_RO = "5569993225383";
 const WHATS_SC = "5548988357992";
 const FALLBACK =
   "Recebi sua mensagem e já estou cuidando do seu caso. Me dê só mais um detalhe " +
-  "enquanto preparo o próximo passo. Se preferir, fale agora com nossa equipe pelo WhatsApp — " +
+  "enquanto preparo o próximo passo. Se preferir, fale agora com nossa equipe pelo WhatsApp, " +
   "não vou te deixar sem resposta.";
 
 const dataHora = (iso?: string | null) =>
@@ -116,7 +116,7 @@ export default function AreaCliente() {
       autor: "AGENTE",
       conteudo:
         `Olá${pn ? ", " + pn : ""}! Estou aqui para te ajudar. Pode me contar o que precisa ou ` +
-        `tirar qualquer dúvida sobre o seu processo, um documento ou algo que não entendeu — ` +
+        `tirar qualquer dúvida sobre o seu processo, um documento ou algo que não entendeu, ` +
         `explico tudo de forma simples e tranquila.`,
     };
   }
@@ -343,7 +343,7 @@ export default function AreaCliente() {
         autor: "AGENTE",
         conteudo: data.retomou_producao
           ? "Recebi os documentos, muito obrigado! Já estão na sua pasta e o seu processo voltou para a produção. Qualquer outra coisa que eu precisar, aviso por aqui."
-          : "Recebi os documentos, obrigado! Já estão na sua pasta. Ainda falta um item que pedimos — assim que enviar, o processo volta para a produção.",
+          : "Recebi os documentos, obrigado! Já estão na sua pasta. Ainda falta um item que pedimos, assim que enviar, o processo volta para a produção.",
       }]);
       await carregarCaso(idUsado, token, nome);
       await carregarCasos(token);
@@ -382,7 +382,7 @@ export default function AreaCliente() {
         <h1 className="font-serif text-2xl font-bold text-navy">Olá, {primeiroNome}</h1>
         <p className="mb-6 text-sm text-charcoal/60">
           {casos.length > 1
-            ? `Você tem ${casos.length} atendimentos conosco. Cada um tem o seu próprio número — é por ele que identificamos o seu caso.`
+            ? `Você tem ${casos.length} atendimentos conosco. Cada um tem o seu próprio número, é por ele que identificamos o seu caso.`
             : tipoCliente === "CONTRATOS" && pedidos.length > 0
             ? `Você tem ${pedidos.length} ${pedidos.length === 1 ? "documento" : "documentos"} conosco.`
             : "Bem-vindo(a) à sua área. Como podemos te ajudar hoje?"}
@@ -394,7 +394,7 @@ export default function AreaCliente() {
             <p className="text-sm font-bold text-navy">✍ Documento aguardando a sua assinatura</p>
             <ol className="mt-2 space-y-0.5 text-xs text-charcoal/70">
               <li>1. Baixe o documento em PDF e confira o conteúdo</li>
-              <li>2. Assine — pode imprimir e assinar à caneta, ou assinar digitalmente no celular</li>
+              <li>2. Assine, pode imprimir e assinar à caneta, ou assinar digitalmente no celular</li>
               <li>3. Volte aqui e envie o arquivo assinado</li>
             </ol>
             <ul className="mt-4 space-y-2">
@@ -420,14 +420,14 @@ export default function AreaCliente() {
               ))}
             </ul>
             <p className="mt-3 text-[11px] text-charcoal/55">
-              Pode enviar em PDF, Word ou até uma foto do documento assinado — o que for mais fácil para você.
+              Pode enviar em PDF, Word ou até uma foto do documento assinado, o que for mais fácil para você.
               Se preferir, <b>responda o e-mail</b> que enviamos com o arquivo assinado em anexo:
               funciona do mesmo jeito e chega direto no seu processo.
             </p>
           </div>
         )}
 
-        {/* Avisos sem ciência — o que o escritório precisa que você veja */}
+        {/* Avisos sem ciência, o que o escritório precisa que você veja */}
         {!carregando && avisosSemCiencia.length > 0 && vista !== "acompanhar" && (
           <div className="mb-6 rounded-2xl border border-gold/40 bg-gold/10 p-5">
             <p className="text-sm font-bold text-navy">
@@ -492,7 +492,7 @@ export default function AreaCliente() {
               className="group flex flex-col items-start rounded-2xl border border-black/5 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md">
               <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-forest text-2xl">📝</span>
               <h2 className="mt-4 font-serif text-xl font-bold text-navy">Solicitar Elaboração de Contrato</h2>
-              <p className="mt-2 text-sm text-charcoal/60">Um especialista elabora seu contrato com segurança jurídica — preço por complexidade e documento em revisão.</p>
+              <p className="mt-2 text-sm text-charcoal/60">Um especialista elabora seu contrato com segurança jurídica, preço por complexidade e documento em revisão.</p>
               <span className="mt-4 text-sm font-semibold text-gold">Abrir →</span>
             </button>
 
@@ -565,7 +565,7 @@ export default function AreaCliente() {
             <button onClick={() => setVista("home")} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
             <h2 className="font-serif text-xl font-bold text-navy">Meus atendimentos</h2>
             <p className="mt-1 text-sm text-charcoal/60">
-              Cada caso tem um número próprio. Use esse número sempre que falar conosco — assim
+              Cada caso tem um número próprio. Use esse número sempre que falar conosco, assim
               sabemos na hora de qual processo você está tratando.
             </p>
             <ul className="mt-5 space-y-3">
@@ -578,7 +578,7 @@ export default function AreaCliente() {
                       <span className="min-w-0">
                         <span className="block font-semibold text-navy">{nomeCaso(c)}</span>
                         <span className="mt-0.5 block font-mono text-xs tracking-wide text-gold">
-                          Atendimento nº {c.numero_atendimento || "—"}
+                          Atendimento nº {c.numero_atendimento || ","}
                         </span>
                         <span className="mt-1 block text-xs text-charcoal/50">
                           Aberto em {dataHora(c.criado_em).split(",")[0]}
@@ -686,7 +686,7 @@ export default function AreaCliente() {
 
             {!caso ? (
               <p className="mt-3 text-sm text-charcoal/60">
-                Você ainda não tem um caso aberto. Use o <b>Atendimento</b> para iniciar — assim que contratar,
+                Você ainda não tem um caso aberto. Use o <b>Atendimento</b> para iniciar, assim que contratar,
                 a esteira aparece aqui para você acompanhar cada etapa.
               </p>
             ) : (
@@ -724,7 +724,7 @@ export default function AreaCliente() {
                     </ul>
                   ) : (
                     <p className="mt-3 text-sm text-charcoal/55">
-                      Após o protocolo, cada movimentação ou intimação do processo aparecerá aqui automaticamente —
+                      Após o protocolo, cada movimentação ou intimação do processo aparecerá aqui automaticamente ,
                       e avisamos você por e-mail e WhatsApp a cada novo passo.
                     </p>
                   )}
@@ -741,7 +741,7 @@ export default function AreaCliente() {
                 <p className="truncate text-xs text-charcoal/50">
                   {caso?.numero_atendimento
                     ? `${nomeCaso(caso)} · nº ${caso.numero_atendimento}`
-                    : "Tire dúvidas e envie documentos — tudo por aqui."}
+                    : "Tire dúvidas e envie documentos, tudo por aqui."}
                 </p>
               </div>
               <button onClick={() => setVista("home")} className="shrink-0 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
@@ -878,7 +878,7 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
         endereco_cidade: d.endereco_cidade || f.endereco_cidade,
         endereco_uf: d.endereco_uf || f.endereco_uf,
       }));
-      setCepStatus("endereço preenchido — confira o número");
+      setCepStatus("endereço preenchido, confira o número");
       setTimeout(() => setCepStatus(""), 5000);
     } catch { ultimoCep.current = ""; setCepStatus("não consegui buscar agora"); }
   }
@@ -914,7 +914,7 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
       <button onClick={onVoltar} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
       <h2 className="font-serif text-xl font-bold text-navy">Meu cadastro</h2>
       <p className="mt-1 text-sm text-charcoal/60">
-        É por estes contatos que avisamos você a cada movimentação do seu caso — por e-mail e WhatsApp.
+        É por estes contatos que avisamos você a cada movimentação do seu caso, por e-mail e WhatsApp.
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">

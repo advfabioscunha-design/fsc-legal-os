@@ -8,12 +8,12 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
 
 /* O PEDIDO, DO LADO DO CLIENTE
 
-   Esta tela não é a área de acompanhamento de processo — é outra coisa,
+   Esta tela não é a área de acompanhamento de processo, é outra coisa,
    e de propósito. Quem pede um contrato de locação não tem processo,
    não tem prazo processual e não precisa ver nada disso.
 
-   Aqui o cliente escolhe COMO quer entregar as informações — mandando
-   cópia dos documentos ou digitando —, acompanha a fase, e no fim lê a
+   Aqui o cliente escolhe COMO quer entregar as informações, mandando
+   cópia dos documentos ou digitando ,, acompanha a fase, e no fim lê a
    minuta e aprova ou pede mudança. Uma coluna só, poucas decisões por
    vez.
 
@@ -181,12 +181,12 @@ export default function PedidoDoCliente() {
           <p className="rounded-lg border border-[#2D7DD2]/40 bg-[#2D7DD2]/10 px-3 py-2 text-xs text-white/80">{aviso}</p>
         )}
 
-        {/* COLETA — dois caminhos, o cliente escolhe */}
+        {/* COLETA, dois caminhos, o cliente escolhe */}
         {faseAtual === "COLETA" && tipo && (
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
             <h2 className="text-sm font-bold text-[#C9A24D]">Informações do contrato</h2>
             <p className="mt-1 text-xs leading-relaxed text-white/50">
-              Você escolhe como prefere. Os dois caminhos servem — e dá para
+              Você escolhe como prefere. Os dois caminhos servem, e dá para
               misturar: mandar o que tiver em foto e digitar o resto.
             </p>
 
@@ -241,7 +241,7 @@ export default function PedidoDoCliente() {
                     Como as partes combinaram? Escreva com suas palavras
                   </span>
                   <span className="block text-[10px] text-white/35">
-                    valor, prazo, quem paga o quê — isso não está no documento e muda o contrato
+                    valor, prazo, quem paga o quê, isso não está no documento e muda o contrato
                   </span>
                   <textarea value={observacoes} onChange={(e) => setObservacoes(e.target.value)}
                     rows={4} className={`mt-1 w-full ${cx}`} />
@@ -275,14 +275,14 @@ export default function PedidoDoCliente() {
               </div>
             )}
 
-            {/* Cláusula específica — vale nos dois caminhos */}
+            {/* Cláusula específica, vale nos dois caminhos */}
             {comoEnviar && (
               <label className="mt-4 block">
                 <span className="text-xs text-white/70">
                   Alguma cláusula específica que você quer incluir?
                 </span>
                 <span className="block text-[10px] text-white/35">
-                  opcional — se for algo que a lei não permita, a gente te
+                  opcional, se for algo que a lei não permita, o escritório te
                   explica antes de escrever, e você decide
                 </span>
                 <textarea value={clausulas} onChange={(e) => setClausulas(e.target.value)}
@@ -309,7 +309,7 @@ export default function PedidoDoCliente() {
           </section>
         )}
 
-        {/* PAGAMENTO — a chave de verdade, não "a gente manda depois" */}
+        {/* PAGAMENTO, a chave de verdade, não "o escritório manda depois" */}
         {faseAtual === "PAGAMENTO" && (
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
             <h2 className="text-sm font-bold text-[#C9A24D]">Pagamento por PIX</h2>
@@ -330,12 +330,12 @@ export default function PedidoDoCliente() {
               Assim que o pagamento for confirmado, a elaboração começa e o prazo
               de {pedido.prazo_entrega_horas || 24} horas passa a contar. Se tiver
               feito o PIX e a tela não mudar em algumas horas, fale com o
-              escritório — a conferência é feita por uma pessoa.
+              escritório, a conferência é feita por uma pessoa.
             </p>
           </section>
         )}
 
-        {/* APROVAÇÃO — minuta com marca d'água */}
+        {/* APROVAÇÃO, minuta com marca d'água */}
         {faseAtual === "APROVACAO" && pedido.minuta && (
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
             <h2 className="mb-3 text-sm font-bold text-[#C9A24D]">

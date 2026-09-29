@@ -24,7 +24,7 @@ export default function AreaLanding({ titulo, subnichos, chamada, dores, solucoe
           {subnichos && <p className="mt-3 text-sm font-medium uppercase tracking-wide text-gold">{subnichos}</p>}
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/75">{chamada}</p>
 
-          {/* CTA central — Atendimento */}
+          {/* CTA central, Atendimento */}
           <div className="mt-9 flex flex-col items-center gap-4">
             <AtendimentoChat variant="inline" label="Tire suas dúvidas agora"
               className="w-full max-w-xs rounded-full bg-gold px-10 py-5 text-center text-base font-bold text-navy shadow-xl shadow-gold/20 transition hover:bg-amber sm:w-auto" />
@@ -88,7 +88,7 @@ export default function AreaLanding({ titulo, subnichos, chamada, dores, solucoe
       <footer className="border-t border-white/10 bg-navy py-10 text-center text-white/60">
         <p className="text-sm text-white/80">📍 Bases em <b>Porto Velho/RO</b> &nbsp;•&nbsp; <b>Florianópolis/SC</b></p>
         <p className="text-xs text-white/50">Atuação em todo o território nacional</p>
-        <p className="mt-4 text-xs text-white/40">© {new Date().getFullYear()} FC Advocacia — Especialistas em Recuperação Patrimonial.</p>
+        <p className="mt-4 text-xs text-white/40">© {new Date().getFullYear()} FC Advocacia, Especialistas em Recuperação Patrimonial.</p>
       </footer>
     </main>
   );

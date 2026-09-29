@@ -1,27 +1,70 @@
 import Link from "next/link";
 import Header from "../components/Header";
 import AtendimentoChat from "../components/AtendimentoChat";
-import AtendimentoWhats from "../components/AtendimentoWhats";
+import { IlustraContrato } from "../components/ui/Ilustracoes";
+
+/* ELABORAÇÃO DE CONTRATOS
+ *
+ * Três coisas estavam erradas aqui e nenhuma era de design.
+ *
+ * 1. O texto contava o bastidor. "O escritório explica a complexidade", "o
+ *    agente especialista solicita os dados". Quem contrata um contrato
+ *    quer saber que um advogado responde por ele, não como o escritório
+ *    organiza o trabalho por dentro. A ferramenta é assunto do
+ *    escritório; o cliente contrata o escritório.
+ *
+ * 2. Os valores não batiam com o sistema. A página anunciava faixas de
+ *    R$ 69,90, R$ 99,90 e R$ 249,90 por "complexidade"; o balcão cobra
+ *    R$ 99,90 pela notificação extrajudicial e R$ 250,00 pelos demais
+ *    documentos. Preço anunciado que não é o preço praticado é problema
+ *    de consumidor, não detalhe de texto.
+ *
+ * 3. Havia dois botões concorrendo no mesmo lugar, e um deles era de
+ *    WhatsApp, que já existe fixo no canto da tela. Duas portas para a
+ *    mesma sala fazem a pessoa parar para escolher em vez de entrar.
+ *
+ * O texto também encolheu. O passo a passo tinha sete etapas escritas em
+ * parágrafo; virou quatro, na linguagem de quem está contratando.
+ */
 
 export const metadata = {
-  title: "Elaboração de Contrato | FC Advocacia",
-  description: "Contratos sob medida, elaborados com base na legislação e na jurisprudência aplicável, com total segurança jurídica.",
+  title: "Elaboração de contratos | FC Advocacia",
+  description:
+    "Contrato escrito por advogado, sob medida para o seu caso, revisado antes da entrega e pronto em até 24 horas.",
 };
 
 const PASSOS = [
-  { n: 1, t: "Você assina o contrato de serviço", d: "Antes de tudo, você assina o nosso contrato de prestação de serviço — rápido e digital." },
-  { n: 2, t: "Conta o que precisa", d: "Você descreve o tipo de contrato que precisa e o objetivo." },
-  { n: 3, t: "Definição da complexidade e do valor", d: "Logo na primeira informação, o agente explica a complexidade e o valor correspondente (você pode escolher uma faixa maior, nunca menor que a análise)." },
-  { n: 4, t: "Coleta das informações", d: "O agente especialista solicita, passo a passo, os dados necessários para confeccionar o contrato." },
-  { n: 5, t: "Elaboração com segurança jurídica", d: "O contrato é elaborado com base na legislação específica e na jurisprudência aplicável." },
-  { n: 6, t: "Revisão e orientações", d: "Você recebe o contrato espelhado para conferência, com orientações sobre eventuais cláusulas abusivas." },
-  { n: 7, t: "Aprovação e envio", d: "Com a sua aprovação, o contrato final é enviado por WhatsApp ou e-mail." },
+  {
+    n: "01",
+    t: "Você escolhe o documento",
+    d: "Aluguel, compra e venda, prestação de serviço, comodato, notificação. Cada tipo tem uma lista do que precisa ser informado.",
+  },
+  {
+    n: "02",
+    t: "Conta como ficou combinado",
+    d: "Envie os documentos por foto ou PDF, ou preencha os campos na tela. Os dois caminhos servem, e dá para misturar.",
+  },
+  {
+    n: "03",
+    t: "O escritório redige e revisa",
+    d: "O texto é escrito conforme a lei que rege aquele tipo de contrato e conferido por advogado antes de chegar até você.",
+  },
+  {
+    n: "04",
+    t: "Você aprova e assina",
+    d: "Leia com calma, peça ajustes se precisar e só então aprove. A assinatura é eletrônica, ou o arquivo vem para baixar.",
+  },
 ];
 
-const COMPLEXIDADE = [
-  { nivel: "Baixa", preco: "R$ 69,90", d: "Contratos simples e diretos (ex.: recibos, declarações, acordos básicos)." },
-  { nivel: "Média", preco: "R$ 99,90", d: "Contratos com cláusulas específicas e obrigações mais detalhadas." },
-  { nivel: "Alta", preco: "R$ 249,90", d: "Contratos complexos, com garantias, múltiplas partes ou alto valor envolvido." },
+const DOCUMENTOS = [
+  { t: "Locação de imóvel", d: "Residencial ou comercial, com garantia, reajuste e encargos definidos." },
+  { t: "Compra e venda", d: "Bem móvel ou imóvel, com prazo, forma de pagamento e posse." },
+  { t: "Prestação de serviço", d: "Objeto, prazo, valor e as regras do conselho profissional quando houver." },
+  { t: "Comodato", d: "Empréstimo gratuito de bem, com prazo e responsabilidade por despesas." },
+  { t: "Confissão de dívida", d: "Valor, origem, parcelamento e garantia." },
+  { t: "Notificação extrajudicial", d: "Cobrança, rescisão ou aviso formal, com prazo e consequência." },
+  { t: "Contrato de trabalho", d: "Função, salário, jornada e período de experiência." },
+  { t: "Rescisão e distrato", d: "Encerramento de contrato em vigor, com acerto e quitação." },
 ];
 
 export default function ContratoLanding() {
@@ -29,96 +72,195 @@ export default function ContratoLanding() {
     <main className="bg-navy text-white">
       <Header />
 
-      {/* Hero */}
-      <section className="px-6 pt-32 pb-16 md:pt-40">
-        <div className="mx-auto max-w-4xl text-center">
-          <span className="mb-5 inline-block rounded-full border border-gold/40 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-gold">
-            Serviço Jurídico Digital
-          </span>
-          <h1 className="font-serif text-4xl font-bold leading-tight md:text-5xl">
-            Elaboração de Contrato com <span className="text-gold">Segurança Jurídica</span>
-          </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/75">
-            Seu contrato elaborado sob medida, com base na legislação específica e na jurisprudência
-            aplicável — com orientação sobre cláusulas abusivas e total segurança jurídica.
-          </p>
-          <div className="mt-9 flex flex-col items-center gap-4">
-            <AtendimentoChat variant="inline" label="Solicitar meu contrato agora"
-              className="w-full max-w-xs rounded-full bg-gold px-10 py-5 text-center text-base font-bold text-navy shadow-xl shadow-gold/20 transition hover:bg-amber sm:w-auto" />
-            <AtendimentoWhats variant="inline" label="Tirar dúvidas no WhatsApp"
-              className="rounded-full border border-gold/40 bg-white/5 px-8 py-3 text-sm font-semibold text-white transition hover:border-gold hover:bg-white/10" />
+      {/* HERO */}
+      <section className="px-6 pb-20 pt-32 md:pt-40">
+        <div className="mx-auto grid max-w-content items-center gap-12 md:grid-cols-[1.15fr_.85fr]">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 px-4 py-1.5 text-caption font-semibold uppercase tracking-[0.16em] text-gold">
+              <span className="h-1.5 w-1.5 rounded-full bg-gold" />
+              Sem processo, sem audiência
+            </span>
+
+            <h1 className="mt-6 font-display text-display-lg font-bold">
+              Seu contrato escrito
+              <br />
+              <span className="text-gold">por um advogado</span>
+            </h1>
+
+            <p className="mt-6 max-w-xl text-subtitle text-white/70">
+              Modelo baixado da internet não conhece o seu imóvel, o seu
+              inquilino nem o que vocês combinaram. Aqui o texto é feito para o
+              seu caso, segue a lei daquele tipo de contrato e passa por
+              revisão antes de chegar até você.
+            </p>
+
+            <div className="mt-10">
+              <Link
+                href="/balcao"
+                className="inline-flex w-full items-center justify-center rounded-lg bg-gold px-9 py-4 text-subtitle font-bold text-navy shadow-card transition hover:brightness-95 sm:w-auto"
+              >
+                Pedir meu contrato
+              </Link>
+              <p className="mt-3 text-small text-slate">
+                Pronto em até 24 horas. Se precisar para hoje, há entrega em
+                até 6 horas.
+              </p>
+            </div>
           </div>
+
+          <IlustraContrato className="mx-auto hidden h-64 w-64 text-white/70 md:block" />
         </div>
       </section>
 
-      {/* Como funciona */}
-      <section className="bg-petrol py-20">
-        <div className="mx-auto max-w-4xl px-6">
-          <h2 className="text-center font-serif text-3xl font-bold">Como funciona</h2>
-          <ol className="mt-10 space-y-4">
+      {/* COMO FUNCIONA */}
+      <section className="border-y border-white/10 bg-petrol py-20">
+        <div className="mx-auto max-w-content px-6">
+          <h2 className="font-display text-display font-bold">Como funciona</h2>
+          <p className="mt-3 max-w-xl text-subtitle text-white/65">
+            Quatro passos. Você só precisa do primeiro para saber quanto custa.
+          </p>
+
+          <ol className="mt-12 grid gap-px overflow-hidden rounded-xl2 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
             {PASSOS.map((p) => (
-              <li key={p.n} className="flex gap-4 rounded-xl border border-white/10 bg-navy/50 p-5">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gold font-bold text-navy">{p.n}</span>
-                <div>
-                  <p className="font-semibold text-white">{p.t}</p>
-                  <p className="mt-1 text-sm text-white/65">{p.d}</p>
-                </div>
+              <li key={p.n} className="bg-petrol p-7">
+                <span className="font-mono text-caption font-bold text-gold">{p.n}</span>
+                <h3 className="mt-3 font-display text-body font-bold">{p.t}</h3>
+                <p className="mt-2 text-small text-white/65">{p.d}</p>
               </li>
             ))}
           </ol>
         </div>
       </section>
 
-      {/* Complexidade e preço */}
+      {/* DOCUMENTOS */}
       <section className="py-20">
-        <div className="mx-auto max-w-5xl px-6">
-          <h2 className="text-center font-serif text-3xl font-bold">Valores por complexidade</h2>
-          <p className="mx-auto mt-3 max-w-xl text-center text-white/65">
-            O valor é definido pela complexidade do contrato. Você pode escolher uma faixa maior, mas nunca menor que a análise do especialista.
+        <div className="mx-auto max-w-content px-6">
+          <h2 className="font-display text-display font-bold">
+            O que o escritório escreve
+          </h2>
+          <p className="mt-3 max-w-xl text-subtitle text-white/65">
+            Se o documento que você precisa não estiver na lista, fale com o
+            escritório antes de contratar.
           </p>
-          <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-3">
-            {COMPLEXIDADE.map((c) => (
-              <div key={c.nivel} className="rounded-2xl border border-white/10 bg-petrol p-6 text-center">
-                <p className="text-sm font-semibold uppercase tracking-wide text-gold">{c.nivel}</p>
-                <p className="mt-2 font-serif text-3xl font-bold">{c.preco}</p>
-                <p className="mt-3 text-sm text-white/60">{c.d}</p>
+
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {DOCUMENTOS.map((d) => (
+              <div key={d.t} className="rounded-xl2 border border-white/10 bg-petrol/60 p-6 transition hover:border-gold/40">
+                <h3 className="font-display text-body font-bold">{d.t}</h3>
+                <p className="mt-2 text-small text-white/60">{d.d}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Segurança jurídica */}
-      <section className="bg-petrol py-16">
+      {/* VALORES */}
+      <section className="border-y border-white/10 bg-petrol py-20">
         <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="font-serif text-2xl font-bold">Total segurança jurídica</h2>
-          <p className="mt-4 text-white/70">
-            Todo contrato é elaborado com base nas legislações específicas e na jurisprudência aplicável.
-            Antes da entrega, você recebe o documento espelhado para conferência, com orientações claras
-            sobre eventuais cláusulas abusivas — e só é finalizado com a sua aprovação.
+          <h2 className="font-display text-display font-bold">Valores</h2>
+          <p className="mx-auto mt-4 max-w-xl text-subtitle text-white/65">
+            O valor depende do documento, e você vê o preço antes de informar
+            qualquer dado pessoal.
+          </p>
+
+          <div className="mt-10 grid gap-5 sm:grid-cols-2">
+            <div className="rounded-xl2 border border-white/10 bg-navy p-8">
+              <p className="text-caption font-semibold uppercase tracking-wider text-slate">
+                Notificação extrajudicial
+              </p>
+              <p className="mt-3 font-display text-display font-bold text-white">
+                R$ 99,90
+              </p>
+              <p className="mt-3 text-small text-white/60">
+                Cobrança, aviso ou rescisão com prazo e consequência definidos.
+              </p>
+            </div>
+
+            <div className="rounded-xl2 border border-gold/30 bg-navy p-8">
+              <p className="text-caption font-semibold uppercase tracking-wider text-gold">
+                Demais contratos
+              </p>
+              <p className="mt-3 font-display text-display font-bold text-white">
+                R$ 250,00
+              </p>
+              <p className="mt-3 text-small text-white/60">
+                Locação, compra e venda, prestação de serviço, comodato,
+                confissão de dívida, trabalho e rescisão.
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-6 text-small text-slate">
+            Entrega em até 6 horas: acréscimo de R$ 30,00. Sem assinatura
+            eletrônica: desconto de R$ 10,00. Se quiser conversar com um
+            advogado sobre o caso antes da redação, o atendimento é contratado
+            à parte.
           </p>
         </div>
       </section>
 
-      {/* CTA final */}
+      {/* GARANTIA */}
       <section className="py-20">
-        <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="font-serif text-3xl font-bold">Pronto para começar?</h2>
-          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <AtendimentoChat variant="inline" label="Solicitar meu contrato agora"
-              className="rounded-full bg-gold px-10 py-4 text-sm font-bold text-navy hover:bg-amber" />
-            <Link href="/entrar?next=/cliente"
-              className="rounded-full border border-white/20 px-8 py-4 text-sm font-semibold text-white hover:border-gold">
-              Acessar minha área
-            </Link>
-          </div>
+        <div className="mx-auto max-w-3xl px-6">
+          <h2 className="font-display text-title font-bold">
+            Você lê antes de aprovar
+          </h2>
+          <p className="mt-4 text-subtitle text-white/70">
+            O documento chega para conferência com marca d’água. Se alguma
+            cláusula não refletir o que foi combinado, é só apontar e o texto
+            volta corrigido. Depois da entrega você ainda tem sete dias para
+            pedir ajuste sem custo.
+          </p>
+          <p className="mt-4 text-subtitle text-white/70">
+            Quando o negócio exigir escritura pública ou registro em cartório,
+            o escritório avisa antes do pagamento e explica o que fazer.
+            Contrato particular resolve muita coisa, mas não resolve tudo, e
+            você tem direito de saber disso antes e não depois.
+          </p>
         </div>
       </section>
 
-      <footer className="border-t border-white/10 bg-navy py-10 text-center text-white/60">
-        <p className="text-sm text-white/80">📍 Bases em <b>Porto Velho/RO</b> &nbsp;•&nbsp; <b>Florianópolis/SC</b></p>
-        <p className="text-xs text-white/50">Atuação em todo o território nacional</p>
-        <p className="mt-4 text-xs text-white/40">© {new Date().getFullYear()} FC Advocacia. Todos os direitos reservados.</p>
+      {/* CTA FINAL */}
+      <section className="border-t border-white/10 bg-petrol py-20">
+        <div className="mx-auto max-w-2xl px-6 text-center">
+          <h2 className="font-display text-display font-bold">
+            Vamos começar pelo seu documento
+          </h2>
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <Link
+              href="/balcao"
+              className="inline-flex items-center justify-center rounded-lg bg-gold px-9 py-4 text-subtitle font-bold text-navy shadow-card transition hover:brightness-95"
+            >
+              Pedir meu contrato
+            </Link>
+            <AtendimentoChat
+              variant="inline"
+              label="Tenho uma dúvida antes"
+              className="inline-flex items-center justify-center rounded-lg border border-white/25 px-9 py-4 text-subtitle font-medium text-white transition hover:border-white/60 hover:bg-white/5"
+            />
+          </div>
+          <p className="mt-6 text-small text-slate">
+            Já é cliente?{" "}
+            <Link href="/entrar?next=/cliente" className="text-white underline underline-offset-4">
+              Acesse a sua área
+            </Link>
+          </p>
+        </div>
+      </section>
+
+      <footer className="border-t border-white/10 bg-navy py-12">
+        <div className="mx-auto max-w-content px-6 text-center">
+          <p className="text-small text-slate">
+            FC Advocacia. Dr. Fábio Cunha, OAB/RO 10.849.
+          </p>
+          <p className="mt-2 text-small text-slate">
+            Porto Velho, RO e Florianópolis, SC. Atendimento em todo o país.
+          </p>
+          <p className="mt-5 text-caption text-slate/70">
+            © {new Date().getFullYear()} FC Advocacia. Conteúdo informativo, nos
+            termos do Provimento 205/2021 da OAB.
+          </p>
+        </div>
       </footer>
     </main>
   );
