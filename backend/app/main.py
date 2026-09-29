@@ -2142,6 +2142,123 @@ def excluir_membro(membro_id: str):
     return {"ok": True}
 
 
+# ══════════════════════════════════════════════════════════════════
+# EQUIPE — o convite, o aceite e o nível de acesso
+#
+# Antes disto não havia caminho: criar um acesso exigia mexer no painel
+# do Supabase e no banco, fora da plataforma, sem registro de quem fez.
+# ══════════════════════════════════════════════════════════════════
+
+class ConviteEquipe(BaseModel):
+    nome: str
+    email: str
+    nivel: str = "ASSESSOR"
+    especialidades: list[str] = []
+    telefone: str = ""
+    quem: str = ""
+
+
+class AceiteConvite(BaseModel):
+    senha: str
+
+
+class MudancaDeNivel(BaseModel):
+    nivel: str
+    motivo: str = ""
+    quem: str = ""
+
+
+@app.get("/api/v1/equipe")
+def equipe_listar():
+    """Membros, convites em aberto e os níveis que a tela oferece."""
+    from .agentes import equipe
+    return equipe.listar()
+
+
+@app.get("/api/v1/equipe/niveis")
+def equipe_niveis():
+    from .agentes import equipe
+    return equipe.niveis_para_convite()
+
+
+@app.post("/api/v1/equipe/convites")
+def equipe_convidar(body: ConviteEquipe):
+    from .agentes import equipe
+    try:
+        return equipe.convidar(body.nome, body.email, body.nivel,
+                               body.especialidades, body.telefone, body.quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/equipe/convites/{convite_id}/reenviar")
+def equipe_reenviar(convite_id: str, quem: str = ""):
+    from .agentes import equipe
+    try:
+        return equipe.reenviar(convite_id, quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/equipe/convites/{convite_id}/cancelar")
+def equipe_cancelar(convite_id: str, quem: str = "", motivo: str = ""):
+    from .agentes import equipe
+    try:
+        return equipe.cancelar(convite_id, quem, motivo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# As duas rotas abaixo são públicas: quem tem o link ainda não tem
+# conta, e por isso não tem como se autenticar. O token é o que protege,
+# e por isso ele é sorteado no servidor, vale uma vez e vence em dias.
+
+@app.get("/api/v1/convites/{token}")
+def convite_ver(token: str):
+    from .agentes import equipe
+    try:
+        return equipe.ver_convite(token)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/convites/{token}/aceitar")
+def convite_aceitar(token: str, body: AceiteConvite, request: Request):
+    from .agentes import equipe
+    ip = request.client.host if request.client else None
+    try:
+        return equipe.aceitar(token, body.senha, ip)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/equipe/perfis/{perfil_id}/nivel")
+def equipe_mudar_nivel(perfil_id: str, body: MudancaDeNivel):
+    from .agentes import equipe
+    try:
+        return equipe.mudar_nivel(perfil_id, body.nivel, body.quem, body.motivo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/equipe/membros/{membro_id}/desligar")
+def equipe_desligar(membro_id: str, quem: str = "", motivo: str = ""):
+    from .agentes import equipe
+    try:
+        return equipe.desligar(membro_id, quem, motivo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/equipe/membros/{membro_id}/reativar")
+def equipe_reativar(membro_id: str, quem: str = ""):
+    from .agentes import equipe
+    try:
+        return equipe.reativar(membro_id, quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/v1/prazos")
 def listar_prazos(responsavel_id: str | None = None, inicio: str | None = None, fim: str | None = None):
     qy = get_db().table("prazos").select("*, membros_equipe(nome,lider)")

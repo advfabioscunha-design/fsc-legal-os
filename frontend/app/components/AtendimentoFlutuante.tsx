@@ -21,6 +21,9 @@ const INTERNAS = new Set([
   // precisa entrar aqui, senão os dois círculos voltam a aparecer por
   // cima dos botões de ação — foi o que aconteceu com estas duas.
   "tarefas", "pendencias",
+  // O convite é a primeira tela que um futuro colega vê. Oferecer ali
+  // o atendimento ao cliente seria oferecer a porta errada.
+  "convite",
   // "atendimento" tem dois sentidos: a esteira da primeira fase do caso
   // (tela da equipe) e a sala de telepresença em /atendimento/<id>. As
   // duas ficam de fora — na sala, dois círculos por cima do vídeo
