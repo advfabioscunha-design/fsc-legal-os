@@ -26,13 +26,28 @@ const COLUNAS_CONTRATOS = [
   { id: "LEAD_FRIO",      label: "Sem retorno",        cor: "border-[#5A6B7C]", hdr: "bg-[#5A6B7C]/10" },
 ];
 
-/* JUDICIAL e RECEBIMENTO são as duas fases que vêm depois do protocolo.
-   As colunas aqui não são etapas de trabalho interno, e sim o estado do
-   processo em juízo — por isso são poucas e largas. */
+/* JUDICIALIZADO segue o caminho real do processo, não etapas de
+   trabalho interno. A coluna de cada caso sai da leitura das
+   publicações (backend/app/agentes/fase_judicial.py) e fica sempre
+   visível no card, com o motivo — classificação automática sem
+   justificativa ninguém confere.
+
+   As duas colunas de prazo são estados de espera: enquanto há prazo em
+   aberto o caso fica nelas, e ao cumprir volta sozinho para a coluna de
+   onde veio. */
 const COLUNAS_JUDICIAL = [
-  { id: "PROTOCOLADO",      label: "Protocolado",         cor: "border-[#1DB954]", hdr: "bg-[#1DB954]/10" },
-  { id: "JUDICIAL",         label: "Em tramitação",       cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/10" },
-  { id: "TRANSITO_JULGADO", label: "Trânsito em julgado",  cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/10" },
+  { id: "PRIMEIRO_GRAU", label: "1º grau",           cor: "border-[#8899AA]", hdr: "bg-[#8899AA]/10" },
+  { id: "PRAZO_1G",      label: "Prazo 1º grau",     cor: "border-[#C0392B]", hdr: "bg-[#C0392B]/15" },
+  { id: "AUDIENCIA",     label: "Audiência",         cor: "border-[#E5A44C]", hdr: "bg-[#E5A44C]/15" },
+  { id: "PERICIA",       label: "Perícia",           cor: "border-[#E5A44C]", hdr: "bg-[#E5A44C]/10" },
+  { id: "CONCLUSO",      label: "Concluso",          cor: "border-[#4361EE]", hdr: "bg-[#4361EE]/10" },
+  { id: "JULGADO_1G",    label: "Julgado 1º grau",   cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/15" },
+  { id: "SEGUNDO_GRAU",  label: "2º grau",           cor: "border-[#2D7DD2]", hdr: "bg-[#2D7DD2]/10" },
+  { id: "PRAZO_2G",      label: "Prazo 2º grau",     cor: "border-[#C0392B]", hdr: "bg-[#C0392B]/15" },
+  { id: "ACORDAO",       label: "Acórdão",           cor: "border-[#C9A84C]", hdr: "bg-[#C9A84C]/10" },
+  { id: "STJ",           label: "STJ",               cor: "border-[#9B59B6]", hdr: "bg-[#9B59B6]/10" },
+  { id: "STF",           label: "STF",               cor: "border-[#9B59B6]", hdr: "bg-[#9B59B6]/15" },
+  { id: "TRANSITO",      label: "Trânsito em julgado", cor: "border-[#1DB954]", hdr: "bg-[#1DB954]/15" },
 ];
 
 const COLUNAS_RECEBIMENTO = [
@@ -72,6 +87,9 @@ type Caso = {
   numero_processo?: string | null;
   clientes: { nome: string; origem?: string } | null; tese_id: string | null;
   mensagens_nao_respondidas?: number;
+  fase_judicial?: string | null;
+  fase_judicial_motivo?: string | null;
+  fase_judicial_fonte?: string | null;
 };
 
 const formVazio = { nome: "", cpf: "", contato: "", grupo: "", fase: "PETICAO", numero_processo: "", honorarios: "", descricao: "" };
@@ -91,7 +109,16 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
   const recebimento = modo === "recebimento";
   const processual = judicial || recebimento;
   const COLUNAS = POR_MODO[modo].colunas;
-  const estados = COLUNAS.map((c) => c.id);
+  /* No judicializado a coluna NÃO é o estado do caso: o estado continua
+     sendo JUDICIAL (é o que a máquina de estados protege), e a coluna
+     vem de `fase_judicial`, lida das publicações. Por isso a lista de
+     estados a buscar e a chave de agrupamento são coisas diferentes
+     aqui — e só aqui. */
+  const estados = judicial
+    ? ["JUDICIAL", "PROTOCOLADO", "TRANSITO_JULGADO"]
+    : COLUNAS.map((c) => c.id);
+  const colunaDoCaso = (c: Caso) =>
+    judicial ? (c.fase_judicial || "PRIMEIRO_GRAU") : c.estado;
   const [casos, setCasos] = useState<Caso[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -107,6 +134,7 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
      ninguém faz, e o acervo velho acaba ficando lá atrapalhando. */
   const [selecao, setSelecao] = useState<Record<string, boolean>>({});
   const [excluindo, setExcluindo] = useState(false);
+  const [recalculando, setRecalculando] = useState(false);
 
   function load() {
     setLoading(true);
@@ -207,6 +235,39 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
     } finally { setExcluindo(false); }
   }
 
+  /* Correção humana da coluna. Fica marcada como manual no servidor e
+     a leitura automática para de mexer naquele caso — quem abriu o
+     processo sabe mais que a leitura de texto. */
+  async function corrigirColuna(id: string, fase: string) {
+    await fetch(`${API}/api/v1/casos/${id}/fase-judicial`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fase, motivo: "corrigido na tela" }),
+    });
+    load();
+  }
+
+  async function religarAutomatico(id: string) {
+    await fetch(`${API}/api/v1/casos/${id}/fase-judicial/automatico`, { method: "POST" });
+    load();
+  }
+
+  async function reclassificarTudo() {
+    setRecalculando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/judicial/reclassificar`, { method: "POST" });
+      const d = await r.json().catch(() => ({} as any));
+      if (r.ok) {
+        alert(`${d.reavaliados ?? 0} de ${d.casos ?? 0} caso(s) reposicionado(s).` +
+          (d.viraram_execucao ? ` ${d.viraram_execucao} passaram para execução.` : ""));
+      } else {
+        alert(d.detail || `Erro ${r.status}`);
+      }
+      load();
+    } catch {
+      alert("Não foi possível falar com o servidor.");
+    } finally { setRecalculando(false); }
+  }
+
   async function restaurar(id: string) {
     await fetch(`${API}/api/v1/lixeira/${id}/restaurar`, { method: "POST" });
     load();
@@ -252,6 +313,13 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
               className="ml-auto rounded-md bg-[#C9A84C] px-3 py-1.5 text-sm font-bold text-[#0A1628] transition hover:bg-[#d8b95e]">
               + Carregar processos (OAB ou número)
             </button>
+            {judicial && (
+              <button onClick={reclassificarTudo} disabled={recalculando}
+                title="Relê as publicações de todos os processos e reposiciona os cards"
+                className="rounded-md border border-[#2D7DD2]/60 px-3 py-1.5 text-sm font-semibold text-[#2D7DD2] transition hover:bg-[#2D7DD2]/10 disabled:opacity-50">
+                {recalculando ? "Relendo…" : "Reavaliar colunas"}
+              </button>
+            )}
             <Link href="/intimacoes"
               className="rounded-md border border-[#C9A84C]/50 px-3 py-1.5 text-sm font-semibold text-[#C9A84C] transition hover:bg-[#C9A84C]/10">
               Intimações e prazos →
@@ -317,9 +385,9 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
       <div className="mt-4 overflow-x-auto">
         <div className="flex gap-3 min-w-max pb-4">
           {COLUNAS.map((col) => {
-            const cards = casos.filter((c) => c.estado === col.id);
+            const cards = casos.filter((c) => colunaDoCaso(c) === col.id);
             return (
-              <div key={col.id} className="w-56 shrink-0 flex flex-col gap-2">
+              <div key={col.id} className={`${judicial ? "w-48" : "w-56"} shrink-0 flex flex-col gap-2`}>
                 <div className={`rounded-lg px-3 py-2 border-l-4 ${col.cor} ${col.hdr} flex items-center justify-between`}>
                   <h2 className="text-xs font-bold text-white truncate">{col.label}</h2>
                   <span className="text-xs text-[#8899AA] ml-1">{cards.length}</span>
@@ -355,6 +423,35 @@ export default function Esteira({ modo }: { modo: ModoEsteira }) {
                       {c.tese_id && (
                         <span className="inline-block mt-1 text-[10px] bg-[#2D7DD2]/15 text-[#2D7DD2] rounded px-2 py-0.5">{c.tese_id}</span>
                       )}
+                      {/* Por que este caso está nesta coluna. Sem isso a
+                          classificação automática vira caixa-preta. */}
+                      {judicial && c.fase_judicial_motivo && (
+                        <p className="mt-1 text-[10px] leading-snug text-white/40"
+                          title={c.fase_judicial_motivo}>
+                          {c.fase_judicial_fonte === "MANUAL" ? "✋ " : ""}
+                          {c.fase_judicial_motivo.length > 64
+                            ? c.fase_judicial_motivo.slice(0, 64) + "…"
+                            : c.fase_judicial_motivo}
+                        </p>
+                      )}
+                      {judicial && (
+                        <select value={colunaDoCaso(c)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => { e.stopPropagation(); corrigirColuna(c.id, e.target.value); }}
+                          title="Corrigir a coluna à mão"
+                          className="mt-1.5 w-full rounded border border-white/10 bg-[#0A1628] px-1.5 py-1 text-[10px] text-white/70 outline-none focus:border-[#C9A84C]">
+                          {COLUNAS_JUDICIAL.map((k) => (
+                            <option key={k.id} value={k.id}>{k.label}</option>
+                          ))}
+                        </select>
+                      )}
+                      {judicial && c.fase_judicial_fonte === "MANUAL" && (
+                        <button onClick={(e) => { e.stopPropagation(); religarAutomatico(c.id); }}
+                          className="mt-1 w-full text-[10px] text-white/35 underline hover:text-white/70">
+                          voltar a seguir as publicações
+                        </button>
+                      )}
+
                       {/* Mover de fase: do judicial para a execução, e o
                           caminho de volta, se a fase foi virada cedo. */}
                       {judicial && (

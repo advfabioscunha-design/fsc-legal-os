@@ -3218,6 +3218,42 @@ class ComunicacoesLidas(BaseModel):
     confirmar_no_datajud: bool = False
 
 
+class FaseJudicialBody(BaseModel):
+    fase: str
+    motivo: str = ""
+
+
+@app.get("/api/v1/judicial/colunas")
+def judicial_colunas():
+    from .agentes.fase_judicial import COLUNAS
+    return COLUNAS
+
+
+@app.post("/api/v1/casos/{caso_id}/fase-judicial")
+def mudar_fase_judicial(caso_id: str, body: FaseJudicialBody):
+    """Correção humana da coluna. Fica marcada como manual e a leitura
+    automática para de mexer naquele caso."""
+    from .agentes import fase_judicial
+    try:
+        return fase_judicial.mover_a_mao(caso_id, body.fase.upper(), body.motivo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/casos/{caso_id}/fase-judicial/automatico")
+def religar_fase_automatica(caso_id: str):
+    from .agentes import fase_judicial
+    return fase_judicial.voltar_ao_automatico(caso_id)
+
+
+@app.post("/api/v1/judicial/reclassificar")
+def reclassificar_judicial():
+    """Relê as publicações de todo o acervo judicial e reposiciona os
+    cards. Roda também na controladoria diária."""
+    from .agentes import fase_judicial
+    return fase_judicial.recalcular_todos()
+
+
 @app.get("/api/v1/tribunais")
 def listar_tribunais():
     """Os tribunais onde o escritório atua e por qual canal se chega a

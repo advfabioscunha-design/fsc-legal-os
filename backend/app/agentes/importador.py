@@ -486,6 +486,15 @@ def importar(processos: list[dict], fase: str = "JUDICIAL") -> dict:
                     registrar_evento(caso_id, "PRAZO_NAO_CRIADO",
                                      {"intimacao": nova["id"], "erro": str(e)[:300]})
 
+        # A coluna do judicial sai das publicações que acabaram de
+        # entrar — sem isso o processo importado cairia todo em "1º
+        # grau", inclusive o que já tem acórdão.
+        try:
+            from . import fase_judicial
+            fase_judicial.recalcular(caso_id)
+        except Exception as e:
+            print(f"[importador] fase judicial não calculada para {numero}: {e}")
+
         registrar_evento(caso_id, "PROCESSO_IMPORTADO", {
             "numero": numero, "fase": destino, "fonte": "COMUNICA_CNJ",
             "publicacoes": len(coms),

@@ -294,9 +294,11 @@ def marcar_vencidos() -> int:
 # ── Rodada diária ───────────────────────────────────────────────
 def rodar() -> dict:
     resultado = {"em": _agora()}
+    from . import fase_judicial
     for nome, funcao in (("publicacoes", varrer_publicacoes),
                          ("datas_ajustadas", recalcular_datas),
                          ("fases", avancar_fases),
+                         ("colunas_do_judicial", fase_judicial.recalcular_todos),
                          ("convites", enviar_convites),
                          ("vencidos_em_aberto", marcar_vencidos)):
         try:
