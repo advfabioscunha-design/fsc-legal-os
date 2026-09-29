@@ -103,3 +103,136 @@ def enviar(destino: str, titulo: str, descricao: str, dia: date, uid: str,
         destino, f"[Agenda] {titulo}", texto, html,
         anexos=[("compromisso.ics", ics, "text/calendar")],
     )
+
+
+# ── Compromisso com hora marcada ────────────────────────────────
+#
+# O `convite()` acima nasceu para prazo, que é dia inteiro. Audiência às
+# 14h30 não é dia inteiro: quem recebe precisa ver o horário, e o
+# calendário precisa saber o fuso — senão o Google mostra 17h30 para uma
+# audiência de Porto Velho, porque assume UTC.
+#
+# O fuso vai declarado no próprio arquivo (VTIMEZONE) em vez de converter
+# para UTC, porque horário de audiência é horário local: se o país mudar
+# a regra do horário de verão, o compromisso continua às 14h30.
+
+FUSO = "America/Sao_Paulo"
+
+_VTIMEZONE = "\r\n".join([
+    "BEGIN:VTIMEZONE",
+    f"TZID:{FUSO}",
+    "BEGIN:STANDARD",
+    "DTSTART:19700101T000000",
+    "TZOFFSETFROM:-0300",
+    "TZOFFSETTO:-0300",
+    "TZNAME:-03",
+    "END:STANDARD",
+    "END:VTIMEZONE",
+])
+
+
+def _vevent(uid: str, titulo: str, descricao: str, dia: date,
+            hora_inicio: str | None = None, hora_fim: str | None = None,
+            sequencia: int = 0, local: str | None = None,
+            link: str | None = None, cancelar: bool = False,
+            alarme_minutos: int = 60, organizador: str | None = None,
+            convidados: list[tuple[str, str]] | None = None) -> list[str]:
+    """As linhas de um VEVENT. Separado para servir ao convite e ao feed."""
+    agora = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    d = dia.strftime("%Y%m%d")
+
+    if hora_inicio:
+        hi = str(hora_inicio)[:5].replace(":", "") + "00"
+        if hora_fim:
+            hf = str(hora_fim)[:5].replace(":", "") + "00"
+            fim = f"DTEND;TZID={FUSO}:{d}T{hf}"
+        else:
+            # Sem hora de término, uma hora. Bloco de duração zero some
+            # da grade de alguns calendários.
+            h = int(str(hora_inicio)[:2])
+            m = str(hora_inicio)[3:5]
+            fim = f"DTEND;TZID={FUSO}:{d}T{min(h + 1, 23):02d}{m}00"
+        tempo = [f"DTSTART;TZID={FUSO}:{d}T{hi}", fim]
+        gatilho = f"TRIGGER:-PT{max(alarme_minutos, 0)}M"
+    else:
+        tempo = [f"DTSTART;VALUE=DATE:{d}",
+                 f"DTEND;VALUE=DATE:{(dia + timedelta(days=1)).strftime('%Y%m%d')}"]
+        gatilho = "TRIGGER:-PT12H"
+
+    s = get_settings()
+    linhas = [
+        "BEGIN:VEVENT",
+        f"UID:{uid}@{DOMINIO}",
+        f"DTSTAMP:{agora}",
+        f"SEQUENCE:{sequencia}",
+        f"STATUS:{'CANCELLED' if cancelar else 'CONFIRMED'}",
+        *tempo,
+        _dobrar(f"SUMMARY:{_escapar(titulo)}"),
+        _dobrar(f"DESCRIPTION:{_escapar(descricao)}"),
+        f"ORGANIZER;CN=FSC Advocacia:mailto:{organizador or s.email_escritorio}",
+        "TRANSP:OPAQUE" if hora_inicio else "TRANSP:TRANSPARENT",
+    ]
+    if local:
+        linhas.append(_dobrar(f"LOCATION:{_escapar(local)}"))
+    if link:
+        linhas.append(_dobrar(f"URL:{link}"))
+    for nome, email in (convidados or []):
+        linhas.append(_dobrar(
+            f"ATTENDEE;CN={_escapar(nome or email)};ROLE=REQ-PARTICIPANT;"
+            f"PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{email}"))
+    if not cancelar:
+        linhas += ["BEGIN:VALARM", "ACTION:DISPLAY", gatilho,
+                   _dobrar(f"DESCRIPTION:{_escapar(titulo)}"), "END:VALARM"]
+    linhas.append("END:VEVENT")
+    return linhas
+
+
+def _envelope(corpo: list[str], metodo: str = "REQUEST",
+              nome: str | None = None) -> bytes:
+    linhas = [
+        "BEGIN:VCALENDAR", "VERSION:2.0",
+        "PRODID:-//FSC Advocacia//Legal OS//PT-BR",
+        "CALSCALE:GREGORIAN", f"METHOD:{metodo}",
+    ]
+    if nome:
+        linhas += [f"X-WR-CALNAME:{_escapar(nome)}", f"X-WR-TIMEZONE:{FUSO}"]
+    linhas.append(_VTIMEZONE)
+    linhas += corpo
+    linhas.append("END:VCALENDAR")
+    return ("\r\n".join(linhas) + "\r\n").encode("utf-8")
+
+
+def compromisso(**kw) -> bytes:
+    """Um .ics de um compromisso só, para anexar ao e-mail."""
+    cancelar = kw.get("cancelar", False)
+    return _envelope(_vevent(**kw), metodo="CANCEL" if cancelar else "REQUEST")
+
+
+def feed(itens: list[dict], nome: str = "FSC Advocacia — Agenda") -> bytes:
+    """A agenda inteira num arquivo, para o calendário assinar.
+
+    Assinar é diferente de importar: o Google relê este endereço sozinho
+    de tempos em tempos, então o que muda aqui aparece lá sem ninguém
+    reenviar nada. É o que substitui a integração por OAuth com o Google
+    Calendar, sem pedir ao escritório que entregue a conta Google inteira
+    a um servidor.
+    """
+    corpo: list[str] = []
+    for i in itens:
+        try:
+            dia = date.fromisoformat(str(i["data"])[:10])
+        except Exception:
+            continue
+        corpo += _vevent(
+            uid=i.get("uid_ics") or str(i.get("id")),
+            titulo=i.get("titulo") or "Compromisso",
+            descricao=i.get("descricao") or "",
+            dia=dia,
+            hora_inicio=i.get("hora_inicio"),
+            hora_fim=i.get("hora_fim"),
+            sequencia=int(i.get("sequencia_ics") or 0),
+            local=i.get("local"),
+            link=i.get("link"),
+            cancelar=(i.get("status") == "CANCELADO"),
+        )
+    return _envelope(corpo, metodo="PUBLISH", nome=nome)

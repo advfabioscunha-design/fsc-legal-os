@@ -3941,3 +3941,247 @@ def verificar_whatsapp(request: Request):
     if p.get("hub.verify_token") == "fsc-legal-os":
         return int(p.get("hub.challenge", 0))
     raise HTTPException(403)
+
+
+# ══════════════════════════════════════════════════════════════════
+# AGENDA — compromissos, convidados, dias fechados e notas do dia
+# ══════════════════════════════════════════════════════════════════
+
+class ConvidadoIn(BaseModel):
+    email: str
+    nome: str = ""
+    papel: str = "OUTRO"
+
+
+class NovoCompromisso(BaseModel):
+    tipo: str = "EVENTO"
+    titulo: str
+    descricao: str = ""
+    data: str
+    hora_inicio: str | None = None
+    hora_fim: str | None = None
+    local: str = ""
+    link: str = ""
+    caso_id: str | None = None
+    cliente_id: str | None = None
+    numero_processo: str | None = None
+    responsavel_id: str | None = None
+    convidados: list[ConvidadoIn] = []
+    quem: str = ""
+    # O dia bloqueado recusa agendamento. Marcar mesmo assim é decisão
+    # de quem está olhando a tela, não do sistema — daí o campo.
+    forcar: bool = False
+
+
+class AcaoCompromisso(BaseModel):
+    nova_data: str | None = None
+    nova_hora: str | None = None
+    motivo: str = ""
+    resultado: str = ""
+    responsavel_id: str | None = None
+    quem: str = ""
+
+
+class FecharDia(BaseModel):
+    data: str
+    motivo: str = ""
+    bloqueia_novos: bool = False
+    quem: str = ""
+
+
+class NotaDoDia(BaseModel):
+    data: str
+    texto: str
+    autor: str = ""
+
+
+@app.get("/api/v1/agenda")
+def agenda_listar(de: str, ate: str, responsavel_id: str | None = None,
+                  caso_id: str | None = None, tipo: str | None = None,
+                  incluir_cancelados: bool = False):
+    from .agentes import agenda
+    return agenda.listar(de, ate, responsavel_id, caso_id, tipo,
+                         incluir_cancelados)
+
+
+@app.get("/api/v1/agenda/dia/{dia}")
+def agenda_dia(dia: str):
+    """Tudo sobre uma data: compromissos, notas e o fechamento."""
+    from .agentes import agenda
+    return agenda.do_dia(dia)
+
+
+@app.get("/api/v1/agenda/semana")
+def agenda_semana(de: str | None = None, dias: int = 7):
+    from .agentes import agenda
+    return agenda.semana(de, dias)
+
+
+@app.post("/api/v1/agenda")
+def agenda_criar(body: NovoCompromisso):
+    from .agentes import agenda
+    dados = body.model_dump()
+    dados["convidados"] = [c.model_dump() for c in body.convidados]
+    try:
+        return agenda.criar(dados, body.quem, forcar=body.forcar)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/v1/agenda/{item_id}/reagendar")
+def agenda_reagendar(item_id: str, body: AcaoCompromisso):
+    from .agentes import agenda
+    if not body.nova_data:
+        raise HTTPException(400, "Informe a nova data.")
+    try:
+        return agenda.reagendar(item_id, body.nova_data, body.motivo,
+                                body.quem, body.nova_hora)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/agenda/{item_id}/concluir")
+def agenda_concluir(item_id: str, body: AcaoCompromisso):
+    from .agentes import agenda
+    try:
+        return agenda.concluir(item_id, body.resultado, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/agenda/{item_id}/cancelar")
+def agenda_cancelar(item_id: str, body: AcaoCompromisso):
+    from .agentes import agenda
+    try:
+        return agenda.cancelar(item_id, body.motivo, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/agenda/{item_id}/responsavel")
+def agenda_responsavel(item_id: str, body: AcaoCompromisso):
+    from .agentes import agenda
+    try:
+        return agenda.atribuir(item_id, body.responsavel_id, body.quem)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/agenda/{item_id}/convidar")
+def agenda_convidar(item_id: str, body: ConvidadoIn):
+    from .agentes import agenda
+    try:
+        return agenda.convidar(item_id, body.email, body.nome, body.papel)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/v1/agenda/convidados/{convidado_id}")
+def agenda_desconvidar(convidado_id: str):
+    from .agentes import agenda
+    return agenda.desconvidar(convidado_id)
+
+
+@app.get("/api/v1/agenda/confirmar/{token}")
+def agenda_confirmar(token: str, request: Request, r: str = "aceito"):
+    """O convidado clicou no botão do e-mail.
+
+    Devolve uma página, não JSON: quem clica aqui é uma pessoa abrindo o
+    link no celular, não um programa. Sem login — o token do convite é a
+    única credencial, e só serve para esta resposta.
+    """
+    from fastapi.responses import HTMLResponse
+    from .agentes import agenda
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else "")
+    try:
+        res = agenda.responder_convite(token, r, ip)
+        aceito = res["resposta"] == "ACEITO"
+        cor = "#1DB954" if aceito else "#C0392B"
+        titulo = "Presença confirmada" if aceito else "Ausência registrada"
+        recado = ("Obrigado. O escritório já foi avisado."
+                  if aceito else
+                  "Obrigado por avisar. O escritório entrará em contato "
+                  "para remarcar, se for o caso.")
+        detalhe = f"{res.get('titulo') or ''} — {res.get('data') or ''}"
+    except ValueError as e:
+        cor, titulo, recado, detalhe = "#8899AA", "Convite não encontrado", str(e), ""
+
+    return HTMLResponse(
+        f"<!doctype html><meta charset='utf-8'>"
+        f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>{titulo}</title>"
+        f"<div style=\"font-family:Arial,sans-serif;max-width:520px;margin:12vh "
+        f"auto;padding:28px;text-align:center\">"
+        f"<h2 style='color:{cor};margin:0 0 10px'>{titulo}</h2>"
+        f"<p style='color:#333;font-size:15px'>{recado}</p>"
+        f"<p style='color:#778;font-size:13px'>{detalhe}</p>"
+        f"<p style='color:#99a;font-size:12px;margin-top:28px'>"
+        f"FSC Advocacia</p></div>"
+    )
+
+
+@app.post("/api/v1/agenda/fechar-dia")
+def agenda_fechar_dia(body: FecharDia):
+    from .agentes import agenda
+    return agenda.fechar_dia(body.data, body.motivo, body.quem,
+                             body.bloqueia_novos)
+
+
+@app.delete("/api/v1/agenda/fechar-dia/{dia}")
+def agenda_reabrir_dia(dia: str, quem: str = ""):
+    from .agentes import agenda
+    return agenda.reabrir_dia(dia, quem)
+
+
+@app.get("/api/v1/agenda/notas")
+def agenda_notas(de: str, ate: str):
+    from .agentes import agenda
+    return agenda.notas(de, ate)
+
+
+@app.post("/api/v1/agenda/notas")
+def agenda_nota_criar(body: NotaDoDia):
+    from .agentes import agenda
+    if not body.texto.strip():
+        raise HTTPException(400, "A nota está vazia.")
+    return agenda.anotar_no_dia(body.data, body.texto, body.autor)
+
+
+@app.delete("/api/v1/agenda/notas/{nota_id}")
+def agenda_nota_apagar(nota_id: str):
+    from .agentes import agenda
+    return agenda.apagar_nota(nota_id)
+
+
+@app.post("/api/v1/agenda/espelhar-prazos")
+def agenda_espelhar(dias: int = 60):
+    """Põe na agenda os prazos abertos que ainda não estão lá."""
+    from .agentes import agenda
+    return agenda.espelhar_prazos(dias)
+
+
+@app.get("/api/v1/agenda/feed/{token}.ics")
+def agenda_feed(token: str):
+    """Calendário assinável — Google Calendar, Outlook, iPhone.
+
+    Assinar é diferente de importar: o Google relê este endereço sozinho,
+    então o que muda na agenda aparece lá sem ninguém reenviar nada. É o
+    que faz a vez da integração por OAuth sem entregar a conta Google
+    inteira ao servidor.
+
+    Quem tem o endereço vê a agenda toda. Por isso o token é conferido em
+    tempo constante e, se vazar, basta trocar AGENDA_FEED_TOKEN no
+    servidor para derrubar as assinaturas antigas.
+    """
+    import secrets as _sec
+    from fastapi.responses import Response
+    from .agentes import agenda
+    esperado = get_settings().agenda_feed_token
+    if not esperado or not _sec.compare_digest(token, esperado):
+        raise HTTPException(404, "Calendário não encontrado.")
+    return Response(
+        agenda.feed_ics(), media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": 'inline; filename="fsc-agenda.ics"',
+                 "Cache-Control": "max-age=900"},
+    )

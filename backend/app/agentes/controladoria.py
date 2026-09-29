@@ -492,6 +492,11 @@ def marcar_vencidos() -> int:
 
 
 # ── Rodada diária ───────────────────────────────────────────────
+def _espelhar_prazos_na_agenda() -> dict:
+    from . import agenda
+    return agenda.espelhar_prazos()
+
+
 def rodar() -> dict:
     resultado = {"em": _agora()}
     from . import fase_judicial
@@ -505,6 +510,11 @@ def rodar() -> dict:
                          ("fases", avancar_fases),
                          ("colunas_do_judicial", fase_judicial.recalcular_todos),
                          ("compromissos", agendar_eventos),
+                         # O prazo também é compromisso do dia: sem este
+                         # espelho, quem abre a Agenda vê as audiências e
+                         # não vê o que vence — e conclui que o dia está
+                         # livre.
+                         ("prazos_na_agenda", _espelhar_prazos_na_agenda),
                          ("convites", enviar_convites),
                          ("vencidos_em_aberto", marcar_vencidos),
                          ("auditoria", auditoria)):

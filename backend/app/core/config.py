@@ -58,6 +58,16 @@ class Settings(BaseModel):
 
     # Endereço do painel do cliente (usado nos links dos avisos)
     app_url: str = os.getenv("APP_URL", "https://app.fscadvocaciadigital.com.br")
+    # Endereço da própria API. O convidado confirma presença clicando num
+    # link que cai aqui, sem passar pelo painel — ele não tem login.
+    api_url: str = os.getenv("API_URL", "https://api.fscadvocaciadigital.com.br")
+
+    # Assinatura do calendário. O Google Calendar (e o Outlook, e o
+    # iPhone) assinam um endereço que devolve iCalendar e o relem sozinhos
+    # de tempos em tempos. Quem tem o endereço vê a agenda inteira, então
+    # o token é longo e só sai daqui; trocá-lo derruba as assinaturas
+    # antigas, que é justamente o que se quer quando ele vaza.
+    agenda_feed_token: str = os.getenv("AGENDA_FEED_TOKEN", "")
 
     # Lembrete automático quando o cliente não dá ciência
     aviso_lembrete_horas: int = int(os.getenv("AVISO_LEMBRETE_HORAS", "24"))
