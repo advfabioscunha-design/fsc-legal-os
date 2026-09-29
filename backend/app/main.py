@@ -4732,3 +4732,105 @@ def cumprir_prazo(prazo_id: str, body: AjustarPrazo):
             "resultado": body.motivo, "quem": body.quem or "escritório",
         })
     return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+# PROPOSTA DO CLIENTE
+#
+# O atendimento tem dois degraus de desconto e para. Quem não consegue
+# pagar nem o último valor fechava a página, e ninguém no escritório
+# ficava sabendo que existiu. A proposta é a última saída antes disso:
+# o cliente diz quanto consegue, e quem decide é o advogado.
+# ══════════════════════════════════════════════════════════════════
+
+class RespostaProposta(BaseModel):
+    decisao: str                  # ACEITA | RECUSADA | CONTRAPROPOSTA
+    valor: float | None = None    # exigido na contraproposta
+    resposta: str = ""            # o que dizer ao cliente
+    quem: str = ""
+
+
+@app.get("/api/v1/contratos/propostas")
+def balcao_propostas(status: str = "PENDENTE"):
+    """As propostas esperando decisão. É o que o painel abre primeiro."""
+    q = get_db().table("pedidos_contrato").select(
+        "id,numero,tipo,valor,proposta_valor,proposta_motivo,proposta_em,"
+        "proposta_status,fase,clientes(nome,email)")
+    if status and status != "TODAS":
+        q = q.eq("proposta_status", status.upper())
+    else:
+        q = q.not_.is_("proposta_status", "null")
+    return q.order("proposta_em", desc=True).limit(200).execute().data or []
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/proposta")
+def balcao_responder_proposta(pedido_id: str, body: RespostaProposta):
+    """Aceita, recusa ou contrapropõe, e avisa o cliente.
+
+    Aceitar grava o valor proposto como o valor do pedido: é o combinado
+    que vale, não o de tabela. Contrapropor devolve a conversa ao
+    cliente com um número novo, sem fechar nada.
+    """
+    from .core.db import registrar_evento
+    db = get_db()
+    r = db.table("pedidos_contrato").select("*,clientes(nome,email)") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    p = r[0]
+    if not p.get("proposta_valor"):
+        raise HTTPException(400, "Este pedido não tem proposta registrada.")
+
+    decisao = (body.decisao or "").upper()
+    if decisao not in ("ACEITA", "RECUSADA", "CONTRAPROPOSTA"):
+        raise HTTPException(400, "Decisão inválida.")
+    if decisao == "CONTRAPROPOSTA" and not body.valor:
+        raise HTTPException(400, "Informe o valor da contraproposta.")
+
+    campos = {
+        "proposta_status": decisao,
+        "proposta_resposta": (body.resposta or "")[:1000] or None,
+        "proposta_respondida_em": datetime.now(_tz.utc).isoformat(),
+        "proposta_respondida_por": body.quem or "escritório",
+        "atualizado_em": datetime.now(_tz.utc).isoformat(),
+    }
+    if decisao == "ACEITA":
+        campos["valor"] = float(p["proposta_valor"])
+    elif decisao == "CONTRAPROPOSTA":
+        campos["proposta_contra"] = float(body.valor or 0)
+
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_PROPOSTA_RESPONDIDA", {
+        "pedido_id": pedido_id, "decisao": decisao,
+        "proposto": p.get("proposta_valor"), "contra": body.valor,
+        "quem": body.quem})
+
+    # O cliente precisa saber, e precisa saber rápido: ele parou de
+    # avançar justamente esperando esta resposta.
+    cliente = p.get("clientes") or {}
+    if cliente.get("email"):
+        try:
+            from .integracoes import avisos
+            s = get_settings()
+            url = f"{s.app_url.rstrip('/')}/balcao/{pedido_id}"
+            if decisao == "ACEITA":
+                assunto = "Sua proposta foi aceita"
+                corpo = (f"Boa notícia: o escritório aceitou a sua proposta de "
+                         f"R$ {float(p['proposta_valor']):.2f}.\n\n")
+            elif decisao == "CONTRAPROPOSTA":
+                assunto = "O escritório respondeu à sua proposta"
+                corpo = (f"O escritório analisou a sua proposta e pode fazer o "
+                         f"serviço por R$ {float(body.valor or 0):.2f}.\n\n")
+            else:
+                assunto = "Resposta sobre a sua proposta"
+                corpo = ("O escritório analisou a sua proposta e, desta vez, "
+                         "não consegue realizar o serviço por esse valor.\n\n")
+            if body.resposta:
+                corpo += body.resposta + "\n\n"
+            corpo += f"Pedido {p.get('numero')}.\nAcompanhe em: {url}"
+            avisos.enviar_email(cliente["email"], assunto, corpo,
+                                corpo.replace("\n", "<br>"))
+        except Exception as e:
+            print(f"[balcao] cliente não avisado da proposta: {e}")
+
+    return {"ok": True, "decisao": decisao}

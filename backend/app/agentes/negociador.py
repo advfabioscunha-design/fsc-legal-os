@@ -101,6 +101,11 @@ REGRAS DURAS
 `propor_valor`. O que ela devolver é o preço, e é o único número que você diz.
 - Nunca ofereça mais de dois descontos. A ferramenta recusa o terceiro; se \
 recusar, diga com franqueza que esse é o melhor valor e volte a falar do serviço.
+- Esgotados os dois descontos, se o cliente disser que mesmo assim não \
+consegue, ofereça a ele deixar uma proposta para o escritório analisar e use \
+`registrar_proposta`. Não ofereça isso antes: enquanto houver desconto a dar, \
+pedir contraproposta é ensinar a pechinchar. E nunca diga que a proposta será \
+aceita, nem dê a entender que sim. O escritório responde depois.
 - Nunca afirme valor mínimo de tabela da OAB, nem cite tabela de honorários, \
 nem diga "abaixo do mínimo da categoria". Você não tem essa informação.
 - Nunca prometa resultado, nem diga que o contrato é imune a questionamento, \
@@ -169,6 +174,32 @@ FERRAMENTAS = [
                 },
             },
             "required": ["resumo"],
+        },
+    },
+    {
+        "name": "registrar_proposta",
+        "description": (
+            "ÚLTIMO RECURSO. Use só depois que o desconto de 20% já foi "
+            "oferecido e o cliente disse que ainda não consegue pagar. "
+            "Registra o valor que ele propõe para o escritório analisar. "
+            "Você NÃO aceita a proposta nem diz que ela será aceita: "
+            "quem decide é o advogado."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "valor": {
+                    "type": "number",
+                    "description": "Quanto o cliente se dispõe a pagar, em reais.",
+                },
+                "motivo": {
+                    "type": "string",
+                    "description": (
+                        "Por que esse valor, nas palavras dele. É a parte mais "
+                        "útil para quem vai decidir: anote o que ele disse, não "
+                        "um resumo genérico."),
+                },
+            },
+            "required": ["valor"],
         },
     },
 ]
@@ -262,6 +293,85 @@ def _executar_propor(pedido: dict, args: dict) -> dict:
             "Este é o melhor valor. Não há outro desconto disponível, "
             "diga isso com franqueza e volte a falar do serviço.")
     return resposta
+
+
+def _executar_proposta(pedido: dict, args: dict) -> dict:
+    """Guarda a contraproposta do cliente e avisa o escritório.
+
+    Existe para não jogar informação fora. Sem isto, quem não consegue
+    pagar o último valor fecha a página e ninguém fica sabendo que
+    existiu. Três pessoas oferecendo R$ 150 pelo mesmo tipo de contrato
+    na mesma semana dizem mais sobre o preço do que qualquer palpite.
+
+    O agente não decide nada aqui. Ele registra e diz que o escritório
+    responde, o que é verdade.
+    """
+    db = get_db()
+    pedido_atual = _pedido(pedido["id"])
+    try:
+        valor = round(float(args.get("valor") or 0), 2)
+    except (TypeError, ValueError):
+        valor = 0.0
+    if valor <= 0:
+        return {"erro": "Pergunte quanto ele consegue pagar antes de registrar."}
+
+    de_tabela = catalogo.precificar(
+        pedido_atual["tipo"],
+        com_orientacao=bool(pedido_atual.get("com_orientacao")),
+    )["total"]
+
+    db.table("pedidos_contrato").update({
+        "proposta_valor": valor,
+        "proposta_motivo": (args.get("motivo") or "")[:1000] or None,
+        "proposta_em": _agora(),
+        "proposta_status": "PENDENTE",
+        "atualizado_em": _agora(),
+    }).eq("id", pedido["id"]).execute()
+
+    _anotar(pedido["id"], {"tipo": "PROPOSTA_CLIENTE", "total": valor,
+                           "porque": (args.get("motivo") or "")[:300]})
+    registrar_evento(None, "BALCAO_PROPOSTA_CLIENTE",
+                     {"pedido_id": pedido["id"], "valor": valor,
+                      "de_tabela": de_tabela,
+                      "motivo": (args.get("motivo") or "")[:300]})
+
+    try:
+        _avisar_escritorio(pedido_atual, valor, args.get("motivo") or "")
+    except Exception as e:
+        print(f"[balcao] proposta não avisada por e-mail: {e}")
+
+    # Honestidade com quem propôs: abaixo de 40% do valor de tabela a
+    # chance é pequena, e é melhor ele saber agora do que esperar dois
+    # dias por um não.
+    resposta = {
+        "registrada": True, "valor": valor, "de_tabela": de_tabela,
+        "prazo_resposta": "até 1 dia útil",
+    }
+    if valor < de_tabela * 0.4:
+        resposta["aviso"] = (
+            "Registre, mas diga com franqueza que propostas muito abaixo do "
+            "valor do serviço raramente são aceitas, para ele não criar "
+            "expectativa.")
+    return resposta
+
+
+def _avisar_escritorio(pedido: dict, valor: float, motivo: str) -> None:
+    from ..integracoes import avisos
+    s = get_settings()
+    t = catalogo.detalhe(pedido["tipo"]) or {}
+    link = f"{s.app_url.rstrip('/')}/contratos"
+    texto = (
+        f"Proposta recebida no balcão.\n\n"
+        f"Pedido: {pedido.get('numero')}\n"
+        f"Documento: {t.get('nome', pedido.get('tipo'))}\n"
+        f"Valor proposto: R$ {valor:.2f}\n"
+        f"Motivo: {motivo or 'não informado'}\n\n"
+        f"Responder em: {link}"
+    )
+    avisos.enviar_email(
+        s.email_escritorio,
+        f"[Balcão] Proposta de R$ {valor:.2f} para análise",
+        texto, texto.replace("\n", "<br>"))
 
 
 def _executar_fechar(pedido: dict, args: dict) -> dict:
@@ -366,6 +476,7 @@ def conversar(pedido_id: str, mensagem: str,
 
     cliente = _claude()
     resposta_final, conta_final, fechou = "", None, False
+    proposta = False
 
     for _ in range(4):                    # trava contra laço infinito
         r = cliente.messages.create(
@@ -389,6 +500,9 @@ def conversar(pedido_id: str, mensagem: str,
             elif u.name == "fechar":
                 saida = _executar_fechar(pedido, u.input or {})
                 conta_final, fechou = saida, True
+            elif u.name == "registrar_proposta":
+                saida = _executar_proposta(pedido, u.input or {})
+                proposta = bool(saida.get("registrada"))
             else:
                 saida = {"erro": "ferramenta desconhecida"}
             resultados.append({"type": "tool_result", "tool_use_id": u.id,
@@ -404,6 +518,7 @@ def conversar(pedido_id: str, mensagem: str,
                       {"total": (conta_final or {}).get("total"),
                        "fechou": fechou})
     return {"texto": resposta_final, "conta": conta_final, "fechou": fechou,
+            "proposta_registrada": proposta,
             "pix": PIX if fechou else None}
 
 

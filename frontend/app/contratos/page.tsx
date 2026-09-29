@@ -75,6 +75,8 @@ export default function BalcaoOperador() {
           </div>
         </div>
 
+        <PropostasPendentes recarregar={carregar} />
+
         {carregando && <p className="text-xs text-white/40">Carregando…</p>}
 
         {verArquivo ? (
@@ -479,6 +481,141 @@ function Linha({ rotulo, valor }: { rotulo: string; valor: string }) {
       <span className="text-white/40">{rotulo}</span>
       <span className="flex-1 border-b border-dotted border-white/10" />
       <span className="text-white/80">{valor}</span>
+    </div>
+  );
+}
+
+
+/* ── PROPOSTAS ESPERANDO DECISÃO ──────────────────────────────────
+
+   Fica no topo da esteira e só aparece quando há o que decidir. É o
+   único ponto da tela em que alguém está do outro lado esperando uma
+   resposta que só uma pessoa pode dar: o cliente parou de avançar
+   exatamente aqui.
+
+   Por isso mostra o valor de tabela ao lado do proposto e a
+   justificativa dele por extenso. Decidir só com o número é decidir no
+   escuro: "é o que sobra do aluguel deste mês" e "achei caro" levam a
+   respostas diferentes. */
+function PropostasPendentes({ recarregar }: { recarregar: () => void }) {
+  const [lista, setLista] = useState<any[]>([]);
+  const [abertaId, setAbertaId] = useState<string | null>(null);
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/propostas?status=PENDENTE`);
+      const d = await r.json();
+      setLista(Array.isArray(d) ? d : []);
+    } catch { setLista([]); }
+  }, []);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  if (lista.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-[#E5A44C]/40 bg-[#E5A44C]/[.07] p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-sm">✋</span>
+        <h3 className="text-sm font-bold text-[#E5A44C]">
+          {lista.length === 1
+            ? "Uma proposta esperando a sua decisão"
+            : `${lista.length} propostas esperando a sua decisão`}
+        </h3>
+        <span className="ml-auto text-[10px] text-white/40">
+          o cliente parou o pedido aqui
+        </span>
+      </div>
+
+      <div className="space-y-2">
+        {lista.map((p) => (
+          <div key={p.id} className="rounded-lg bg-black/25 p-3">
+            <button onClick={() => setAbertaId(abertaId === p.id ? null : p.id)}
+              className="flex w-full flex-wrap items-baseline gap-2 text-left">
+              <span className="text-xs font-semibold text-white">
+                {p.clientes?.nome ?? "sem cadastro"}
+              </span>
+              <span className="text-[10px] text-white/40">
+                {p.numero} · {String(p.tipo || "").replaceAll("_", " ").toLowerCase()}
+              </span>
+              <span className="ml-auto text-xs">
+                <b className="text-[#E5A44C]">{brl(p.proposta_valor)}</b>
+                <span className="text-white/35"> de {brl(p.valor)}</span>
+              </span>
+            </button>
+
+            {p.proposta_motivo && (
+              <p className="mt-1.5 text-[11px] italic leading-relaxed text-white/60">
+                “{p.proposta_motivo}”
+              </p>
+            )}
+
+            {abertaId === p.id && (
+              <Decisao pedido={p}
+                depois={() => { carregar(); recarregar(); setAbertaId(null); }} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Decisao({ pedido, depois }: { pedido: any; depois: () => void }) {
+  const [resposta, setResposta] = useState("");
+  const [contra, setContra] = useState("");
+  const [ocupado, setOcupado] = useState("");
+
+  async function responder(decisao: string) {
+    if (decisao === "CONTRAPROPOSTA" && !contra) {
+      alert("Informe o valor da contraproposta.");
+      return;
+    }
+    setOcupado(decisao);
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedido.id}/proposta`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decisao, resposta,
+          valor: decisao === "CONTRAPROPOSTA" ? Number(contra) : null,
+          quem: "escritório",
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j?.detail || "Não deu certo."); return; }
+      depois();
+    } finally { setOcupado(""); }
+  }
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
+      <input value={resposta} onChange={(e) => setResposta(e.target.value)}
+        placeholder="o que dizer ao cliente (vai no e-mail)"
+        className={inp} />
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => responder("ACEITA")} disabled={!!ocupado}
+          className={`${btn} bg-[#1DB954] text-[#0A1628]`}>
+          {ocupado === "ACEITA" ? "…" : `Aceitar ${brl(pedido.proposta_valor)}`}
+        </button>
+
+        <div className="flex gap-1">
+          <input value={contra} onChange={(e) => setContra(e.target.value)}
+            type="number" placeholder="contraproposta"
+            className={`${inp} w-32`} />
+          <button onClick={() => responder("CONTRAPROPOSTA")} disabled={!!ocupado}
+            className={`${btn} shrink-0 bg-[#E5A44C] text-[#0A1628]`}>
+            {ocupado === "CONTRAPROPOSTA" ? "…" : "Contrapropor"}
+          </button>
+        </div>
+
+        <button onClick={() => responder("RECUSADA")} disabled={!!ocupado}
+          className={`${btn} border border-[#C0392B]/50 text-[#ff9c90]`}>
+          {ocupado === "RECUSADA" ? "…" : "Recusar"}
+        </button>
+      </div>
+      <p className="text-[10px] text-white/35">
+        Aceitar grava o valor proposto como o valor do pedido. O cliente recebe
+        a resposta por e-mail nos três casos.
+      </p>
     </div>
   );
 }

@@ -418,6 +418,7 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
   const [texto, setTexto] = useState("");
   const [pensando, setPensando] = useState(false);
   const [usouSaida, setUsouSaida] = useState(false);
+  const [propostaEnviada, setPropostaEnviada] = useState(false);
   const fim = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -447,6 +448,7 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
       const d = await r.json();
       if (d?.texto) setFalas((f) => [...f, { de: "agente", texto: d.texto }]);
       if (d?.conta) setConta(d.conta);
+      if (d?.proposta_registrada) setPropostaEnviada(true);
       if (d?.fechou) aoFechar(d.conta);
     } catch {
       setFalas((f) => [...f, { de: "agente", texto: "Tive um problema de conexão. Pode repetir?" }]);
@@ -501,6 +503,18 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
         {pensando && <p className="text-[11px] text-white/35">digitando…</p>}
         <div ref={fim} />
       </div>
+
+      {propostaEnviada && (
+        <div className="mt-3 rounded-xl border border-[#1DB954]/40 bg-[#1DB954]/10 p-3">
+          <p className="text-xs font-bold text-[#1DB954]">
+            Sua proposta foi registrada
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-white/70">
+            Um advogado do escritório vai analisar e responder pelo seu e-mail
+            em até um dia útil. Você não precisa fazer mais nada agora.
+          </p>
+        </div>
+      )}
 
       <div className="mt-3 flex gap-2">
         <input value={texto} onChange={(e) => setTexto(e.target.value)}

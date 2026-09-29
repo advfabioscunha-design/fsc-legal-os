@@ -177,6 +177,47 @@ export default function PedidoDoCliente() {
           </div>
         </section>
 
+        {/* A proposta trava o pedido: enquanto não houver resposta, não
+            adianta o cliente preencher nada. Dizer isso evita que ele
+            fique tentando avançar numa tela que não vai avançar. */}
+        {pedido.proposta_status === "PENDENTE" && (
+          <section className="rounded-2xl border border-[#E5A44C]/40 bg-[#E5A44C]/10 p-5">
+            <p className="text-sm font-bold text-[#E5A44C]">
+              Proposta em análise
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-white/75">
+              Você propôs {brl(pedido.proposta_valor)}. Um advogado do escritório
+              está analisando e responde pelo seu e-mail em até um dia útil.
+            </p>
+          </section>
+        )}
+
+        {pedido.proposta_status === "CONTRAPROPOSTA" && (
+          <section className="rounded-2xl border border-[#2D7DD2]/40 bg-[#2D7DD2]/10 p-5">
+            <p className="text-sm font-bold text-[#2D7DD2]">
+              O escritório respondeu
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-white/75">
+              Você propôs {brl(pedido.proposta_valor)} e o escritório pode fazer
+              por {brl(pedido.proposta_contra)}.
+              {pedido.proposta_resposta ? ` ${pedido.proposta_resposta}` : ""}
+            </p>
+          </section>
+        )}
+
+        {pedido.proposta_status === "RECUSADA" && (
+          <section className="rounded-2xl border border-white/15 bg-[#0B1F3B] p-5">
+            <p className="text-sm font-bold text-white/85">
+              Sobre a sua proposta
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-white/70">
+              Desta vez o escritório não consegue realizar o serviço pelo valor
+              proposto.
+              {pedido.proposta_resposta ? ` ${pedido.proposta_resposta}` : ""}
+            </p>
+          </section>
+        )}
+
         {aviso && (
           <p className="rounded-lg border border-[#2D7DD2]/40 bg-[#2D7DD2]/10 px-3 py-2 text-xs text-white/80">{aviso}</p>
         )}
