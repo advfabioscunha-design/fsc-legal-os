@@ -3564,7 +3564,11 @@ class RecuperarPorCpf(BaseModel):
 def ver_termo_contratacao(pedido_id: str):
     from .agentes import contratos_online
     p = ver_pedido(pedido_id)
-    return contratos_online.termo_de_contratacao(p["tipo"], p.get("com_orientacao"))
+    # O pedido inteiro vai junto: é dele que saem o valor combinado, o
+    # desconto, a urgência e a proposta aceita. Mandar só o tipo era o
+    # que fazia o termo mostrar sempre o preço de tabela.
+    return contratos_online.termo_de_contratacao(
+        p["tipo"], p.get("com_orientacao"), pedido=p)
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/termo-contratacao")
@@ -3575,7 +3579,8 @@ def aceitar_termo_contratacao(pedido_id: str, body: TermoContratacaoBody,
     if not body.aceito:
         raise HTTPException(400, "É preciso aceitar para prosseguir.")
     p = ver_pedido(pedido_id)
-    termo = contratos_online.termo_de_contratacao(p["tipo"], p.get("com_orientacao"))
+    termo = contratos_online.termo_de_contratacao(
+        p["tipo"], p.get("com_orientacao"), pedido=p)
     ip = request.client.host if request.client else None
     r = contratos_online.aceitar_contratacao(pedido_id, termo, ip)
     return {"ok": True, "aceite": r["id"], "fase": "PAGAMENTO",
@@ -4802,6 +4807,46 @@ def balcao_entregar(pedido_id: str, body: EntregaDoPedido):
 def balcao_arquivar(pedido_id: str, quem: str = ""):
     from .agentes import contratos_online
     return contratos_online.arquivar(pedido_id, quem)
+
+
+class PedidoDeDesarquivamento(BaseModel):
+    motivo: str
+    cliente_id: str | None = None
+
+
+class RespostaDesarquivamento(BaseModel):
+    aprovado: bool
+    resposta: str = ""
+    quem: str = ""
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/desarquivar")
+def balcao_pedir_desarquivamento(pedido_id: str,
+                                 body: PedidoDeDesarquivamento):
+    """O cliente pede o pedido de volta, explicando por quê."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.pedir_desarquivamento(
+            pedido_id, body.motivo, body.cliente_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/contratos/desarquivamentos")
+def balcao_desarquivamentos(status: str = "PENDENTE"):
+    from .agentes import contratos_online
+    return contratos_online.desarquivamentos(status.upper())
+
+
+@app.post("/api/v1/contratos/desarquivamentos/{chamado_id}")
+def balcao_responder_desarquivamento(chamado_id: str,
+                                     body: RespostaDesarquivamento):
+    from .agentes import contratos_online
+    try:
+        return contratos_online.responder_desarquivamento(
+            chamado_id, body.aprovado, body.resposta, body.quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/v1/contratos/arquivar-vencidos")

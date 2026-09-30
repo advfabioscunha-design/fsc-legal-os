@@ -76,6 +76,7 @@ export default function BalcaoOperador() {
         </div>
 
         <PropostasPendentes recarregar={carregar} />
+        <Desarquivamentos recarregar={carregar} />
 
         {carregando && <p className="text-xs text-white/40">Carregando…</p>}
 
@@ -719,5 +720,95 @@ function Decisao({ pedido, depois }: { pedido: any; depois: () => void }) {
         a resposta por e-mail nos três casos.
       </p>
     </div>
+  );
+}
+
+
+/* ── CHAMADOS DE DESARQUIVAMENTO ──────────────────────────────
+ *
+ * Pedido que passou dos sete dias sem aprovação arquiva sozinho. O
+ * cliente que voltar depois escreve por que precisa do documento, e o
+ * chamado cai aqui.
+ *
+ * Fica no topo da esteira, junto das propostas, porque é gente
+ * esperando resposta, e não trabalho na fila. A diferença entre as
+ * duas coisas é o que decide a ordem do dia.
+ */
+function Desarquivamentos({ recarregar }: { recarregar: () => void }) {
+  const [lista, setLista] = useState<any[]>([]);
+  const [ocupado, setOcupado] = useState("");
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/desarquivamentos`);
+      setLista(r.ok ? await r.json() : []);
+    } catch { setLista([]); }
+  }, []);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  async function responder(c: any, aprovado: boolean) {
+    const resposta = aprovado
+      ? (prompt("Quer dizer algo ao cliente junto com a aprovação? (opcional)") ?? "")
+      : (prompt("Explique ao cliente por que não é possível reabrir agora:") || "");
+    if (!aprovado && !resposta.trim()) return;
+
+    setOcupado(c.id);
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/desarquivamentos/${c.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aprovado, resposta, quem: "escritório" }),
+      });
+      if (r.ok) { carregar(); recarregar(); }
+    } finally { setOcupado(""); }
+  }
+
+  if (lista.length === 0) return null;
+
+  return (
+    <section className="mb-5 rounded-2xl border border-[#E5A44C]/40 bg-[#E5A44C]/5 p-5">
+      <p className="text-xs font-bold uppercase tracking-wider text-[#E5A44C]">
+        {lista.length === 1
+          ? "Um cliente pediu para reabrir um documento arquivado"
+          : `${lista.length} clientes pediram para reabrir documentos arquivados`}
+      </p>
+
+      <div className="mt-4 space-y-3">
+        {lista.map((c) => {
+          const p = c.pedidos_contrato || {};
+          const cli = p.clientes || {};
+          return (
+            <div key={c.id} className="rounded-xl border border-white/10 bg-[#0B1F3B] p-4">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span className="font-mono text-[11px] text-white/50">{p.numero}</span>
+                <span className="text-sm font-semibold text-white">{cli.nome || "sem cadastro"}</span>
+                <span className="text-[11px] text-white/40">
+                  {p.tipo === "OUTRO" && p.servico_livre
+                    ? p.servico_livre.slice(0, 40)
+                    : String(p.tipo || "").replaceAll("_", " ").toLowerCase()}
+                </span>
+              </div>
+
+              <p className="mt-2 whitespace-pre-line rounded-lg bg-black/25 px-3 py-2 text-[12px] leading-relaxed text-white/75">
+                {c.motivo}
+              </p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => responder(c, true)} disabled={ocupado === c.id}
+                  className="rounded-lg bg-[#1DB954] px-4 py-2 text-xs font-bold text-[#0A1628] disabled:opacity-50">
+                  Reabrir com prazo novo
+                </button>
+                <button onClick={() => responder(c, false)} disabled={ocupado === c.id}
+                  className="rounded-lg border border-[#C0392B]/40 px-4 py-2 text-xs font-semibold text-[#ff9a8f]">
+                  Recusar
+                </button>
+                <span className="ml-auto self-center text-[11px] text-white/35">
+                  Reabrir devolve o documento à revisão do cliente por mais sete dias.
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

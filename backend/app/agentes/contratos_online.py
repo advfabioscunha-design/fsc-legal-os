@@ -49,14 +49,36 @@ VERSAO_TERMO = "2026-09-v1"
 VERSAO_CONTRATACAO = "2026-09-v1"
 
 
-def termo_de_contratacao(tipo: str, com_orientacao: bool = False) -> dict:
+def _reais(v: float) -> str:
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def termo_de_contratacao(tipo: str, com_orientacao: bool = False,
+                         pedido: dict | None = None) -> dict:
     """As regras da contratação, em texto curto, antes de começar.
 
     Curto de propósito: termo que ninguém lê não informa ninguém, e o
     que interessa aqui cabe em uma tela — o que o escritório faz, por
-    quanto, em quanto tempo, e o que acontece se o cliente desistir."""
+    quanto, em quanto tempo, e o que acontece se o cliente desistir.
+
+    O TERMO LÊ O PEDIDO, NÃO A TABELA
+    Antes ele mostrava sempre o preço cheio, mesmo quando o cliente
+    tinha negociado 20% ou tido a própria proposta aceita. A pessoa
+    assinava um texto que dizia um valor e pagava outro, o que é o tipo
+    de incoerência que ninguém percebe na hora e todo mundo lembra na
+    discussão. Agora o valor sai do pedido, com o desconto, a urgência
+    e a proposta aceita discriminados."""
     t = catalogo.detalhe(tipo) or {}
-    valor = catalogo.preco(tipo, com_orientacao)
+    p = pedido or {}
+
+    valor = float(p.get("valor") or 0) or catalogo.preco(tipo, com_orientacao)
+    base = float(p.get("valor_base") or 0)
+    desconto = float(p.get("desconto_pct") or 0)
+    urgente = bool(p.get("urgente"))
+    horas = int(p.get("prazo_entrega_horas") or (
+        catalogo.HORAS_URGENTE if urgente else catalogo.HORAS_PADRAO))
+    por_proposta = p.get("proposta_status") == "ACEITA"
+
     linhas = [
         f"CONTRATAÇÃO DE SERVIÇO, {t.get('nome', tipo)}",
         "",
@@ -67,23 +89,61 @@ def termo_de_contratacao(tipo: str, com_orientacao: bool = False) -> dict:
         f"validade jurídica (Lei 14.063/2020 e MP 2.200-2/2001).",
         "",
         "VALOR E PAGAMENTO",
-        f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        + ", por PIX, à vista. O trabalho começa depois do pagamento confirmado.",
+        f"{_reais(valor)}, por PIX, à vista. O trabalho começa depois do "
+        f"pagamento confirmado.",
     ]
-    if com_orientacao:
+
+    # A conta, aberta. Só aparece o que de fato aconteceu nesta
+    # negociação: linha de desconto sem desconto é ruído.
+    detalhe = []
+    if base and base != valor:
+        detalhe.append(f"Valor de tabela deste documento: {_reais(base)}.")
+    if desconto:
+        detalhe.append(f"Desconto combinado no atendimento: {desconto:.0f}%.")
+    if urgente:
+        detalhe.append(
+            f"Acréscimo de urgência: entrega em até {horas} horas em vez de "
+            f"{catalogo.HORAS_PADRAO}.")
+    if p.get("assinatura_digital") is False:
+        detalhe.append("Sem assinatura eletrônica, com o desconto "
+                       "correspondente. O documento é entregue para baixar.")
+    if por_proposta:
+        detalhe.append(
+            f"Este valor é a proposta que você apresentou e que o escritório "
+            f"aceitou em {_br(p.get('proposta_respondida_em'))}.")
+    if detalhe:
+        linhas += ["", "COMO SE CHEGOU A ESSE VALOR"] + detalhe
+
+    if com_orientacao or p.get("com_orientacao"):
         linhas += ["Inclui atendimento jurídico prévio, por vídeo, com gravação "
                    "de áudio e transcrição, mediante seu consentimento na sala."]
     linhas += [
         "",
-        "PRAZO",
-        "A primeira versão fica pronta em até 3 dias úteis contados do "
-        "pagamento e do recebimento de todos os dados e documentos. Cada "
-        "pedido de alteração seu reinicia a contagem de 1 dia útil.",
+        "PRAZO DE ENTREGA",
+        f"A primeira versão fica pronta em até {horas} horas contadas do "
+        f"pagamento confirmado e do recebimento de todos os dados e "
+        f"documentos que o escritório pedir. Cada pedido de alteração seu "
+        f"reinicia a contagem.",
+    ]
+    if urgente:
+        linhas += ["Você contratou a entrega urgente: o prazo é de 6 horas, e "
+                   "ele só começa quando as informações estiverem completas."]
+    linhas += [
+        "",
+        "REVISÃO E APROVAÇÃO, E O PRAZO DE 7 DIAS",
+        "Quando o documento ficar pronto, ele é disponibilizado na sua área "
+        "na plataforma e você é avisado por e-mail. A partir dessa "
+        "disponibilização você tem 7 dias corridos para ler, pedir alteração "
+        "e aprovar.",
+        "Passados os 7 dias sem aprovação e sem pedido de alteração, a "
+        "solicitação é arquivada automaticamente. O documento não se perde: "
+        "para retomá-lo, basta abrir um chamado de desarquivamento na sua "
+        "área, explicando o motivo. O escritório analisa e responde.",
         "",
         "REVISÕES",
-        "Você recebe o documento para conferência e pode pedir alterações "
-        "quantas vezes precisar, desde que dentro do que foi contratado. "
-        "Mudar o tipo de contrato ou incluir objeto novo é outro serviço.",
+        "Dentro dos 7 dias você pode pedir alterações quantas vezes precisar, "
+        "desde que dentro do que foi contratado. Mudar o tipo de contrato ou "
+        "incluir objeto novo é outro serviço.",
         "",
         "O QUE NÃO ESTÁ INCLUÍDO",
         "Custas de cartório, registro, reconhecimento de firma, taxas e "
@@ -102,7 +162,16 @@ def termo_de_contratacao(tipo: str, com_orientacao: bool = False) -> dict:
         f"Versão: {VERSAO_CONTRATACAO}",
     ]
     return {"versao": VERSAO_CONTRATACAO, "tipo": tipo, "valor": valor,
-            "texto": "\n".join(linhas)}
+            "horas": horas, "urgente": urgente, "desconto_pct": desconto,
+            "por_proposta": por_proposta, "texto": "\n".join(linhas)}
+
+
+def _br(iso: str | None) -> str:
+    """Data em português, ou nada. Usada só no texto do termo."""
+    if not iso:
+        return ""
+    s = str(iso)
+    return f"{s[8:10]}/{s[5:7]}/{s[:4]}"
 
 
 def aceitar_contratacao(pedido_id: str, termo: dict, ip: str | None = None) -> dict:
@@ -455,16 +524,30 @@ def liberar_para_cliente(pedido_id: str, quem: str = "",
     if not r[0].get("visto_advogado_em") and not forcar:
         raise ValueError("Abra o PDF e confira o layout antes de liberar.")
 
+    # O RELÓGIO DOS 7 DIAS COMEÇA AQUI
+    #
+    # Antes ele começava na entrega, que é depois da assinatura. Mas o
+    # que o termo promete ao cliente é prazo para revisar e aprovar, e
+    # isso acontece agora, quando o documento fica disponível. Contar da
+    # entrega dava ao cliente um prazo que ele já tinha gastado.
+    from datetime import date, timedelta
+    ate = (date.today() + timedelta(days=DIAS_PARA_ALTERAR)).isoformat()
+
     db.table("pedidos_contrato").update({
         "fase": "APROVACAO", "aprovado_advogado_em": _agora(),
-        "aprovado_advogado_por": quem or None, "atualizado_em": _agora(),
+        "aprovado_advogado_por": quem or None,
+        "disponibilizado_em": _agora(), "prazo_alteracao_ate": ate,
+        "atualizado_em": _agora(),
     }).eq("id", pedido_id).execute()
 
     try:
         recado(pedido_id,
-               "O seu documento está pronto e já passou pela revisão do "
-               "advogado. Acesse a sua página para ler e aprovar, ou pedir "
-               "ajuste se algo não refletir o que foi combinado.",
+               f"O seu documento está pronto e já passou pela revisão do "
+               f"advogado. Acesse a sua página para ler e aprovar, ou pedir "
+               f"ajuste se algo não refletir o que foi combinado. Você tem "
+               f"até {ate[8:10]}/{ate[5:7]}/{ate[:4]}, sete dias a contar de "
+               f"hoje; depois disso a solicitação é arquivada e a reabertura "
+               f"passa a depender de um chamado.",
                canais=["EMAIL", "WHATSAPP"], autor="ESCRITORIO",
                assunto=f"Seu documento está pronto para revisão, "
                        f"{r[0].get('numero')}")
@@ -651,12 +734,26 @@ def arquivar_vencidos() -> dict:
     from datetime import date
     db = get_db()
     hoje = date.today().isoformat()
-    vencidos = db.table("pedidos_contrato").select("id,numero") \
-        .eq("fase", "ENTREGUE").lt("prazo_alteracao_ate", hoje) \
+    # Duas fases, e não uma. ENTREGUE é quem já assinou e tem os sete
+    # dias de ajuste. APROVACAO é quem recebeu o documento para revisar
+    # e sumiu: é justamente esse que o termo promete arquivar, e era o
+    # que ficava parado para sempre na coluna do operador.
+    vencidos = db.table("pedidos_contrato").select("id,numero,fase") \
+        .in_("fase", ["ENTREGUE", "APROVACAO"]) \
+        .lt("prazo_alteracao_ate", hoje) \
+        .is_("excluido_em", "null") \
         .limit(200).execute().data or []
     for p in vencidos:
         try:
             arquivar(p["id"], quem="sistema")
+            if p.get("fase") == "APROVACAO":
+                recado(p["id"],
+                       "Passaram os sete dias para revisão e o seu documento "
+                       "foi arquivado. Ele não se perdeu: abra um pedido de "
+                       "desarquivamento na sua área, explicando o motivo, e o "
+                       "escritório retoma.",
+                       canais=["EMAIL"], autor="AGENTE",
+                       assunto=f"Pedido {p.get('numero')} arquivado")
         except Exception as e:
             print(f"[balcao] não arquivou {p.get('numero')}: {e}")
     return {"arquivados": len(vencidos)}
@@ -903,3 +1000,125 @@ def marcar_visto(pedido_id: str, quem: str = "") -> dict:
     registrar_evento(None, "BALCAO_LAYOUT_CONFERIDO",
                      {"pedido_id": pedido_id, "quem": quem})
     return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+# DESARQUIVAMENTO
+#
+# O termo promete ao cliente que o documento não se perde: passados os
+# sete dias, a solicitação arquiva e ele pode abrir um chamado para
+# retomá-la. Sem isto, a promessa não teria como ser cumprida, e o
+# cliente arquivado só teria o telefone do escritório.
+#
+# Não é botão que reabre sozinho. Reabertura automática torna o prazo
+# decorativo, e há casos em que retomar custa trabalho de verdade,
+# porque o contrato envelheceu ou a outra parte desistiu. Quem decide é
+# quem vai fazer, lendo o motivo escrito pelo cliente.
+# ══════════════════════════════════════════════════════════════════
+
+def pedir_desarquivamento(pedido_id: str, motivo: str,
+                          cliente_id: str | None = None) -> dict:
+    """O cliente explica por que quer o pedido de volta."""
+    motivo = (motivo or "").strip()
+    if len(motivo) < 15:
+        raise ValueError(
+            "Conte com um pouco mais de detalhe o que você precisa. "
+            "É o que o escritório lê para decidir.")
+
+    db = get_db()
+    r = db.table("pedidos_contrato").select("id,numero,fase,cliente_id") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    p = r[0]
+    if p.get("fase") != "ARQUIVADO":
+        raise ValueError("Este pedido não está arquivado.")
+
+    aberto = db.table("pedidos_desarquivamento").select("id,criado_em") \
+        .eq("pedido_id", pedido_id).eq("status", "PENDENTE") \
+        .limit(1).execute().data
+    if aberto:
+        raise ValueError(
+            "Você já tem um pedido de desarquivamento em análise para este "
+            "documento. O escritório responde por e-mail.")
+
+    linha = db.table("pedidos_desarquivamento").insert({
+        "pedido_id": pedido_id,
+        "cliente_id": cliente_id or p.get("cliente_id"),
+        "motivo": motivo[:2000],
+    }).execute().data[0]
+
+    try:
+        s = get_settings()
+        from ..integracoes import avisos
+        avisos.enviar_email(
+            s.email_escritorio,
+            f"Pedido de desarquivamento, {p.get('numero')}",
+            f"Um cliente pediu para reabrir o pedido {p.get('numero')}.\n\n"
+            f"Motivo:\n{motivo}\n\n"
+            f"Responda pela tela de Contratos.",
+            "")
+    except Exception as e:
+        print(f"[balcao] escritório não avisado do desarquivamento: {e}")
+
+    registrar_evento(None, "BALCAO_DESARQUIVAMENTO_PEDIDO",
+                     {"pedido_id": pedido_id, "chamado": linha["id"]})
+    return {"ok": True, "chamado": linha["id"]}
+
+
+def responder_desarquivamento(chamado_id: str, aprovado: bool,
+                              resposta: str = "", quem: str = "") -> dict:
+    """O escritório decide. Aprovado, o pedido volta com prazo novo."""
+    db = get_db()
+    r = db.table("pedidos_desarquivamento").select("*").eq("id", chamado_id) \
+        .limit(1).execute().data
+    if not r:
+        raise ValueError("Chamado não encontrado.")
+    c = r[0]
+    if c["status"] != "PENDENTE":
+        raise ValueError("Este chamado já foi respondido.")
+    if not aprovado and not (resposta or "").strip():
+        raise ValueError("Explique ao cliente por que não é possível reabrir.")
+
+    db.table("pedidos_desarquivamento").update({
+        "status": "APROVADO" if aprovado else "RECUSADO",
+        "resposta": (resposta or "")[:2000] or None,
+        "respondido_em": _agora(), "respondido_por": quem or "escritório",
+    }).eq("id", chamado_id).execute()
+
+    if aprovado and c.get("pedido_id"):
+        # Volta para a revisão do cliente, com sete dias novos. Devolver
+        # sem prazo faria o pedido ficar aberto para sempre, que é o que
+        # o arquivamento existia para evitar.
+        from datetime import date, timedelta
+        ate = (date.today() + timedelta(days=DIAS_PARA_ALTERAR)).isoformat()
+        db.table("pedidos_contrato").update({
+            "fase": "APROVACAO", "arquivado_em": None,
+            "prazo_alteracao_ate": ate, "atualizado_em": _agora(),
+        }).eq("id", c["pedido_id"]).execute()
+
+    if c.get("pedido_id"):
+        try:
+            texto = (
+                f"Seu pedido de desarquivamento foi aprovado. O documento "
+                f"voltou a ficar disponível na sua área para revisão e "
+                f"aprovação, com prazo novo de {DIAS_PARA_ALTERAR} dias."
+                if aprovado else
+                f"Sobre o seu pedido de desarquivamento: {resposta}")
+            recado(c["pedido_id"], texto, canais=["EMAIL"],
+                   autor="ESCRITORIO",
+                   assunto="Resposta ao seu pedido de desarquivamento")
+        except Exception as e:
+            print(f"[balcao] cliente não avisado da decisão: {e}")
+
+    registrar_evento(None, "BALCAO_DESARQUIVAMENTO_RESPONDIDO",
+                     {"chamado": chamado_id, "aprovado": aprovado,
+                      "quem": quem})
+    return {"ok": True, "aprovado": aprovado}
+
+
+def desarquivamentos(status: str = "PENDENTE") -> list[dict]:
+    return get_db().table("pedidos_desarquivamento") \
+        .select("*,pedidos_contrato(numero,tipo,servico_livre,clientes(nome,email))") \
+        .eq("status", status).order("criado_em", desc=True) \
+        .limit(100).execute().data or []

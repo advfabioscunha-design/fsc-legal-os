@@ -496,17 +496,29 @@ export default function AreaCliente() {
           <p className="text-body text-charcoal/50">Carregando</p>
         ) : vista === "home" ? (
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {veProcessos && (
+            {/* AS DUAS PASTAS, SEMPRE AS DUAS
+
+                Este cartão só aparecia para quem estava marcado como
+                cliente de processo, e o de pedidos só para quem estava
+                marcado como cliente de contrato. Quem tinha as duas
+                coisas via uma só, e quem mudou de categoria no meio do
+                caminho perdia a outra de vista.
+
+                O tipo do cliente decide o que vem primeiro, nunca o que
+                existe. Pasta vazia diz "você não tem nada aqui", que é
+                uma informação; pasta ausente faz a pessoa achar que
+                perdeu o processo. */}
             <Cartao
-              onClick={() => setVista(casos.length > 1 ? "casos" : "acompanhar")}
+              onClick={() => setVista(casos.length === 1 ? "acompanhar" : "casos")}
               icone={ICONES.pasta}
               contador={totalPendencias}
-              titulo={casos.length > 1 ? "Meus atendimentos" : "Acompanhar o meu caso"}
-              texto={casos.length > 1
-                ? `Escolha qual dos seus ${casos.length} atendimentos deseja acompanhar.`
-                : "Veja em que fase o seu caso está, do primeiro contato ao protocolo, e as movimentações do processo."}
+              titulo="Meus processos"
+              texto={casos.length === 0
+                ? "Você ainda não tem processo com o escritório. Quando tiver, ele aparece aqui."
+                : casos.length === 1
+                ? "Veja em que fase o seu caso está, do primeiro contato ao protocolo, e as movimentações do processo."
+                : `Seus ${casos.length} processos, cada um com o próprio número e andamento.`}
             />
-            )}
 
             {/* ACOMPANHAR PEDIDO, SEM PORTEIRO
 
@@ -519,8 +531,10 @@ export default function AreaCliente() {
               onClick={() => setVista("pedidos")}
               icone={ICONES.documento}
               contador={pedidos.filter((p: any) => !["ENTREGUE", "ARQUIVADO"].includes(p.fase)).length}
-              titulo="Acompanhar pedido"
-              texto="Os documentos que você encomendou, cada um com o seu número de protocolo, do pedido à entrega."
+              titulo="Meus serviços de contrato"
+              texto={pedidos.length === 0
+                ? "Você ainda não encomendou documento. Quando pedir, ele aparece aqui com número de protocolo."
+                : `Seus ${pedidos.length} ${pedidos.length === 1 ? "pedido" : "pedidos"}, cada um com protocolo próprio, do pedido à entrega.`}
             />
 
             <Cartao
@@ -587,6 +601,10 @@ export default function AreaCliente() {
                   const nome = p.tipo === "OUTRO" && p.servico_livre
                     ? p.servico_livre
                     : String(p.tipo || "").replaceAll("_", " ").toLowerCase();
+                  if (arquivado) {
+                    return <Arquivado key={p.id} pedido={p}
+                             aoPedir={() => token && carregarPedidos(token)} />;
+                  }
                   return (
                     <a key={p.id} href={`/balcao/${p.id}`}
                       className="block rounded-xl2 border border-black/5 bg-white p-5 shadow-card transition hover:-translate-y-0.5 hover:border-electric/30 hover:shadow-lift">
@@ -1103,5 +1121,110 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
         )}
       </div>
     </section>
+  );
+}
+
+
+/* ── O PEDIDO ARQUIVADO, E COMO PEDIR DE VOLTA ────────────────
+ *
+ * O termo promete ao cliente que o documento fica sete dias disponível
+ * para revisão e que, passado o prazo, a solicitação é arquivada e
+ * pode ser retomada por um chamado. O chamado é este.
+ *
+ * Não é um botão que reabre sozinho, de propósito. Reabertura
+ * automática torna o prazo decorativo: quem sabe que basta clicar não
+ * revisa no prazo. E há casos em que retomar custa trabalho de
+ * verdade, porque o contrato envelheceu ou a outra parte desistiu.
+ * Quem decide é quem vai fazer, lendo o motivo escrito aqui.
+ *
+ * O cartão fica visualmente apagado, mas não escondido. Documento que
+ * some da tela faz o cliente achar que o escritório perdeu o trabalho
+ * dele.
+ */
+function Arquivado({ pedido, aoPedir }: { pedido: any; aoPedir: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState("");
+  const [enviado, setEnviado] = useState(false);
+
+  const nomeDoc = pedido.tipo === "OUTRO" && pedido.servico_livre
+    ? pedido.servico_livre
+    : String(pedido.tipo || "").replaceAll("_", " ").toLowerCase();
+
+  async function enviar() {
+    if (motivo.trim().length < 15) {
+      setErro("Conte com um pouco mais de detalhe. É o que o escritório lê para decidir.");
+      return;
+    }
+    setOcupado(true); setErro("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedido.id}/desarquivar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setErro(j?.detail || "Não foi possível enviar agora."); return; }
+      setEnviado(true); setAberto(false); aoPedir();
+    } catch { setErro("Falha de conexão."); }
+    finally { setOcupado(false); }
+  }
+
+  return (
+    <div className="rounded-xl2 border border-black/10 bg-mist/40 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-md bg-white px-2.5 py-1 font-mono text-caption tracking-wide text-charcoal/60">
+          {pedido.numero}
+        </span>
+        <span className="ml-auto rounded-full bg-black/5 px-3 py-0.5 text-caption font-bold text-charcoal/55">
+          Arquivado
+        </span>
+      </div>
+
+      <p className="mt-2 font-display text-subtitle font-bold capitalize text-charcoal/70">
+        {nomeDoc}
+      </p>
+      <p className="mt-1 text-small text-charcoal/55">
+        Passaram os sete dias de revisão sem aprovação. O documento não se
+        perdeu: o escritório o guarda e pode retomá-lo.
+      </p>
+
+      {enviado ? (
+        <p className="mt-4 rounded-lg border border-emerald/30 bg-emerald/10 px-4 py-2.5 text-small text-charcoal/80">
+          Pedido de desarquivamento enviado. O escritório analisa e responde
+          por e-mail.
+        </p>
+      ) : !aberto ? (
+        <button onClick={() => setAberto(true)}
+          className="mt-4 rounded-lg border border-charcoal/20 px-5 py-2.5 text-small font-semibold text-charcoal/75 transition hover:border-charcoal/45">
+          Pedir desarquivamento
+        </button>
+      ) : (
+        <div className="mt-4">
+          <label className="block text-small text-charcoal/70">
+            Por que você precisa deste documento de volta?
+            <span className="mt-0.5 block text-caption text-charcoal/45">
+              Se houve alguma mudança no combinado ou alguma dúvida que travou
+              a aprovação, conte aqui: é o que o escritório precisa saber para
+              retomar do ponto certo.
+            </span>
+            <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)}
+              rows={4}
+              className="mt-2 w-full rounded-lg border border-black/10 bg-white px-3 py-2.5 text-small text-charcoal outline-none focus:border-electric" />
+          </label>
+          {erro && <p className="mt-2 text-small text-crimson">{erro}</p>}
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button onClick={enviar} disabled={ocupado}
+              className="rounded-lg bg-electric px-5 py-2.5 text-small font-bold text-white transition hover:bg-indigo disabled:opacity-50">
+              {ocupado ? "Enviando…" : "Enviar pedido"}
+            </button>
+            <button onClick={() => { setAberto(false); setErro(""); }}
+              className="text-small text-charcoal/50 underline underline-offset-4">
+              cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

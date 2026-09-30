@@ -117,7 +117,23 @@ serviço à parte e pode ser somado.
 
 QUANDO ELA ACEITAR
 Chame `fechar` com o valor combinado. Depois disso, diga que o próximo passo é \
-criar o acesso dela e reúna as informações do contrato.
+o pagamento, e que logo em seguida você volta para pedir as informações do \
+contrato.
+
+MUDANÇA DE IDEIA VALE, E VALE SEMPRE
+Se a pessoa já tiver deixado uma proposta para o escritório analisar e depois \
+disser que aceita o valor que você ofereceu, é o aceite que vale. Não pergunte \
+se ela tem certeza, não diga que a proposta dela está em análise, não a mande \
+esperar: chame `fechar` na hora, com o último valor que VOCÊ ofereceu, e diga \
+em uma frase que a proposta anterior fica sem efeito.
+
+Isso serve para qualquer frase com esse sentido: "aceito", "pode ser", "fechou", \
+"vamos nesse valor", "tudo bem então", "aceito a sua proposta". Em caso de \
+dúvida entre aceitar e continuar negociando, aceite: é o que a pessoa quer, e \
+ela sempre pode voltar a falar.
+
+O contrário também vale. Se ela já tiver aceitado e depois quiser propor outro \
+valor, o pedido volta a ficar em aberto.
 
 Respostas curtas: duas a quatro frases. Uma pergunta por vez."""
 
@@ -375,31 +391,75 @@ def _avisar_escritorio(pedido: dict, valor: float, motivo: str) -> None:
 
 
 def _executar_fechar(pedido: dict, args: dict) -> dict:
-    """Grava o combinado e deixa o pedido pronto para o cadastro."""
+    """Grava o combinado e manda o pedido para o pagamento.
+
+    Três coisas acontecem aqui, e as três vieram de erro real.
+
+    1. A PROPOSTA PENDENTE MORRE. O cliente que deixou uma proposta e
+       depois aceita o valor do escritório mudou de ideia, e mudança de
+       ideia vale. Deixar a proposta viva faria o escritório responder
+       dias depois a uma negociação que já acabou.
+
+    2. O VALOR É O COMBINADO, NÃO O DE TABELA. Se o escritório aceitou
+       a proposta do cliente, é ela que vale. Se não, vale a conta com
+       desconto, urgência e assinatura. O contrato mostrava o valor
+       cheio mesmo quando o cliente tinha pago menos.
+
+    3. O PRAZO ACOMPANHA A URGÊNCIA. Urgência contratada são 6 horas, e
+       é isso que precisa aparecer no termo e no card."""
     db = get_db()
-    pedido_atual = _pedido(pedido["id"])
-    desconto = _maior_desconto_ja_dado(pedido_atual)
-    conta = catalogo.precificar(
-        pedido_atual["tipo"],
-        com_orientacao=bool(pedido_atual.get("com_orientacao")),
-        desconto_pct=desconto,
-        urgente=bool(pedido_atual.get("urgente")),
-        assinatura_digital=bool(pedido_atual.get("assinatura_digital", True)),
-    )
-    db.table("pedidos_contrato").update({
+    p = _pedido(pedido["id"])
+    campos: dict = {"atualizado_em": _agora()}
+    cancelou_proposta = False
+
+    if p.get("proposta_status") == "PENDENTE":
+        campos.update({
+            "proposta_status": "CANCELADA",
+            "proposta_resposta": "O cliente aceitou a proposta do escritório "
+                                 "antes da análise.",
+            "proposta_respondida_em": _agora(),
+            "proposta_respondida_por": "cliente",
+        })
+        cancelou_proposta = True
+
+    # O escritório aceitou a proposta do cliente: é ela o preço.
+    if p.get("proposta_status") == "ACEITA" and p.get("proposta_valor"):
+        total = float(p["proposta_valor"])
+        horas = catalogo.HORAS_URGENTE if p.get("urgente") else catalogo.HORAS_PADRAO
+        conta = {
+            "base": float(p.get("valor_base") or total), "desconto_pct": 0,
+            "total": total, "horas": horas, "urgente": bool(p.get("urgente")),
+            "origem": "PROPOSTA_DO_CLIENTE",
+        }
+    else:
+        conta = catalogo.precificar(
+            p["tipo"],
+            com_orientacao=bool(p.get("com_orientacao")),
+            desconto_pct=_maior_desconto_ja_dado(p),
+            urgente=bool(p.get("urgente")),
+            assinatura_digital=bool(p.get("assinatura_digital", True)),
+        )
+        conta["origem"] = "NEGOCIACAO"
+
+    campos.update({
         "valor_base": conta["base"],
         "desconto_pct": conta["desconto_pct"],
         "valor": conta["total"],
         "prazo_entrega_horas": conta["horas"],
-        "atualizado_em": _agora(),
-    }).eq("id", pedido["id"]).execute()
+    })
+    db.table("pedidos_contrato").update(campos).eq("id", pedido["id"]).execute()
 
     _anotar(pedido["id"], {"tipo": "FECHADO", "total": conta["total"],
+                           "origem": conta["origem"],
+                           "proposta_cancelada": cancelou_proposta,
                            "resumo": (args.get("resumo") or "")[:300]})
     registrar_evento(None, "BALCAO_NEGOCIACAO_FECHADA",
                      {"pedido_id": pedido["id"], "total": conta["total"],
-                      "desconto_pct": conta["desconto_pct"]})
-    return {"fechado": True, **conta, "pix": PIX}
+                      "desconto_pct": conta["desconto_pct"],
+                      "origem": conta["origem"],
+                      "proposta_cancelada": cancelou_proposta})
+    return {"fechado": True, **conta, "pix": PIX,
+            "proposta_cancelada": cancelou_proposta}
 
 
 # ── A conversa ──────────────────────────────────────────────────
@@ -460,12 +520,51 @@ def conversar(pedido_id: str, mensagem: str,
                           "content": "[o cliente está fechando a página]"
                           if vai_sair else "[sem resposta]"})
 
+    # ESTADO DA NEGOCIAÇÃO, DITO EM TODO TURNO
+    #
+    # Antes, o modelo recebia só o maior desconto já dado, e o resto
+    # tinha de deduzir lendo a conversa. Num teste real isso falhou: o
+    # cliente deixou uma proposta, mudou de ideia duas falas depois e
+    # escreveu "aceito a proposta"; o agente não percebeu que havia algo
+    # a cancelar e tratou como se a proposta dele continuasse valendo.
+    #
+    # O estado agora vem escrito, não deduzido. Modelo que precisa
+    # reconstruir situação lendo histórico erra justamente quando a
+    # pessoa muda de ideia, que é quando mais importa acertar.
+    desconto_atual = _maior_desconto_ja_dado(pedido)
+    conta_atual = catalogo.precificar(
+        pedido["tipo"],
+        com_orientacao=bool(pedido.get("com_orientacao")),
+        desconto_pct=desconto_atual,
+        urgente=bool(pedido.get("urgente")),
+        assinatura_digital=bool(pedido.get("assinatura_digital", True)),
+    )
     contexto = (
         f"Tipo de contrato pedido: {t.get('nome')}.\n"
         f"Base legal: {t.get('base_legal', '')}.\n"
-        f"Maior desconto já oferecido nesta conversa: "
-        f"{_maior_desconto_ja_dado(pedido)}%."
+        f"Maior desconto já oferecido nesta conversa: {desconto_atual}%.\n"
+        f"Último valor que você ofereceu: R$ {conta_atual['total']:.2f}.\n"
+        f"Urgência contratada: {'sim' if pedido.get('urgente') else 'não'}."
     )
+    if pedido.get("proposta_status") == "PENDENTE":
+        contexto += (
+            f"\n\nATENÇÃO: este cliente já deixou uma proposta de "
+            f"R$ {float(pedido.get('proposta_valor') or 0):.2f} para o "
+            f"escritório analisar. Se ele agora aceitar o seu valor de "
+            f"R$ {conta_atual['total']:.2f}, o aceite prevalece: chame "
+            f"`fechar` imediatamente e avise, em uma frase, que a proposta "
+            f"anterior fica sem efeito. Não o mande esperar resposta.")
+    elif pedido.get("proposta_status") == "ACEITA":
+        contexto += (
+            f"\n\nO escritório ACEITOU a proposta deste cliente, de "
+            f"R$ {float(pedido.get('proposta_valor') or 0):.2f}. Esse é o "
+            f"valor do serviço. Não ofereça desconto nem recalcule: ao "
+            f"fechar, o sistema usa esse valor.")
+    elif pedido.get("proposta_status") == "CONTRAPROPOSTA":
+        contexto += (
+            f"\n\nO escritório respondeu à proposta deste cliente com uma "
+            f"contraproposta de R$ {float(pedido.get('proposta_contra') or 0):.2f}. "
+            f"Se ele aceitar, chame `fechar`.")
     if vai_sair:
         contexto += (
             "\n\nSINAL DA TELA: o cliente está saindo da página agora. Se "

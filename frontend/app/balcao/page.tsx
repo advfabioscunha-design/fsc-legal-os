@@ -43,15 +43,18 @@ export default function Balcao() {
 
   const [termo, setTermo] = useState<any>(null);
   const [pedidoId, setPedidoId] = useState<string | null>(null);
-  // tipo → negociar → conta → termo. A conta só entra depois do sim.
-  const [etapa, setEtapa] = useState<"tipo" | "negociar" | "conta" | "termo">("tipo");
+  /* A conta deixou de ser etapa: ela é a porta, e quem não entrou não
+     chega aqui. Restam três: escolher o documento, negociar e ler o
+     termo. "fechado" é o instante entre o sim e o termo, em que o
+     pedido é amarrado ao cadastro. */
+  const [etapa, setEtapa] = useState<"tipo" | "negociar" | "fechado" | "termo">("tipo");
   const [combinado, setCombinado] = useState<any>(null);
 
-  // Fechado o preço e havendo sessão, amarra o pedido ao cadastro e
-  // busca o termo. O vínculo vem do token, e não de um cliente_id que a
-  // tela mandaria, era isso que fazia todo pedido nascer órfão.
+  // Fechado o preço, amarra o pedido ao cadastro e busca o termo. O
+  // vínculo vem do token, e não de um cliente_id que a tela mandaria:
+  // era isso que fazia todo pedido nascer órfão.
   useEffect(() => {
-    if (etapa !== "conta" || !sessao || !pedidoId) return;
+    if (etapa !== "fechado" || !sessao || !pedidoId) return;
     (async () => {
       try {
         await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/vincular`, {
@@ -206,10 +209,34 @@ export default function Balcao() {
           </p>
         </header>
 
-        {/* Depois do sim: negociação → conta → termo */}
-        {etapa === "negociar" && pedidoId ? (
+        {/* A CONTA VEM PRIMEIRO
+
+            Antes o cadastro ficava depois da negociação, para não pedir
+            dados a quem ainda não tinha decidido. A ordem mudou por
+            escolha do escritório: quem pede um contrato passa a criar o
+            acesso na entrada, e assim, ao sair e voltar, entra com a
+            senha e reencontra o pedido onde parou, junto com os
+            processos e os outros serviços dele.
+
+            O que se ganha: nenhum pedido órfão, e um só lugar para
+            acompanhar tudo. O que se perde: parte de quem só estava
+            olhando desiste ao ver um formulário. É reversível, se um
+            dia o número mostrar que não valeu. */}
+        {!sessao ? (
+          <Entrada
+            modo={modo} setModo={setModo}
+            nome={nome} setNome={setNome}
+            email={email} setEmail={setEmail}
+            senha={senha} setSenha={setSenha}
+            cpf={cpf} setCpf={setCpf}
+            nascimento={nascimento} setNascimento={setNascimento}
+            erro={erro} aviso={aviso} ocupado={ocupado}
+            entrar={entrar} criarConta={criarConta}
+            recuperarSenha={recuperarSenha} recuperarSemEmail={recuperarSemEmail}
+          />
+        ) : etapa === "negociar" && pedidoId ? (
           <Negociacao pedidoId={pedidoId} escolhido={escolhido}
-            aoFechar={(c) => { setCombinado(c); setEtapa("conta"); }}
+            aoFechar={(c) => { setCombinado(c); setEtapa("fechado"); }}
             aoVoltar={() => { setEtapa("tipo"); setPedidoId(null); }} />
         ) : etapa === "termo" && termo ? (
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6">
@@ -230,99 +257,6 @@ export default function Balcao() {
               <span className="ml-auto text-xs text-white/40">
                 O aceite fica registrado com data, hora e versão do texto.
               </span>
-            </div>
-          </section>
-        ) : etapa === "conta" && !sessao ? (
-          /* Conta, só agora, com o preço já combinado */
-          <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6">
-            {combinado && (
-              <div className="mb-4 rounded-xl border border-[#1DB954]/40 bg-[#1DB954]/10 p-3">
-                <p className="text-xs text-white/80">
-                  Combinado: <b>{escolhido?.nome}</b> por{" "}
-                  <b className="text-[#1DB954]">{reais(combinado.total)}</b>
-                  {combinado.desconto_pct > 0 && ` (com ${combinado.desconto_pct}% de desconto)`}
-                  , entrega em até {combinado.horas} horas.
-                </p>
-                <p className="mt-1 text-[10px] text-white/45">
-                  Falta só criar seu acesso para guardarmos o pedido com segurança.
-                </p>
-              </div>
-            )}
-            <h2 className="text-sm font-bold text-[#C9A24D]">
-              {modo === "criar" ? "Criar conta"
-                : modo === "recuperar" ? "Esqueci a senha"
-                : modo === "semEmail" ? "Não lembro o e-mail cadastrado"
-                : "Entrar"}
-            </h2>
-
-            <div className="mt-4 grid gap-3">
-              {modo === "criar" && (
-                <input value={nome} onChange={(e) => setNome(e.target.value)}
-                  placeholder="Nome completo"
-                  className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
-              )}
-              {modo === "semEmail" && (
-                <>
-                  <p className="rounded-lg border border-[#E5A44C]/40 bg-[#E5A44C]/10 px-3 py-2 text-[11px] leading-relaxed text-white/75">
-                    Como o e-mail cadastrado é o único canal já confirmado, a troca
-                    não é automática: vamos ligar no telefone que você cadastrou
-                    para confirmar que é você. É o mesmo cuidado que o banco toma.
-                  </p>
-                  <input value={cpf} onChange={(e) => setCpf(e.target.value)}
-                    placeholder="Seu CPF"
-                    className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
-                  <label className="text-xs text-white/50">
-                    Data de nascimento
-                    <input value={nascimento} onChange={(e) => setNascimento(e.target.value)}
-                      type="date"
-                      className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm text-white outline-none focus:border-[#C9A84C]" />
-                  </label>
-                </>
-              )}
-              <input value={email} onChange={(e) => setEmail(e.target.value)}
-                type="email"
-                placeholder={modo === "semEmail" ? "E-mail novo, que passará a ser o seu acesso" : "E-mail"}
-                className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
-              {(modo === "entrar" || modo === "criar") && (
-                <input value={senha} onChange={(e) => setSenha(e.target.value)}
-                  type="password" placeholder="Senha"
-                  onKeyDown={(e) => e.key === "Enter" && (modo === "entrar" ? entrar() : criarConta())}
-                  className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
-              )}
-            </div>
-
-            {erro && <p className="mt-3 text-xs text-[#C0392B]">{erro}</p>}
-            {aviso && <p className="mt-3 rounded-lg bg-[#1DB954]/10 px-3 py-2 text-xs text-[#1DB954]">{aviso}</p>}
-
-            <button
-              onClick={modo === "entrar" ? entrar : modo === "criar" ? criarConta
-                : modo === "recuperar" ? recuperarSenha : recuperarSemEmail}
-              disabled={ocupado}
-              className="mt-4 w-full rounded-lg bg-[#C9A84C] py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
-              {ocupado ? "Aguarde…"
-                : modo === "entrar" ? "Entrar"
-                : modo === "criar" ? "Criar conta"
-                : modo === "recuperar" ? "Enviar link para criar nova senha"
-                : "Enviar pedido"}
-            </button>
-
-            <div className="mt-4 flex flex-wrap gap-4 text-xs text-white/45">
-              {modo !== "entrar" && (
-                <button onClick={() => { setModo("entrar"); setErro(""); setAviso(""); }}
-                  className="underline hover:text-white">já tenho conta</button>
-              )}
-              {modo !== "criar" && (
-                <button onClick={() => { setModo("criar"); setErro(""); setAviso(""); }}
-                  className="underline hover:text-white">criar conta</button>
-              )}
-              {modo !== "recuperar" && (
-                <button onClick={() => { setModo("recuperar"); setErro(""); setAviso(""); }}
-                  className="underline hover:text-white">esqueci a senha</button>
-              )}
-              {modo !== "semEmail" && (
-                <button onClick={() => { setModo("semEmail"); setErro(""); setAviso(""); }}
-                  className="underline hover:text-white">não lembro o e-mail</button>
-              )}
             </div>
           </section>
         ) : (
@@ -621,6 +555,120 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
           <p className="mt-1 text-[11px] leading-relaxed text-white/75">{escolhido.alerta}</p>
         </div>
       )}
+    </section>
+  );
+}
+
+
+/* ── A PORTA DE ENTRADA ────────────────────────────────────────
+ *
+ * Quem chega ao balcão cria o acesso antes de escolher o documento.
+ * Duas razões práticas, e nenhuma delas é burocracia:
+ *
+ * O pedido não fica órfão. Antes, quem fechasse a aba no meio da
+ * negociação deixava para trás um pedido sem dono, que ninguém
+ * conseguia retomar, nem ele nem o escritório.
+ *
+ * E há um lugar para voltar. Com a conta criada, sair e retornar é
+ * entrar com a senha e reencontrar o serviço onde parou, ao lado dos
+ * outros pedidos e dos processos, se houver.
+ *
+ * O formulário diz isso com todas as letras. Pedir dados sem explicar
+ * para quê é o que faz a pessoa fechar a página.
+ */
+function Entrada({
+  modo, setModo, nome, setNome, email, setEmail, senha, setSenha,
+  cpf, setCpf, nascimento, setNascimento, erro, aviso, ocupado,
+  entrar, criarConta, recuperarSenha, recuperarSemEmail,
+}: any) {
+  const campo = "rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]";
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6">
+      <h2 className="font-display text-lg font-bold text-white">
+        {modo === "criar" ? "Criar seu acesso"
+          : modo === "recuperar" ? "Esqueci a senha"
+          : modo === "semEmail" ? "Não lembro o e-mail cadastrado"
+          : "Entrar"}
+      </h2>
+      <p className="mt-1.5 text-sm leading-relaxed text-white/60">
+        {modo === "criar"
+          ? "É com esse acesso que você acompanha o documento sendo feito, "
+            + "conversa com o escritório e volta depois, de onde parou."
+          : modo === "entrar"
+          ? "Entre para pedir um documento novo ou acompanhar os que você já "
+            + "pediu."
+          : "Vamos recuperar o seu acesso."}
+      </p>
+
+      <div className="mt-5 grid gap-3">
+        {modo === "criar" && (
+          <input value={nome} onChange={(e) => setNome(e.target.value)}
+            placeholder="Nome completo" className={campo} />
+        )}
+        {modo === "semEmail" && (
+          <>
+            <p className="rounded-lg border border-[#E5A44C]/40 bg-[#E5A44C]/10 px-3 py-2 text-[11px] leading-relaxed text-white/75">
+              Como o e-mail cadastrado é o único canal já confirmado, a troca
+              não é automática: vamos ligar no telefone que você cadastrou
+              para confirmar que é você. É o mesmo cuidado que o banco toma.
+            </p>
+            <input value={cpf} onChange={(e) => setCpf(e.target.value)}
+              placeholder="Seu CPF" className={campo} />
+            <label className="text-xs text-white/50">
+              Data de nascimento
+              <input value={nascimento} onChange={(e) => setNascimento(e.target.value)}
+                type="date" className={`mt-1 w-full text-white ${campo}`} />
+            </label>
+          </>
+        )}
+        <input value={email} onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          placeholder={modo === "semEmail" ? "E-mail novo, que passará a ser o seu acesso" : "E-mail"}
+          className={campo} />
+        {(modo === "entrar" || modo === "criar") && (
+          <input value={senha} onChange={(e) => setSenha(e.target.value)}
+            type="password"
+            placeholder={modo === "criar" ? "Senha, pelo menos 8 caracteres" : "Senha"}
+            onKeyDown={(e) => e.key === "Enter" && (modo === "entrar" ? entrar() : criarConta())}
+            className={campo} />
+        )}
+      </div>
+
+      {erro && <p className="mt-3 text-xs text-[#C0392B]">{erro}</p>}
+      {aviso && <p className="mt-3 rounded-lg bg-[#1DB954]/10 px-3 py-2 text-xs text-[#1DB954]">{aviso}</p>}
+
+      <button
+        onClick={modo === "entrar" ? entrar : modo === "criar" ? criarConta
+          : modo === "recuperar" ? recuperarSenha : recuperarSemEmail}
+        disabled={ocupado}
+        className="mt-5 w-full rounded-lg bg-[#C9A84C] py-3 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
+        {ocupado ? "Aguarde…"
+          : modo === "entrar" ? "Entrar"
+          : modo === "criar" ? "Criar acesso e continuar"
+          : modo === "recuperar" ? "Enviar link para criar nova senha"
+          : "Enviar pedido"}
+      </button>
+
+      <div className="mt-4 flex flex-wrap gap-4 text-xs text-white/45">
+        {modo !== "entrar" && (
+          <button onClick={() => setModo("entrar")} className="underline hover:text-white">já tenho acesso</button>
+        )}
+        {modo !== "criar" && (
+          <button onClick={() => setModo("criar")} className="underline hover:text-white">criar acesso</button>
+        )}
+        {modo !== "recuperar" && (
+          <button onClick={() => setModo("recuperar")} className="underline hover:text-white">esqueci a senha</button>
+        )}
+        {modo !== "semEmail" && (
+          <button onClick={() => setModo("semEmail")} className="underline hover:text-white">não lembro o e-mail</button>
+        )}
+      </div>
+
+      <p className="mt-6 border-t border-white/10 pt-4 text-xs text-white/40">
+        O escritório não vê a sua senha. Seus dados são usados apenas para
+        elaborar o que você pedir, conforme a Política de Privacidade.
+      </p>
     </section>
   );
 }
