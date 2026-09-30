@@ -854,6 +854,95 @@ class PrestacaoBody(BaseModel):
     observacoes: str | None = None
 
 
+# ── A CONVERSA DO CASO, DO LADO DO ESCRITÓRIO ──────────────────
+#
+# O operador abria a ficha do cliente e via cadastro, honorários,
+# documentos e prazos, tudo menos o que o cliente tinha escrito. A
+# conversa existia, estava gravada, e não aparecia em lugar nenhum da
+# tela de quem atende: para ler o que a pessoa disse era preciso
+# abrir o banco. Perguntar duas vezes a mesma coisa começa aí.
+
+@app.get("/api/v1/casos/{caso_id}/mensagens")
+def conversa_do_caso(caso_id: str, limite: int = 200):
+    """O fio inteiro, do primeiro contato até a última linha."""
+    return get_db().table("mensagens") \
+        .select("id,canal,autor,conteudo,criado_em") \
+        .eq("caso_id", caso_id).order("criado_em").limit(limite) \
+        .execute().data or []
+
+
+class RespostaDoEscritorio(BaseModel):
+    conteudo: str
+    canais: list[str] | None = None
+
+
+@app.post("/api/v1/casos/{caso_id}/responder")
+def responder_ao_cliente(caso_id: str, body: RespostaDoEscritorio):
+    """A resposta escrita por gente, que entra no mesmo fio.
+
+    Autor HUMANO, e não AGENTE, porque a diferença importa depois:
+    é ela que permite saber quem disse o quê quando alguém precisar
+    reconstituir o atendimento."""
+    texto = (body.conteudo or "").strip()
+    if not texto:
+        raise HTTPException(400, "A mensagem está vazia.")
+    db = get_db()
+    linha = db.table("mensagens").insert({
+        "caso_id": caso_id, "canal": "PORTAL", "autor": "HUMANO",
+        "conteudo": texto[:4000],
+    }).execute().data
+
+    # Sai também pelos canais externos, quando pedido. O cliente que
+    # fechou a aba não fica sem saber que foi respondido. A central de
+    # avisos já sabe o e-mail, o WhatsApp, o fio do assunto e o número
+    # do atendimento: não há por que montar isso de novo aqui.
+    if body.canais:
+        try:
+            avisos.notificar(caso_id, "MENSAGEM", "Resposta do escritório",
+                             texto)
+        except Exception as e:
+            print(f"[caso] resposta não saiu pelos canais externos: {e}")
+
+    registrar_evento(caso_id, "RESPOSTA_DO_ESCRITORIO", {"caracteres": len(texto)})
+    return {"ok": True, "mensagem": (linha or [{}])[0]}
+
+
+@app.post("/api/v1/casos/{caso_id}/iniciar-atendimento")
+def iniciar_atendimento(caso_id: str):
+    """Faz o atendimento assumir um caso que ficou sem primeira fala.
+
+    O caminho normal já responde sozinho: o lead nasce e o especialista
+    do grupo escreve a primeira mensagem. Mas há caminhos que criam
+    caso sem passar por ali, o cadastro feito pelo escritório e a
+    importação de processos, e esses ficavam mudos. O cliente escrevia
+    e não recebia nada.
+
+    Idempotente de propósito: se já existe fala do escritório naquele
+    fio, não escreve outra. Abrir a ficha duas vezes não pode gerar
+    duas saudações."""
+    db = get_db()
+    caso = db.table("casos").select("id,relato_inicial,estado") \
+        .eq("id", caso_id).limit(1).execute().data
+    if not caso:
+        raise HTTPException(404, "Caso não encontrado.")
+
+    ja = db.table("mensagens").select("id").eq("caso_id", caso_id) \
+        .neq("autor", "CLIENTE").limit(1).execute().data
+    if ja:
+        return {"ja_iniciado": True}
+
+    ultima = db.table("mensagens").select("conteudo").eq("caso_id", caso_id) \
+        .eq("autor", "CLIENTE").order("criado_em", desc=True) \
+        .limit(1).execute().data
+    gatilho = ((ultima or [{}])[0].get("conteudo")
+               or caso[0].get("relato_inicial")
+               or "Olá, preciso de ajuda.")
+
+    r = especialista.atender(caso_id, gatilho, canal="PORTAL")
+    registrar_evento(caso_id, "ATENDIMENTO_INICIADO_MANUALMENTE", {})
+    return {"ok": True, "resposta": r.get("resposta")}
+
+
 @app.get("/api/v1/casos/{caso_id}/historico")
 def historico_do_caso(caso_id: str):
     """Linha do tempo do atendimento, do primeiro contato até agora."""

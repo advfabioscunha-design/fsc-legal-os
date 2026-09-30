@@ -786,6 +786,16 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                 segurança e reenvia para lá tudo o que ainda estava sem ciência.
               </p>
 
+              {/* A CONVERSA VEM ANTES DO CADASTRO
+
+                  Ela estava gravada e não aparecia em lugar nenhum da
+                  tela de quem atende. Para ler o que o cliente
+                  escreveu era preciso abrir o banco, e foi assim que
+                  um "preciso te enviar o que?" ficou dias sem
+                  resposta. Quem abre a ficha precisa ver primeiro o
+                  que a pessoa disse, e só depois os campos. */}
+              <ConversaDoCaso casoId={casoId} />
+
               <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Informações do caso</h3>
               <label className="mb-3 block text-xs text-white/60">Nome do caso <span className="text-white/40">(é o que o cliente vê junto do nº de atendimento)</span>
                 <input value={edit.titulo} onChange={(e) => setEdit({ ...edit, titulo: e.target.value })}
@@ -1723,5 +1733,165 @@ function LinhaDoTempo({ casoId, nota, setNota, addNota }: {
         conversa com a parte contrária — só entra no relatório se for anotado aqui.
       </p>
     </section>
+  );
+}
+
+
+/* ── A CONVERSA COM O CLIENTE, DENTRO DA FICHA ──────────────────
+ *
+ * Três decisões que não são de estilo:
+ *
+ * A caixa rola sozinha e a página não. `scrollIntoView` arrastaria a
+ * ficha inteira enquanto o operador preenche um campo lá em cima.
+ *
+ * Recarrega de vinte em vinte segundos. O cliente responde enquanto a
+ * ficha está aberta, e obrigar a fechar e reabrir para ver a resposta
+ * é o tipo de detalhe que faz ninguém usar a tela.
+ *
+ * Quem responde daqui entra como HUMANO, não como agente. A diferença
+ * importa depois, quando alguém precisar reconstituir quem disse o
+ * quê, e é ela que permite ao atendimento saber que houve intervenção
+ * do escritório naquele fio.
+ */
+function ConversaDoCaso({ casoId }: { casoId: string }) {
+  const [msgs, setMsgs] = useState<any[]>([]);
+  const [texto, setTexto] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [tambem, setTambem] = useState(true);
+  const [erro, setErro] = useState("");
+  const caixa = useRef<HTMLDivElement | null>(null);
+  const quantas = useRef(0);
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/mensagens`);
+      const d = await r.json();
+      setMsgs(Array.isArray(d) ? d : []);
+    } catch { /* a ficha continua utilizável sem isto */ }
+  }, [casoId]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+  useEffect(() => {
+    const t = setInterval(carregar, 20000);
+    return () => clearInterval(t);
+  }, [carregar]);
+
+  /* O CASO QUE NASCEU MUDO
+
+     O lead vindo do site já recebe a primeira fala do especialista.
+     Os outros caminhos, cadastro feito pelo escritório e importação
+     de processos, criavam caso sem conversa nenhuma: o cliente
+     escrevia e ninguém respondia, e o operador via a pergunta parada
+     no relato.
+
+     Ao abrir a ficha, se não há uma linha sequer do escritório
+     naquele fio, o atendimento assume. A rota é idempotente, então
+     abrir a ficha de novo não gera segunda saudação. */
+  const jaTentou = useRef(false);
+  useEffect(() => {
+    if (jaTentou.current) return;
+    const semEscritorio = msgs.length === 0
+      || msgs.every((m: any) => String(m.autor).toUpperCase() === "CLIENTE");
+    if (!semEscritorio) return;
+    jaTentou.current = true;
+    (async () => {
+      try {
+        await fetch(`${API}/api/v1/casos/${casoId}/iniciar-atendimento`,
+                    { method: "POST" });
+        await carregar();
+      } catch { /* sem isto a ficha continua utilizável */ }
+    })();
+  }, [msgs, casoId, carregar]);
+  useEffect(() => {
+    if (msgs.length <= quantas.current) { quantas.current = msgs.length; return; }
+    quantas.current = msgs.length;
+    const c = caixa.current;
+    if (c) c.scrollTop = c.scrollHeight;
+  }, [msgs]);
+
+  async function responder() {
+    const conteudo = texto.trim();
+    if (!conteudo) return;
+    setEnviando(true); setErro("");
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/responder`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conteudo,
+          canais: tambem ? ["EMAIL", "WHATSAPP"] : [],
+        }),
+      });
+      if (!r.ok) { setErro("Não consegui enviar. Tente de novo."); return; }
+      setTexto("");
+      await carregar();
+    } catch { setErro("Sem conexão com o servidor."); }
+    finally { setEnviando(false); }
+  }
+
+  const quando = (s?: string) => {
+    if (!s) return "";
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? "" : d.toLocaleString("pt-BR",
+      { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div className="mb-6 rounded-xl border border-white/10 bg-[#0B1F3B] p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-bold text-[#C9A84C]">
+          Conversa com o cliente
+        </h3>
+        <span className="text-[10px] text-white/35">
+          {msgs.length === 0 ? "sem mensagens" : `${msgs.length} mensagens`}
+        </span>
+      </div>
+
+      <div ref={caixa}
+        className="max-h-[38vh] space-y-2 overflow-y-auto rounded-lg bg-[#0A1628] p-3">
+        {msgs.length === 0 && (
+          <p className="py-6 text-center text-[11px] text-white/35">
+            Nenhuma mensagem ainda. O atendimento está assumindo este caso.
+          </p>
+        )}
+        {msgs.map((m: any) => {
+          const doCliente = String(m.autor || "").toUpperCase() === "CLIENTE";
+          const humano = String(m.autor || "").toUpperCase() === "HUMANO";
+          return (
+            <div key={m.id}
+              className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${doCliente
+                ? "bg-white/5 text-white/85"
+                : "ml-auto bg-[#C9A84C]/15 text-white/90"}`}>
+              <p className="whitespace-pre-line">{m.conteudo}</p>
+              <p className="mt-1 text-[10px] text-white/35">
+                {doCliente ? "cliente" : humano ? "escritório" : "atendimento"}
+                {" · "}{quando(m.criado_em)}
+                {m.canal && m.canal !== "PORTAL" ? ` · ${String(m.canal).toLowerCase()}` : ""}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <textarea value={texto} onChange={(e) => setTexto(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); responder(); }
+          }}
+          rows={2} placeholder="responder ao cliente…"
+          className="flex-1 resize-none rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+        <button onClick={responder} disabled={enviando || !texto.trim()}
+          className="rounded-lg bg-[#C9A84C] px-4 text-sm font-bold text-[#0A1628] disabled:opacity-40">
+          {enviando ? "…" : "Enviar"}
+        </button>
+      </div>
+
+      <label className="mt-2 flex items-center gap-2 text-[11px] text-white/50">
+        <input type="checkbox" checked={tambem}
+          onChange={(e) => setTambem(e.target.checked)} />
+        enviar também por e-mail e WhatsApp
+      </label>
+
+      {erro && <p className="mt-2 text-[11px] text-[#ff9a8f]">{erro}</p>}
+    </div>
   );
 }
