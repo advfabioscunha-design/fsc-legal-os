@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Playfair_Display, Inter, Space_Grotesk } from "next/font/google";
 import AtendimentoFlutuante from "./components/AtendimentoFlutuante";
+import LevaParaRedefinirSenha from "./components/LevaParaRedefinirSenha";
 import TokenNasChamadas from "./components/TokenNasChamadas";
 
 /* TIPOGRAFIA
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <TokenNasChamadas />
         {children}
         {/* Só no site e na área do cliente. Quem decide é o componente. */}
+        <LevaParaRedefinirSenha />
         <AtendimentoFlutuante />
       </body>
     </html>

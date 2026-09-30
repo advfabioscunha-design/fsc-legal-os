@@ -61,13 +61,35 @@ def processar_webhook(payload: dict) -> dict:
         ).eq("id", caso_id).execute()
         mudar_estado(caso_id, "COLETA_DOCS", motivo="Pagamento confirmado (Asaas)")
 
-        # avisa o cliente e já pede o primeiro documento
-        from .whatsapp import enviar_para_cliente
+        # O CLIENTE SABE PELOS TRÊS CANAIS, NÃO POR UM
+        #
+        # Isto avisava só pelo WhatsApp. Quem pagou por outro caminho,
+        # ou não tem WhatsApp cadastrado, não recebia nada: pagava e
+        # ficava no escuro, justamente no momento em que mais precisa
+        # de confirmação. A central de avisos já sabe o e-mail, o
+        # número, o fio do assunto e o número do atendimento, e
+        # registra a ciência.
+        texto = ("Pagamento confirmado, obrigado pela confiança. "
+                 "A partir de agora o seu caso está em andamento e você "
+                 "acompanha cada passo pela plataforma. O próximo passo é "
+                 "reunir os documentos, e já vamos te dizer qual é o "
+                 "primeiro de que precisamos.")
         try:
-            enviar_para_cliente(caso_id,
-                "Pagamento confirmado, obrigado! 🎉 Agora vamos reunir os documentos "
-                "do seu caso. Já te explico o primeiro que preciso.")
-        except Exception:
-            pass
+            from . import avisos
+            avisos.notificar(caso_id, "PAGAMENTO", "Pagamento confirmado", texto)
+        except Exception as e:
+            print(f"[asaas] aviso de pagamento não saiu: {e}")
+
+        # E aparece também na conversa, que é onde o cliente volta para
+        # olhar depois. Aviso que só existe no e-mail some na caixa de
+        # entrada de quem recebe cinquenta por dia.
+        try:
+            get_db().table("mensagens").insert({
+                "caso_id": caso_id, "canal": "PORTAL", "autor": "AGENTE",
+                "conteudo": texto,
+            }).execute()
+        except Exception as e:
+            print(f"[asaas] confirmação não registrada na conversa: {e}")
+
         return {"ok": True, "avancou": "COLETA_DOCS"}
     return {"ok": True, "ignorado": evento}
