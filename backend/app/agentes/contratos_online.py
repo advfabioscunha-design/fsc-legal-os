@@ -1648,3 +1648,309 @@ def revisar_pendencias(pedido_id: str) -> dict:
 
     return {**pend, "recado": recado_de_pendencia(pend),
             "travado": bool(pend["trava"])}
+
+
+# ══════════════════════════════════════════════════════════════════
+# A RÉGUA DE COBRANÇA, E OS TRÊS CANAIS QUE VOLTAM PARA O MESMO LUGAR
+#
+# Pendência que ninguém cobra é pedido que morre. O cliente mandou o
+# que lembrou, ficou faltando um dado, e a vida seguiu: uma semana
+# depois ele não lembra mais que havia algo pendente, e o escritório
+# tem um pedido pago parado na esteira.
+#
+# De seis em seis horas, enquanto faltar algo indispensável, sai um
+# comunicado com a lista do que falta e a explicação de por que aquilo
+# importa. Seis horas é curto o bastante para não deixar o pedido
+# esfriar e longo o bastante para não soar cobrança de agiota.
+#
+# OS TRÊS CANAIS SÃO UMA PORTA SÓ
+#
+# O comunicado sai pela plataforma, pelo e-mail e pelo WhatsApp, e a
+# resposta volta por onde o cliente preferir. Seja qual for o caminho,
+# ela cai na conversa do pedido, e o mesmo código trata as três: quem
+# responde por e-mail não pode ter um atendimento pior do que quem
+# responde pelo chat.
+#
+# E A RESPOSTA NÃO FICA ESPERANDO ALGUÉM LER
+#
+# Chegando qualquer coisa do cliente num pedido travado, o redator lê
+# o que veio, separa o que corresponde ao que faltava e preenche. O
+# relógio volta a andar na mesma hora, com a hora de graça quando as
+# quatro já passaram.
+# ══════════════════════════════════════════════════════════════════
+
+INTERVALO_COBRANCA = 6        # horas
+
+
+def _texto_da_cobranca(pedido: dict, pend: dict, vez: int) -> str:
+    """O comunicado. Muda de tom conforme a vez, sem perder a educação."""
+    itens = "\n".join(f"  • {_rotulo(i)}" for i in pend["obrigatorias"])
+    complementares = ""
+    if pend["complementares"]:
+        complementares = (
+            "\n\nAproveitando, isto aqui não segura nada e deixa o documento "
+            "mais completo, se você tiver à mão:\n"
+            + "\n".join(f"  • {i['rotulo']}" for i in pend["complementares"]))
+
+    abertura = {
+        1: "Passando para lembrar de uma informação que ficou faltando.",
+        2: "Voltando ao seu pedido: ainda falta uma informação para "
+           "concluirmos.",
+    }.get(vez, "O seu documento continua parado esperando uma informação.")
+
+    return (
+        f"{abertura}\n\n"
+        f"Pedido {pedido.get('numero')}.\n\n"
+        f"O que falta:\n{itens}{complementares}\n\n"
+        f"Por que isso importa: o texto do seu documento já está escrito na "
+        f"parte que não depende disso, e a conferência final é a última etapa "
+        f"antes de ele ir para a sua aprovação. Sem essa informação, o "
+        f"documento não pode ser concluído, e é só isso que está segurando a "
+        f"entrega.\n\n"
+        f"Como responder: do jeito que for mais fácil para você. Responda "
+        f"este e-mail escrevendo a informação, mande pelo chat da sua área na "
+        f"plataforma, ou responda no WhatsApp. Chega tudo no mesmo lugar, e "
+        f"assim que chegar o prazo volta a correr."
+    )
+
+
+def cobrar_pendencias() -> dict:
+    """De seis em seis horas, enquanto faltar o indispensável."""
+    db = get_db()
+    parados = db.table("pedidos_contrato") \
+        .select("id,numero,fase,fase_em,avanca_em,pendencia_cobrada_em,"
+                "pendencia_cobrancas,pago_em") \
+        .in_("fase", list(_PROXIMA)) \
+        .is_("avanca_em", "null") \
+        .is_("excluido_em", "null") \
+        .limit(100).execute().data or []
+
+    enviados, erros = 0, []
+    for p in parados:
+        try:
+            pend = pendencias_do_pedido(p["id"])
+            if not pend["trava"]:
+                # O relógio devia estar andando. Conserta em vez de
+                # cobrar: cobrar o que já foi enviado é o jeito mais
+                # rápido de perder a confiança do cliente.
+                revisar_pendencias(p["id"])
+                continue
+
+            ultimo = p.get("pendencia_cobrada_em") or p.get("fase_em") or p.get("pago_em")
+            if _horas_desde(ultimo) < INTERVALO_COBRANCA:
+                continue
+
+            vez = int(p.get("pendencia_cobrancas") or 0) + 1
+            recado(p["id"], _texto_da_cobranca(p, pend, vez),
+                   canais=["PLATAFORMA", "EMAIL", "WHATSAPP"], autor="AGENTE",
+                   assunto=f"Falta uma informação para concluir o seu "
+                           f"documento, {p.get('numero')}")
+            db.table("pedidos_contrato").update({
+                "pendencia_cobrada_em": _agora(),
+                "pendencia_cobrancas": vez,
+                "atualizado_em": _agora(),
+            }).eq("id", p["id"]).execute()
+            registrar_evento(None, "BALCAO_PENDENCIA_COBRADA",
+                             {"pedido_id": p["id"], "vez": vez,
+                              "faltam": len(pend["obrigatorias"])})
+            enviados += 1
+        except Exception as e:
+            erros.append(f"{p.get('numero')}: {e}")
+
+    return {"cobrados": enviados, "erros": erros}
+
+
+# ── A resposta do cliente, venha de onde vier ───────────────────
+
+SYSTEM_COMPLEMENTO = """Você recebe a resposta de um cliente que estava \
+devendo informações para um contrato, e a lista do que faltava. Sua tarefa é \
+só uma: dizer quais desses campos a mensagem responde, e com que valor.
+
+REGRAS
+- Só preencha campo que a mensagem responde de forma clara. Na dúvida, deixe \
+de fora: campo preenchido errado é pior do que campo vazio, porque ninguém \
+vai conferir de novo.
+- Não invente, não complete, não deduza. Se a pessoa escreveu "moro na Rua \
+das Flores", isso é a rua, e não o endereço completo.
+- Copie o valor como a pessoa escreveu, corrigindo só maiúsculas óbvias.
+- Se a mensagem não responder nada da lista, devolva a lista vazia."""
+
+FERRAMENTA_COMPLEMENTO = [{
+    "name": "preencher",
+    "description": "Registra os campos que a mensagem do cliente respondeu.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "campos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "campo": {"type": "string"},
+                        "valor": {"type": "string"},
+                    },
+                    "required": ["campo", "valor"],
+                },
+            },
+        },
+        "required": ["campos"],
+    },
+}]
+
+
+def complementar_com_a_resposta(pedido_id: str, texto: str) -> dict:
+    """Lê o que o cliente mandou e preenche o que dá.
+
+    A leitura é feita por modelo porque a resposta vem em português
+    corrido, do jeito que a pessoa fala: "o CPF dele é 123, e ele é
+    casado". O que o modelo NÃO faz é decidir se aquilo basta: quem
+    decide é `pendencias_do_pedido`, comparando o que ficou preenchido
+    com o que o tipo de contrato exige."""
+    texto = (texto or "").strip()
+    if not texto:
+        return {"preenchidos": 0}
+
+    pend = pendencias_do_pedido(pedido_id)
+    if not pend["itens"]:
+        return {"preenchidos": 0}
+
+    lista = "\n".join(
+        f"- {i['campo']}: {_rotulo(i)}"
+        + (" (indispensável)" if i["obrigatorio"] else " (complementar)")
+        for i in pend["itens"])
+
+    try:
+        r = _claude().messages.create(
+            model=get_settings().claude_model, max_tokens=1200,
+            system=SYSTEM_COMPLEMENTO,
+            tools=FERRAMENTA_COMPLEMENTO,
+            tool_choice={"type": "tool", "name": "preencher"},
+            messages=[{"role": "user", "content":
+                       f"CAMPOS QUE FALTAM:\n{lista}\n\n"
+                       f"MENSAGEM DO CLIENTE:\n{texto[:4000]}"}],
+        )
+    except Exception as e:
+        print(f"[balcao] leitura da resposta falhou: {e}")
+        return {"preenchidos": 0, "erro": str(e)}
+
+    achados = []
+    for bloco in r.content:
+        if getattr(bloco, "type", "") == "tool_use" and bloco.name == "preencher":
+            achados = (bloco.input or {}).get("campos") or []
+
+    if not achados:
+        return {"preenchidos": 0}
+
+    db = get_db()
+    atual = db.table("pedidos_contrato").select("dados,partes") \
+        .eq("id", pedido_id).limit(1).execute().data[0]
+    dados = dict(atual.get("dados") or {})
+    partes = list(atual.get("partes") or [])
+    por_papel = {p.get("papel"): p for p in partes}
+
+    preenchidos = []
+    for a in achados:
+        campo = (a.get("campo") or "").strip()
+        valor = (a.get("valor") or "").strip()
+        if not campo or not valor:
+            continue
+        item = next((i for i in pend["itens"] if i["campo"] == campo), None)
+        if not item:
+            continue
+        if item.get("origem") == "PARTE":
+            papel = item.get("papel")
+            alvo = por_papel.setdefault(papel, {"papel": papel})
+            # o campo da parte vem como "papel_rótulo"; o que interessa
+            # é o rótulo, que é o nome do campo na estrutura da parte
+            chave = {"nome completo": "nome", "CPF ou CNPJ": "cpf_cnpj",
+                     "endereço completo": "endereco"}.get(item["rotulo"],
+                                                          item["rotulo"])
+            alvo[chave] = valor
+        else:
+            dados[campo] = valor
+        preenchidos.append(_rotulo(item))
+
+    if not preenchidos:
+        return {"preenchidos": 0}
+
+    db.table("pedidos_contrato").update({
+        "dados": dados, "partes": list(por_papel.values()) or partes,
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    estado = revisar_pendencias(pedido_id)
+    registrar_evento(None, "BALCAO_PENDENCIA_COMPLEMENTADA",
+                     {"pedido_id": pedido_id, "campos": preenchidos,
+                      "ainda_falta": estado.get("travado")})
+
+    # O redator refaz a minuta com o que chegou. Sem isto, o documento
+    # seguiria para a conferência final sem a informação que acabou de
+    # ser prestada, que é o pior desfecho possível desta espera.
+    if not estado.get("travado"):
+        try:
+            redigir(pedido_id, auto=True)
+        except Exception as e:
+            print(f"[balcao] minuta não refeita agora, fica para a esteira: {e}")
+
+    return {"preenchidos": len(preenchidos), "campos": preenchidos,
+            "ainda_falta": estado.get("travado"),
+            "pendencias": estado}
+
+
+def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
+                        anexos: list[str] | None = None) -> dict:
+    """Porta única para o que o cliente responde, venha de onde vier.
+
+    Chat, e-mail e WhatsApp entram por aqui. Ter uma porta só é o que
+    garante que a experiência não dependa do canal escolhido, e o que
+    evita três implementações que envelhecem em ritmos diferentes."""
+    db = get_db()
+    if texto.strip():
+        db.table("pedidos_mensagens").insert({
+            "pedido_id": pedido_id, "autor": "CLIENTE",
+            "texto": texto[:4000], "canais": [canal.upper()],
+        }).execute()
+
+    registrar_evento(None, "BALCAO_RESPOSTA_CLIENTE",
+                     {"pedido_id": pedido_id, "canal": canal.upper(),
+                      "anexos": len(anexos or [])})
+
+    r = db.table("pedidos_contrato").select("avanca_em,fase") \
+        .eq("id", pedido_id).limit(1).execute().data
+    travado = bool(r) and r[0].get("avanca_em") is None \
+        and r[0].get("fase") in _PROXIMA
+
+    saida: dict = {"registrado": True, "travado_antes": travado}
+    if travado:
+        saida.update(complementar_com_a_resposta(pedido_id, texto))
+        # Anexo também destrava: documento que chega costuma trazer a
+        # informação que faltava, mesmo sem uma linha escrita.
+        if anexos and saida.get("preenchidos", 0) == 0:
+            saida["pendencias"] = revisar_pendencias(pedido_id)
+    return saida
+
+
+def pedido_por_numero(numero: str) -> dict | None:
+    """Acha o pedido pelo protocolo. Usado pela entrada de e-mail."""
+    if not numero:
+        return None
+    r = get_db().table("pedidos_contrato") \
+        .select("id,numero,cliente_id,fase,avanca_em") \
+        .eq("numero", numero.upper()).limit(1).execute().data
+    return r[0] if r else None
+
+
+def pedido_travado_do_cliente(cliente_id: str) -> dict | None:
+    """O pedido daquele cliente que está esperando informação.
+
+    Serve ao WhatsApp, que chega sem número de protocolo: a mensagem é
+    do cliente, e se ele tem exatamente um pedido parado esperando algo,
+    é sobre esse que ele está falando. Com mais de um, não se adivinha:
+    a conversa vai para o caso, como antes."""
+    r = get_db().table("pedidos_contrato").select("id,numero") \
+        .eq("cliente_id", cliente_id) \
+        .in_("fase", list(_PROXIMA)) \
+        .is_("avanca_em", "null") \
+        .is_("excluido_em", "null") \
+        .limit(2).execute().data or []
+    return r[0] if len(r) == 1 else None

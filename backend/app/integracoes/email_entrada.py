@@ -45,6 +45,11 @@ from ..core.db import get_db, registrar_evento
 EXTENSOES_OK = (".pdf", ".docx", ".doc", ".jpg", ".jpeg", ".png", ".heic")
 PADRAO_REF = re.compile(r"FSCDOC-([0-9a-f]{8})", re.I)
 PADRAO_ATENDIMENTO = re.compile(r"FSC-\d{4}-\d{3,6}", re.I)
+# O protocolo do balcão. Vem antes do de atendimento na ordem de
+# reconhecimento porque é mais específico: "FSC-C-2026-0001" também
+# casaria com o padrão de atendimento se lido da esquerda para a
+# direita a partir do "C".
+PADRAO_PEDIDO = re.compile(r"FSC-C-\d{4}-\d{3,6}", re.I)
 # anexos que são enchimento do próprio e-mail, não documento do cliente
 LIXO = re.compile(r"^(icon|logo|image\d*|imagem\d*|assinatura|signature)\.", re.I)
 TAMANHO_MINIMO = 3 * 1024      # abaixo disso é ícone, não documento
@@ -199,6 +204,57 @@ def _por_remetente(de: str) -> list[dict]:
     if len({d["caso_id"] for d in docs}) != 1:
         return []
     return docs
+
+
+def _pedido_do_balcao(alvo: str, de: str):
+    """A resposta é sobre um pedido de contrato?
+
+    Duas formas de saber, nesta ordem. O protocolo citado no assunto ou
+    no corpo, que é o caminho do cliente que responde ao comunicado de
+    cobrança; e, na falta dele, o cliente ter exatamente um pedido
+    parado esperando informação, que é o caminho de quem responde de um
+    celular que corta o assunto.
+
+    Com mais de um pedido parado, não se adivinha: a mensagem segue
+    para o caminho normal e alguém lê."""
+    from ..agentes import contratos_online as balcao
+    m = PADRAO_PEDIDO.search(alvo or "")
+    if m:
+        p = balcao.pedido_por_numero(m.group(0).upper())
+        if p:
+            return p
+    try:
+        cli = get_db().table("clientes").select("id") \
+            .eq("email", (de or "").lower()).limit(1).execute().data
+        if cli:
+            return balcao.pedido_travado_do_cliente(cli[0]["id"])
+    except Exception:
+        pass
+    return None
+
+
+def _guardar_no_pedido(pedido_id: str, nome: str, dados: bytes, mime: str,
+                       remetente: str) -> str:
+    """Anexo que chegou por e-mail entra na pasta do pedido.
+
+    O mesmo lugar em que cai o que o cliente sobe pela tela. Guardar em
+    outro lugar faria o escritório procurar em dois, e um dia esquecer
+    de olhar o segundo."""
+    import uuid
+    from ..core.config import get_settings as _cfg
+    s = _cfg()
+    db = get_db()
+    limpo = re.sub(r"[^A-Za-z0-9._-]", "_", nome or "anexo")[:80]
+    caminho = f"pedidos/{pedido_id}/{uuid.uuid4().hex}_{limpo}"
+    db.storage.from_(s.bucket_documentos).upload(
+        caminho, dados, {"content-type": mime or "application/octet-stream",
+                         "upsert": "true"})
+    db.table("pedidos_documentos").insert({
+        "pedido_id": pedido_id, "nome": nome[:200], "url": caminho,
+        "tipo_mime": mime, "tamanho": len(dados), "enviado_por": "CLIENTE",
+        "rotulo": f"enviado por e-mail ({remetente})"[:200],
+    }).execute()
+    return nome
 
 
 def _identificar(msg, alvo: str, de: str) -> tuple[list[dict], str | None, str]:
@@ -490,6 +546,36 @@ def ler_respostas(limite: int = 60, dias: int = 21) -> dict:
                     continue          # e-mail vazio: nada a registrar
 
                 alvo = f"{_texto(msg.get('Subject'))}\n{_corpo_texto(msg)}"
+
+                # O BALCÃO VEM PRIMEIRO
+                #
+                # Quem responde ao comunicado de pendência está falando
+                # de um pedido de contrato, não de um processo. Deixar
+                # essa mensagem cair no caminho do caso faria a
+                # informação chegar no lugar errado e o relógio
+                # continuar parado.
+                pedido = _pedido_do_balcao(alvo, de)
+                if pedido:
+                    nomes_anexos = []
+                    for nome, conteudo, mime in anexos:
+                        try:
+                            nomes_anexos.append(
+                                _guardar_no_pedido(pedido["id"], nome,
+                                                   conteudo, mime, de))
+                        except Exception as e:
+                            resultado["erros"].append(f"anexo do pedido: {e}")
+                    try:
+                        from ..agentes import contratos_online as balcao
+                        balcao.resposta_do_cliente(
+                            pedido["id"], escrito, canal="EMAIL",
+                            anexos=nomes_anexos)
+                        resultado["respostas"] += 1
+                    except Exception as e:
+                        resultado["erros"].append(f"pedido {pedido.get('numero')}: {e}")
+                    _marcar_processado(mid, None,
+                                       f"resposta ao pedido {pedido.get('numero')}")
+                    continue
+
                 docs, caso_id, como = _identificar(msg, alvo, de)
                 if not caso_id:
                     resultado["sem_referencia"] += 1

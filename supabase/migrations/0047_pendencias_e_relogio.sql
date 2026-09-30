@@ -64,3 +64,22 @@ create index if not exists idx_pedidos_avanco
 -- dia por causa de uma frase.
 alter table public.pedidos_contrato
   add column if not exists observacao_cliente text;
+
+
+-- ── A régua de cobrança ────────────────────────────────────────
+--
+-- Pendência que ninguém cobra é pedido que morre: o cliente mandou o
+-- que lembrou, ficou faltando um dado, e uma semana depois ele nem
+-- lembra que havia algo pendente. De seis em seis horas sai um
+-- comunicado com a lista, pelos três canais.
+--
+-- Duas colunas, e a segunda existe porque o tom da terceira cobrança
+-- não pode ser o mesmo da primeira.
+alter table public.pedidos_contrato
+  add column if not exists pendencia_cobrada_em timestamptz,
+  add column if not exists pendencia_cobrancas  integer not null default 0;
+
+comment on column public.pedidos_contrato.pendencia_cobrada_em is
+  'Última vez que o cliente foi lembrado do que falta. A régua conta '
+  'daqui, e não da entrada na fase: sem isso, o primeiro ciclo depois '
+  'de uma resposta parcial dispararia uma cobrança imediata.';

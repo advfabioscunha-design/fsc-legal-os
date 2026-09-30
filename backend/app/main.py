@@ -119,6 +119,18 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[balcao] esteira não agendada: {e}")
+        # Régua de pendências: de 6 em 6 horas, enquanto faltar o
+        # indispensável. Roda de meia em meia hora e a própria função
+        # decide de quem está na hora de cobrar.
+        try:
+            from .agentes import contratos_online as _b2
+            sched.add_job(
+                _b2.cobrar_pendencias,
+                CronTrigger(minute="5,35"),
+                id="cobranca_pendencias", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[balcao] régua de pendências não agendada: {e}")
         # Caixa de entrada: recebe a via assinada devolvida por e-mail
         try:
             if s.imap_auto:
@@ -5019,6 +5031,13 @@ def balcao_esteira():
     return contratos_online.esteira_automatica()
 
 
+@app.post("/api/v1/contratos/cobrar-pendencias")
+def balcao_cobrar_pendencias():
+    """Roda a régua de cobrança agora. Mesma função do agendador."""
+    from .agentes import contratos_online
+    return contratos_online.cobrar_pendencias()
+
+
 @app.post("/api/v1/contratos/arquivar-vencidos")
 def balcao_arquivar_vencidos():
     """Tira da coluna Entregue o que passou dos sete dias."""
@@ -5052,11 +5071,11 @@ def balcao_mensagem(pedido_id: str, body: MensagemDoBalcao):
     if autor == "CLIENTE":
         if not body.texto.strip():
             raise HTTPException(400, "A mensagem está vazia.")
-        r = get_db().table("pedidos_mensagens").insert({
-            "pedido_id": pedido_id, "autor": "CLIENTE",
-            "texto": body.texto[:4000], "canais": ["PLATAFORMA"],
-        }).execute().data
-        return r[0] if r else {"ok": True}
+        # Passa pela mesma porta que o e-mail e o WhatsApp: se o pedido
+        # estiver parado esperando informação, o que o cliente escreveu
+        # aqui já destrava, sem ninguém precisar ler.
+        return contratos_online.resposta_do_cliente(
+            pedido_id, body.texto, canal="PLATAFORMA")
     try:
         return contratos_online.recado(
             pedido_id, body.texto, canais=body.canais, autor=autor,

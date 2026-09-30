@@ -120,6 +120,37 @@ def processar_webhook(payload: dict) -> dict:
             .maybe_single().execute().data
 
     if cli:
+        # O BALCÃO VEM ANTES DO CASO
+        #
+        # Se este cliente tem um pedido de contrato parado esperando
+        # informação, é quase certo que a mensagem é sobre ele: foi o
+        # que o escritório cobrou por aqui há poucas horas. Mandar para
+        # o especialista do processo faria a informação chegar no lugar
+        # errado e o relógio do pedido continuar parado.
+        #
+        # Só vale com UM pedido parado. Com dois, não se adivinha, e a
+        # conversa segue o caminho normal.
+        try:
+            from ..agentes import contratos_online as balcao
+            pedido = balcao.pedido_travado_do_cliente(cli["id"])
+            if pedido:
+                r = balcao.resposta_do_cliente(pedido["id"], texto,
+                                               canal="WHATSAPP")
+                if r.get("preenchidos"):
+                    resposta = ("Recebido, obrigado. Já estou complementando o "
+                                "seu documento com essa informação.")
+                elif r.get("ainda_falta"):
+                    resposta = ("Recebi a sua mensagem e anotei no seu pedido. "
+                                "Ainda falta alguma informação; o escritório "
+                                "confere e retorna.")
+                else:
+                    resposta = ("Recebi a sua mensagem e anotei no seu pedido. "
+                                "O escritório já está com ela.")
+                responder_espelhando(numero, resposta, eh_audio)
+                return {"ok": True, "pedido": pedido["id"], "audio": eh_audio}
+        except Exception as e:
+            print(f"[whatsapp] balcão não tratou, segue para o caso: {e}")
+
         caso = db.table("casos").select("id").eq("cliente_id", cli["id"]) \
                  .not_.in_("estado", ["CONCLUIDO", "CANCELADO", "INVIAVEL"]) \
                  .order("criado_em", desc=True).limit(1).execute().data
