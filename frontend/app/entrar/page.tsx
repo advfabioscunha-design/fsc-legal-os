@@ -8,7 +8,9 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
 
 export default function Entrar() {
   const router = useRouter();
-  const [modo, setModo] = useState<"login" | "cadastro" | "recuperar">("login");
+  const [modo, setModo] = useState<
+    "login" | "cadastro" | "recuperar" | "nova-senha">("login");
+  const [senha2, setSenha2] = useState("");
 
   /* Quem chega pelo "Analisar meu caso" ainda não tem conta, e abrir a
      tela em "Entrar" faz essa pessoa procurar o link de cadastro antes
@@ -19,6 +21,30 @@ export default function Entrar() {
     // Quem chega pelo "esqueci a senha" da porta da equipe já cai na
     // tela certa, sem ter de procurar o link de novo aqui dentro.
     if (p.get("recuperar") === "1") setModo("recuperar");
+
+    /* QUEM CHEGA PELO LINK DO E-MAIL
+     *
+     * O link de recuperação traz de volta para cá, e a tela mostrava a
+     * entrada normal: a pessoa clicava no e-mail, voltava para o
+     * formulário de senha e não tinha onde redefinir nada. O link
+     * funcionava, o destino é que não sabia o que fazer com ele.
+     *
+     * O Supabase devolve o sinal de duas formas, conforme a versão do
+     * fluxo: `type=recovery` na âncora depois do `#`, no formato
+     * antigo, ou um `code` na própria URL, no formato novo. Os dois
+     * são checados, e o evento PASSWORD_RECOVERY cobre o caso em que a
+     * biblioteca termina a troca depois desta primeira leitura. */
+    const ancora = new URLSearchParams(
+      (window.location.hash || "").replace(/^#/, ""));
+    if (ancora.get("type") === "recovery"
+        || p.get("type") === "recovery"
+        || p.get("code")) {
+      setModo("nova-senha");
+    }
+    const { data: sub } = supabase.auth.onAuthStateChange((evento) => {
+      if (evento === "PASSWORD_RECOVERY") setModo("nova-senha");
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
@@ -94,6 +120,43 @@ export default function Entrar() {
     }
   }
 
+  /* GRAVAR A SENHA NOVA
+   *
+   * Neste ponto a pessoa já está autenticada: o link do e-mail abriu
+   * uma sessão de recuperação. Por isso não se pede a senha antiga,
+   * que ela não tem mesmo, e sim a nova duas vezes. Errar a digitação
+   * de uma senha que ninguém vai ver de novo é fácil, e o prejuízo é
+   * ficar trancado outra vez.
+   */
+  async function gravarNovaSenha(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (senha.length < 6) {
+      setMsg("A senha precisa de pelo menos 6 caracteres.");
+      return;
+    }
+    if (senha !== senha2) {
+      setMsg("As duas senhas não são iguais. Confira e tente de novo.");
+      return;
+    }
+    setCarregando(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: senha });
+      if (error) throw error;
+      // Limpa a âncora com o token: recarregar a página depois disso
+      // não pode reabrir a tela de troca de senha.
+      window.history.replaceState({}, "", window.location.pathname);
+      setMsg("Senha alterada. Entrando…");
+      await redirecionarPorPapel();
+    } catch (err: any) {
+      setMsg(err?.message?.includes("expired")
+        ? "Este link expirou. Peça um novo em 'Esqueci a minha senha'."
+        : (err?.message ?? "Não foi possível alterar a senha agora."));
+    } finally {
+      setCarregando(false);
+    }
+  }
+
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
@@ -135,6 +198,7 @@ export default function Entrar() {
         <h1 className="mb-1 text-center font-display text-2xl font-bold text-navy">
           {modo === "login" ? "Entrar"
             : modo === "cadastro" ? "Criar seu acesso"
+            : modo === "nova-senha" ? "Criar a sua nova senha"
             : "Recuperar a senha"}
         </h1>
         <p className="mb-6 text-center text-sm leading-relaxed text-charcoal/55">
@@ -144,6 +208,9 @@ export default function Entrar() {
             ? "Com a senha criada, tudo o que você conversar e solicitar fica "
               + "guardado na sua área. Se sair e voltar depois, continua do "
               + "mesmo ponto."
+            : modo === "nova-senha"
+            ? "Escolha a senha que você vai usar a partir de agora. Digite duas "
+              + "vezes para não correr o risco de errar."
             : "Informe o e-mail cadastrado. Enviamos para ele o link para você "
               + "criar uma senha nova."}
         </p>
@@ -154,7 +221,28 @@ export default function Entrar() {
             ninguém: quem recebe o link é o dono da caixa de entrada,
             e é isso que faz a recuperação segura. Campo a mais só
             trava quem já está sem acesso. */}
-        {modo === "recuperar" ? (
+        {modo === "nova-senha" ? (
+          <form onSubmit={gravarNovaSenha} className="space-y-4">
+            <input
+              type="password" autoFocus minLength={6}
+              className="w-full rounded-lg border border-black/10 bg-white px-4 py-3 text-sm text-charcoal outline-none focus:border-gold"
+              placeholder="Nova senha, pelo menos 6 caracteres" value={senha}
+              onChange={(e) => setSenha(e.target.value)} required
+            />
+            <input
+              type="password" minLength={6}
+              className="w-full rounded-lg border border-black/10 bg-white px-4 py-3 text-sm text-charcoal outline-none focus:border-gold"
+              placeholder="Repita a nova senha" value={senha2}
+              onChange={(e) => setSenha2(e.target.value)} required
+            />
+            <button
+              type="submit" disabled={carregando || !senha || !senha2}
+              className="w-full rounded-lg bg-gold py-3 text-sm font-semibold text-navy transition hover:bg-[#b89971] disabled:opacity-60"
+            >
+              {carregando ? "Salvando…" : "Salvar e entrar"}
+            </button>
+          </form>
+        ) : modo === "recuperar" ? (
           <form onSubmit={recuperar} className="space-y-4">
             <input
               type="email" autoFocus
@@ -210,19 +298,24 @@ export default function Entrar() {
           </button>
         )}
 
-        <button
-          onClick={() => {
-            setMsg(null);
-            setModo(modo === "login" ? "cadastro" : "login");
-          }}
-          className="mt-4 w-full text-center text-sm text-charcoal/50 hover:text-charcoal"
-        >
-          {modo === "login"
-            ? "Não tem conta? Cadastre-se"
-            : modo === "cadastro"
-            ? "Já tem conta? Entrar"
-            : "Voltar para a entrada"}
-        </button>
+        {/* Na troca de senha não há para onde voltar: sair daqui sem
+            gravar deixa a pessoa trancada de novo, com um link já
+            usado na mão. */}
+        {modo !== "nova-senha" && (
+          <button
+            onClick={() => {
+              setMsg(null);
+              setModo(modo === "login" ? "cadastro" : "login");
+            }}
+            className="mt-4 w-full text-center text-sm text-charcoal/50 hover:text-charcoal"
+          >
+            {modo === "login"
+              ? "Não tem conta? Cadastre-se"
+              : modo === "cadastro"
+              ? "Já tem conta? Entrar"
+              : "Voltar para a entrada"}
+          </button>
+        )}
       </div>
     </main>
   );
