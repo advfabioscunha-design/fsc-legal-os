@@ -276,7 +276,7 @@ function PainelDoPedido({ id, fechar, recarregar }:
             Vem antes do bloco da fase de propósito: é dinheiro que já
             entrou e prazo que só começa a valer depois do clique. Um
             aviso desses no meio da tela seria visto na semana que vem. */}
-        {pedido.urgencia_pedida_em && !pedido.urgencia_confirmada_em && (
+        {p?.urgencia_pedida_em && !p?.urgencia_confirmada_em && (
           <div className="mb-4 rounded-xl border border-[#E5A44C]/50 bg-[#E5A44C]/10 p-3">
             <p className="text-[11px] font-bold text-[#E5A44C]">
               Urgência pedida pelo cliente
@@ -284,12 +284,12 @@ function PainelDoPedido({ id, fechar, recarregar }:
             <p className="mt-1 text-[11px] leading-relaxed text-white/75">
               Adicional de{" "}
               <b className="text-white">
-                {Number(pedido.urgencia_valor || 0).toLocaleString("pt-BR",
+                {Number(p?.urgencia_valor || 0).toLocaleString("pt-BR",
                   { style: "currency", currency: "BRL" })}
               </b>
-              {pedido.urgencia_txid
+              {p?.urgencia_txid
                 ? <> . O cliente informou o comprovante{" "}
-                    <span className="font-mono text-white/85">{pedido.urgencia_txid}</span>.</>
+                    <span className="font-mono text-white/85">{p?.urgencia_txid}</span>.</>
                 : ". O cliente ainda não avisou o pagamento."}
             </p>
             <p className="mt-1 text-[11px] leading-relaxed text-white/50">
@@ -299,7 +299,7 @@ function PainelDoPedido({ id, fechar, recarregar }:
             </p>
             <button
               onClick={() => acao("/urgencia/confirmar",
-                { txid: pedido.urgencia_txid || "", quem: "escritório" },
+                { txid: p?.urgencia_txid || "", quem: "escritório" },
                 "urgencia")}
               disabled={ocupado === "urgencia"}
               className="mt-2 rounded-lg bg-[#E5A44C] px-4 py-2 text-xs font-bold text-[#0A1628] hover:brightness-110 disabled:opacity-50">
