@@ -43,6 +43,11 @@ export default function Balcao() {
 
   const [termo, setTermo] = useState<any>(null);
   const [pedidoId, setPedidoId] = useState<string | null>(null);
+  /* O pedido que esta pessoa já tem esperando informação. Null é
+     "ainda não perguntei"; undefined seria ambíguo demais para uma
+     decisão que decide o que a tela inteira mostra. */
+  const [emAberto, setEmAberto] = useState<any | null>(null);
+  const [conferindo, setConferindo] = useState(true);
   /* A conta deixou de ser etapa: ela é a porta, e quem não entrou não
      chega aqui. Restam três: escolher o documento, negociar e ler o
      termo. "fechado" é o instante entre o sim e o termo, em que o
@@ -81,6 +86,38 @@ export default function Balcao() {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSessao(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  /* UM PEDIDO DE CADA VEZ, ENQUANTO O PRIMEIRO ESPERA INFORMAÇÃO
+
+     Quem clicava duas vezes em "Pedir meu contrato" abria um segundo
+     cadastro em branco, e acabava com dois protocolos para o mesmo
+     documento: um com metade dos dados, outro vazio. Do lado do
+     escritório viram dois pedidos, e alguém tem de descobrir qual
+     vale.
+
+     Enquanto houver pedido esperando pagamento ou esperando as
+     informações, o balcão não abre a lista de novo: leva direto para
+     aquele, de onde a pessoa parou. Passada essa fase, a lista volta
+     a abrir normalmente, porque pedir um segundo documento é
+     legítimo e comum. */
+  useEffect(() => {
+    if (!sessao) { setConferindo(false); return; }
+    let vivo = true;
+    (async () => {
+      setConferindo(true);
+      try {
+        const r = await fetch(`${API}/api/v1/contratos/meus-pedidos`, {
+          headers: { Authorization: `Bearer ${sessao.access_token}` },
+        });
+        const lista = await r.json();
+        const esperando = (Array.isArray(lista) ? lista : [])
+          .find((p: any) => ["PAGAMENTO", "COLETA"].includes(p.fase));
+        if (vivo) setEmAberto(esperando || null);
+      } catch { /* sem isto a tela segue como antes, e não como travada */ }
+      finally { if (vivo) setConferindo(false); }
+    })();
+    return () => { vivo = false; };
+  }, [sessao]);
 
   const reais = (v: number) =>
     v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -167,6 +204,14 @@ export default function Balcao() {
   async function comecar() {
     const descrito = descricaoLivre.trim();
     if (!escolhido && descrito.length < 8) return;
+    /* CLIQUE DUPLO NÃO NASCE PEDIDO DUPLO
+
+       `ocupado` já desabilita o botão, mas o clique repetido chega
+       antes do React redesenhar, e nessa fresta cabiam dois POST. Dois
+       POST são dois protocolos, e alguém no escritório vai ter de
+       descobrir qual dos dois vale. A guarda é aqui, no início da
+       função, que é o único ponto por onde os dois passam. */
+    if (ocupado || pedidoId) return;
     setOcupado(true); setErro("");
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos`, {
@@ -240,6 +285,49 @@ export default function Balcao() {
             entrar={entrar} criarConta={criarConta}
             recuperarSenha={recuperarSenha} recuperarSemEmail={recuperarSemEmail}
           />
+        ) : conferindo ? (
+          <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6 text-sm text-white/50">
+            Um instante, conferindo os seus pedidos…
+          </section>
+        ) : emAberto && etapa === "tipo" ? (
+          /* JÁ EXISTE UM PEDIDO ESPERANDO INFORMAÇÃO
+
+             Aqui a lista não abre. Abrir seria convidar a pessoa a
+             começar de novo o que ela já começou, e o resultado é dois
+             protocolos para o mesmo documento. */
+          <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-6">
+            <span className="inline-flex items-center gap-2 rounded-full bg-[#C9A84C]/15 px-3 py-1 text-[11px] font-bold text-[#C9A84C]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#C9A84C]" />
+              Pedido em andamento
+            </span>
+            <h2 className="mt-3 text-lg font-bold text-white">
+              Você já tem um pedido aberto
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-white/60">
+              É o protocolo <b className="font-mono text-white/85">{emAberto.numero}</b>,
+              {" "}
+              {String(emAberto.tipo) === "OUTRO" && emAberto.servico_livre
+                ? emAberto.servico_livre
+                : String(emAberto.tipo || "").replaceAll("_", " ").toLowerCase()}
+              . Ele está {emAberto.fase === "PAGAMENTO"
+                ? "esperando a confirmação do pagamento"
+                : "esperando as informações do documento"}.
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-white/45">
+              Continue de onde parou. Tudo o que você já informou está
+              guardado, e não é preciso preencher nada de novo.
+            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <button onClick={() => router.push(`/balcao/${emAberto.id}`)}
+                className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e]">
+                Continuar o meu pedido
+              </button>
+              <a href="/cliente"
+                className="text-sm text-white/50 underline hover:text-white">
+                ver todos os meus pedidos
+              </a>
+            </div>
+          </section>
         ) : etapa === "negociar" && pedidoId ? (
           <Negociacao pedidoId={pedidoId} escolhido={escolhido}
             aoFechar={(c) => { setCombinado(c); setEtapa("fechado"); }}

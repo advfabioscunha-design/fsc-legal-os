@@ -4803,11 +4803,14 @@ def balcao_meus_pedidos(authorization: str | None = Header(default=None)):
     _, ids = _clientes_do_token(authorization)
     if not ids:
         return []
+    # Pedido excluído não é pedido do cliente: ele não aparece na área
+    # dele e não pode contar como "já tem um em andamento", senão um
+    # cancelamento do escritório travaria a pessoa para sempre.
     return get_db().table("pedidos_contrato").select(
-        "id,numero,tipo,fase,valor,prazo_entrega_horas,prazo_alteracao_ate,"
-        "entregue_em,criado_em"
-    ).in_("cliente_id", ids).order("criado_em", desc=True) \
-        .limit(100).execute().data or []
+        "id,numero,tipo,servico_livre,fase,valor,prazo_entrega_horas,"
+        "prazo_alteracao_ate,entregue_em,criado_em"
+    ).in_("cliente_id", ids).is_("excluido_em", "null") \
+        .order("criado_em", desc=True).limit(100).execute().data or []
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/documentos")
