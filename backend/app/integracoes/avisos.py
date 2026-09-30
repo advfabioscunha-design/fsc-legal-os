@@ -584,6 +584,42 @@ def _reais(v) -> str:
         return "R$ 0,00"
 
 
+def _destino_do_repasse(cli: dict) -> str:
+    """A conta para onde o valor foi, escrita na prestação de contas.
+
+    É o único documento em que o dado bancário do cliente aparece. Não
+    vai para contrato, procuração ou petição: peça processual é pública,
+    e conta bancária em processo público é problema de quem a informou.
+
+    Sem a declaração de titularidade, não escreve nada. Transferir
+    alvará para conta de terceiro é o caminho mais curto para uma
+    acusação de apropriação, e o silêncio aqui obriga o escritório a
+    confirmar com a pessoa, como fazia antes."""
+    if not cli.get("titular_confirmado"):
+        return ""
+
+    partes = []
+    if cli.get("pix_chave"):
+        rotulo = {"CPF": "CPF", "CNPJ": "CNPJ", "EMAIL": "e-mail",
+                  "TELEFONE": "telefone", "ALEATORIA": "chave aleatória"}.get(
+            (cli.get("pix_tipo") or "").upper(), "chave")
+        partes.append(f"PIX ({rotulo}): {cli['pix_chave']}")
+    if cli.get("conta"):
+        banco = cli.get("banco_nome") or cli.get("banco_codigo") or "banco"
+        tipo = (cli.get("conta_tipo") or "").lower()
+        partes.append(
+            f"{banco}, agência {cli.get('agencia') or '—'}, conta "
+            f"{cli['conta']}" + (f" ({tipo})" if tipo else ""))
+    if not partes:
+        return ""
+
+    quando = cli.get("dados_bancarios_em")
+    data = f" Dados informados por você em {_br_data(quando)}." if quando else ""
+    return ("\n\nDESTINO DO REPASSE\n"
+            + "\n".join(partes)
+            + f"\nTitular: {cli.get('nome') or 'o próprio cliente'}." + data)
+
+
 def prestacao_de_contas(caso_id: str, valores: dict) -> dict:
     """Envia a prestação de contas: linha do tempo completa do atendimento
     + demonstrativo financeiro. É o último e-mail do fio e encerra o caso."""
@@ -624,6 +660,7 @@ def prestacao_de_contas(caso_id: str, valores: dict) -> dict:
         + (f"Despesas processuais: {_reais(desp)}\n" if desp else "")
         + f"VALOR REPASSADO A VOCÊ: {_reais(repasse)}"
         + (f"\nForma do repasse: {valores.get('forma_repasse')}" if valores.get("forma_repasse") else "")
+        + _destino_do_repasse(cli)
     )
     mensagem = (
         f"Chegamos ao fim do seu atendimento nº {num}.\n\n"

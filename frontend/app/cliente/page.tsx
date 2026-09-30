@@ -647,10 +647,11 @@ export default function AreaCliente() {
           /* ── LISTA DE ATENDIMENTOS ── */
           <section className="rounded-2xl border border-black/5 bg-white p-6 shadow-sm">
             <button onClick={() => setVista("home")} className="mb-4 text-sm text-charcoal/50 hover:text-charcoal">← Voltar</button>
-            <h2 className="font-serif text-xl font-bold text-navy">Meus atendimentos</h2>
-            <p className="mt-1 text-sm text-charcoal/60">
-              Cada caso tem um número próprio. Use esse número sempre que falar conosco, assim
-              sabemos na hora de qual processo você está tratando.
+            <h2 className="font-display text-title font-bold text-navy">Meus processos</h2>
+            <p className="mt-1 text-body text-charcoal/60">
+              Cada processo tem a sua pasta, com o número de atendimento, o
+              andamento, a conversa com o escritório e os documentos daquele
+              caso. Clique para abrir.
             </p>
             <ul className="mt-5 space-y-3">
               {casos.map((c) => {
@@ -660,7 +661,14 @@ export default function AreaCliente() {
                     <button onClick={() => abrirCaso(c)}
                       className="flex w-full items-center justify-between gap-4 rounded-xl border border-black/5 bg-ice px-4 py-4 text-left transition hover:border-gold hover:bg-white">
                       <span className="min-w-0">
-                        <span className="block font-semibold text-navy">{nomeCaso(c)}</span>
+                        <span className="flex items-center gap-2">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}
+                            strokeLinecap="round" strokeLinejoin="round"
+                            className="h-4 w-4 shrink-0 text-electric" aria-hidden="true">
+                            <path d="M3 7h6l2 2h10v10H3zM3 7V5h6l2 2" />
+                          </svg>
+                          <span className="font-semibold text-navy">{nomeCaso(c)}</span>
+                        </span>
                         <span className="mt-0.5 block font-mono text-xs tracking-wide text-gold">
                           Atendimento nº {c.numero_atendimento || ","}
                         </span>
@@ -813,6 +821,18 @@ export default function AreaCliente() {
                     </p>
                   )}
                 </div>
+
+                {/* A PASTA DO PROCESSO, COMPLETA
+
+                    A conversa e os documentos existiam, mas em outro
+                    lugar: o chat era uma tela à parte e os documentos
+                    estavam no cadastro, misturados com os de todos os
+                    outros casos. Quem tinha dois processos não
+                    conseguia responder "o que eu mandei para aquele?".
+
+                    Agora tudo o que é deste caso está dentro dele, e é
+                    a mesma coisa que o escritório vê. */}
+                <PastaDoProcesso caso={caso} irParaConversa={() => setVista("atendimento")} />
               </>
             )}
           </section>
@@ -928,7 +948,18 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
     endereco_numero: cadastro?.endereco_numero || "", endereco_complemento: cadastro?.endereco_complemento || "",
     endereco_bairro: cadastro?.endereco_bairro || "", endereco_cidade: cadastro?.endereco_cidade || "",
     endereco_uf: cadastro?.endereco_uf || "",
+    // Bancários. Vêm do cadastro para a pessoa não redigitar tudo a
+    // cada visita, que era o que acontecia com a qualificação inteira.
+    banco_nome: (cadastro as any)?.banco_nome || "",
+    banco_codigo: (cadastro as any)?.banco_codigo || "",
+    agencia: (cadastro as any)?.agencia || "",
+    conta: (cadastro as any)?.conta || "",
+    conta_tipo: (cadastro as any)?.conta_tipo || "",
+    pix_tipo: (cadastro as any)?.pix_tipo || "",
+    pix_chave: (cadastro as any)?.pix_chave || "",
   });
+  const [titular, setTitular] = useState<boolean>(
+    Boolean((cadastro as any)?.titular_confirmado));
   const faltando = ["nome", "cpf_cnpj", "estado_civil", "profissao", "endereco_rua",
     "endereco_numero", "endereco_bairro", "endereco_cidade", "endereco_uf", "endereco_cep"]
     .filter((k) => !(form[k] || "").trim());
@@ -973,7 +1004,7 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
       const r = await fetch(`${API}/api/v1/cliente/cadastro`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, titular_confirmado: titular }),
       });
       const d = await r.json().catch(() => ({} as any));
       if (!r.ok) { setAviso(d.detail || "Não foi possível salvar."); return; }
@@ -1083,44 +1114,204 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
         {aviso && <span className="text-xs text-charcoal/60">{aviso}</span>}
       </div>
 
-      {assinados.length > 0 && (
-        <div className="mt-8 border-t border-black/5 pt-5">
-          <h3 className="text-sm font-semibold text-navy">Documentos que você assinou</h3>
-          <ul className="mt-3 space-y-2">
-            {assinados.map((a) => (
-              <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-black/5 bg-ice px-3 py-2 text-sm">
-                <span className="truncate text-charcoal/80">✍ {a.titulo}</span>
-                <span className="shrink-0 text-xs text-forest">assinado em {dataHora(a.assinado_em)}</span>
-              </li>
-            ))}
-          </ul>
+      {/* OS DOCUMENTOS SAÍRAM DAQUI
+
+          Ficavam duas listas no fim do cadastro: o que o cliente
+          assinou e o que ele enviou. Só que documento pertence a um
+          processo ou a um pedido, não à pessoa. Com dois casos abertos,
+          as duas listas viravam uma pilha só, sem dizer o que era de
+          qual, e era impossível responder "que documento eu mandei para
+          aquele processo?".
+
+          Agora cada pasta guarda os seus. O cadastro voltou a ser o que
+          o nome diz: quem a pessoa é, onde mora e para onde vai o
+          dinheiro dela. */}
+
+      <DadosBancarios form={form} setForm={setForm} nome={form.nome}
+        titular={titular} setTitular={setTitular} />
+
+      <TrocarSenha />
+    </section>
+  );
+}
+
+
+/* ── PARA ONDE O DINHEIRO VAI ──────────────────────────────────
+ *
+ * Quando uma ação termina com valor a receber, alguém precisa dizer
+ * para qual conta transferir. Hoje isso acontece por WhatsApp, no dia
+ * do alvará, com print do aplicativo do banco e alguém digitando à mão.
+ * É o momento de maior pressa do processo, que é exatamente quando se
+ * erra um dígito.
+ *
+ * Perguntar antes resolve duas coisas: o dado chega com calma e
+ * conferido, e a prestação de contas sai preenchida sozinha.
+ *
+ * A conta tem de ser do próprio cliente, e a tela diz isso com todas as
+ * letras. Transferir alvará para conta de terceiro é o caminho mais
+ * curto para uma acusação de apropriação, e não há conveniência que
+ * pague esse risco. Sem a confirmação de titularidade, a prestação de
+ * contas ignora estes campos e o escritório pergunta na hora, como
+ * fazia antes.
+ */
+function DadosBancarios({ form, setForm, nome, titular, setTitular }: {
+  form: Record<string, any>; setForm: (f: any) => void; nome: string;
+  titular: boolean; setTitular: (v: boolean) => void;
+}) {
+  const campo = "mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-electric";
+  const rotulo = "text-xs font-medium text-charcoal/60";
+  const set = (k: string) => (e: any) =>
+    setForm((f: any) => ({ ...f, [k]: e.target.value }));
+
+  return (
+    <div className="mt-8 border-t border-black/5 pt-6">
+      <h3 className="font-display text-body font-bold text-navy">
+        Para onde transferir o seu dinheiro
+      </h3>
+      <p className="mt-1 max-w-2xl text-small text-charcoal/60">
+        Se o seu caso terminar com valor a receber, é para esta conta que ele
+        vai. Preencher agora evita a correria do dia do alvará, que é quando
+        se erra um dígito. Estes dados aparecem num único documento, a
+        prestação de contas, junto do valor transferido: nunca em contrato,
+        procuração ou petição.
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label className={rotulo}>Chave PIX
+          <input value={form.pix_chave || ""} onChange={set("pix_chave")}
+            placeholder="CPF, e-mail, telefone ou chave aleatória" className={campo} />
+        </label>
+        <label className={rotulo}>Tipo da chave
+          <select value={form.pix_tipo || ""} onChange={set("pix_tipo")} className={campo}>
+            <option value="">selecione</option>
+            <option value="CPF">CPF</option>
+            <option value="CNPJ">CNPJ</option>
+            <option value="EMAIL">E-mail</option>
+            <option value="TELEFONE">Telefone</option>
+            <option value="ALEATORIA">Chave aleatória</option>
+          </select>
+        </label>
+      </div>
+
+      <p className="mt-5 text-caption uppercase tracking-wider text-charcoal/45">
+        E a conta, para quando o PIX não servir
+      </p>
+      <p className="text-caption text-charcoal/45">
+        PIX falha, cai fora do horário e tem limite. Ter os dois caminhos evita
+        que a transferência pare por causa do meio.
+      </p>
+      <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label className={rotulo}>Banco
+          <input value={form.banco_nome || ""} onChange={set("banco_nome")}
+            placeholder="Nome do banco" className={campo} />
+        </label>
+        <label className={rotulo}>Tipo de conta
+          <select value={form.conta_tipo || ""} onChange={set("conta_tipo")} className={campo}>
+            <option value="">selecione</option>
+            <option value="CORRENTE">Conta corrente</option>
+            <option value="POUPANCA">Poupança</option>
+          </select>
+        </label>
+        <label className={rotulo}>Agência
+          <input value={form.agencia || ""} onChange={set("agencia")}
+            placeholder="com dígito, se houver" className={campo} />
+        </label>
+        <label className={rotulo}>Conta
+          <input value={form.conta || ""} onChange={set("conta")}
+            placeholder="com dígito" className={campo} />
+        </label>
+      </div>
+
+      <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-xl2 border border-black/10 bg-mist/40 p-4">
+        <input type="checkbox" checked={titular}
+          onChange={(e) => setTitular(e.target.checked)}
+          className="mt-0.5 h-4 w-4 accent-electric" />
+        <span className="text-small text-charcoal/75">
+          Declaro que a conta e a chave informadas são <b>minhas</b>, em nome de{" "}
+          <b>{nome || "mim"}</b>.
+          <span className="mt-1 block text-caption text-charcoal/55">
+            O escritório não transfere valor de processo para conta de outra
+            pessoa, mesmo a pedido do cliente. Sem esta confirmação, a
+            transferência é combinada por telefone na hora.
+          </span>
+        </span>
+      </label>
+
+      <p className="mt-3 text-caption text-charcoal/45">
+        Pode mudar quando quiser. A partir do momento em que salvar, é a conta
+        nova que vale para tudo daí em diante.
+      </p>
+    </div>
+  );
+}
+
+
+/* ── TROCAR A SENHA ────────────────────────────────────────────
+ *
+ * Ficava só na tela de entrada, no "esqueci a senha", que é o caminho
+ * de quem não consegue entrar. Quem está dentro e quer trocar por
+ * cuidado, e não por esquecimento, não tinha por onde.
+ */
+function TrocarSenha() {
+  const [aberto, setAberto] = useState(false);
+  const [nova, setNova] = useState("");
+  const [repetir, setRepetir] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+
+  async function trocar() {
+    if (nova.length < 8) { setErro("A senha precisa de pelo menos 8 caracteres."); return; }
+    if (nova !== repetir) { setErro("As duas senhas não são iguais."); return; }
+    setOcupado(true); setErro(""); setAviso("");
+    try {
+      const { error } = await supabase.auth.updateUser({ password: nova });
+      if (error) { setErro(error.message); return; }
+      setAviso("Senha trocada. Use a nova na próxima vez que entrar.");
+      setNova(""); setRepetir(""); setAberto(false);
+    } finally { setOcupado(false); }
+  }
+
+  return (
+    <div className="mt-8 border-t border-black/5 pt-6">
+      <h3 className="font-display text-body font-bold text-navy">Senha de acesso</h3>
+      {aviso && (
+        <p className="mt-2 rounded-lg border border-emerald/30 bg-emerald/10 px-4 py-2.5 text-small text-charcoal/80">
+          {aviso}
+        </p>
+      )}
+      {!aberto ? (
+        <button onClick={() => { setAberto(true); setAviso(""); }}
+          className="mt-3 rounded-lg border border-black/15 px-5 py-2.5 text-small font-semibold text-charcoal/75 transition hover:border-black/35">
+          Trocar a minha senha
+        </button>
+      ) : (
+        <div className="mt-3 max-w-md">
+          <label className="block text-xs font-medium text-charcoal/60">Senha nova
+            <input type="password" value={nova} onChange={(e) => setNova(e.target.value)}
+              placeholder="pelo menos 8 caracteres"
+              className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-electric" />
+          </label>
+          <label className="mt-3 block text-xs font-medium text-charcoal/60">Repita a senha nova
+            <input type="password" value={repetir} onChange={(e) => setRepetir(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && trocar()}
+              className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-electric" />
+          </label>
+          {erro && <p className="mt-2 text-small text-crimson">{erro}</p>}
+          <div className="mt-3 flex gap-3">
+            <button onClick={trocar} disabled={ocupado}
+              className="rounded-lg bg-electric px-5 py-2.5 text-small font-bold text-white transition hover:bg-indigo disabled:opacity-50">
+              {ocupado ? "Trocando…" : "Trocar senha"}
+            </button>
+            <button onClick={() => { setAberto(false); setErro(""); }}
+              className="text-small text-charcoal/50 underline underline-offset-4">cancelar</button>
+          </div>
+          <p className="mt-3 text-caption text-charcoal/45">
+            Ninguém no escritório vê a sua senha, nem a antiga nem a nova.
+          </p>
         </div>
       )}
-
-      <div className="mt-8 border-t border-black/5 pt-5">
-        <h3 className="text-sm font-semibold text-navy">Documentos que você já enviou</h3>
-        {docs.length === 0 ? (
-          <p className="mt-2 text-sm text-charcoal/55">
-            Nada enviado ainda. Quando precisarmos de algum documento, o pedido aparece aqui e no atendimento.
-          </p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {docs.map((d) => (
-              <li key={d.id} className="flex items-center justify-between gap-3 rounded-lg border border-black/5 bg-ice px-3 py-2 text-sm">
-                <span className="truncate text-charcoal/80">📄 {d.observacao || d.tipo}</span>
-                <span className="flex shrink-0 items-center gap-3 text-xs">
-                  <span className="text-charcoal/45">
-                    {d.enviado_por === "CLIENTE" ? "enviado por você" : "do escritório"}
-                  </span>
-                  <a href={`${API}/api/v1/documentos/${d.id}/baixar`} target="_blank" rel="noreferrer"
-                    className="font-semibold text-gold hover:underline">baixar</a>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -1225,6 +1416,117 @@ function Arquivado({ pedido, aoPedir }: { pedido: any; aoPedir: () => void }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+/* ── A PASTA DO PROCESSO ───────────────────────────────────────
+ *
+ * Tudo o que é de um caso, dentro dele: a conversa com o escritório, os
+ * documentos que o cliente enviou e os que ele assinou.
+ *
+ * Antes isso estava espalhado. O chat era uma tela à parte, e as duas
+ * listas de documentos ficavam no fim do cadastro, misturando o que era
+ * de um processo com o que era de outro. Com dois casos abertos, não
+ * havia como responder à pergunta mais comum que um cliente faz: "o
+ * que eu já mandei para aquele processo?".
+ *
+ * O que o cliente vê aqui é o mesmo que o escritório vê do outro lado.
+ * Não é transparência de enfeite: é o que evita a ligação para
+ * confirmar se o documento chegou.
+ */
+function PastaDoProcesso({ caso, irParaConversa }: {
+  caso: Caso; irParaConversa: () => void;
+}) {
+  const docs = caso.documentos || [];
+  const assinados = (caso.assinaturas || []).filter((a: any) => a.status === "ASSINADO");
+  const mensagens = (caso as any).mensagens?.length || 0;
+
+  return (
+    <div className="mt-7 border-t border-black/5 pt-5">
+      <h3 className="font-display text-body font-bold text-navy">
+        Conversas e documentos deste processo
+      </h3>
+      <p className="mt-1 text-small text-charcoal/60">
+        Tudo o que foi tratado neste caso fica guardado aqui e continua onde
+        você parou, sempre que voltar.
+      </p>
+
+      <button onClick={irParaConversa}
+        className="mt-4 flex w-full items-center gap-3 rounded-xl2 border border-black/5 bg-mist/50 p-4 text-left transition hover:border-electric/40 hover:bg-white">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl2 bg-white text-electric">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}
+            strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+            <path d="M21 12a8 8 0 0 1-8 8H8l-5 2 1.4-4.2A8 8 0 1 1 21 12z" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-small font-semibold text-navy">
+            Atendimento deste processo
+          </span>
+          <span className="block text-caption text-charcoal/55">
+            {mensagens > 0
+              ? `${mensagens} ${mensagens === 1 ? "mensagem" : "mensagens"} trocadas. Tire dúvidas sobre andamento, despacho ou qualquer ponto do caso.`
+              : "Tire dúvidas sobre andamento, despacho ou qualquer ponto do caso, e envie documentos por aqui."}
+          </span>
+        </span>
+        <span className="shrink-0 text-electric">→</span>
+      </button>
+
+      <div className="mt-5 grid gap-5 sm:grid-cols-2">
+        <div>
+          <p className="text-caption font-semibold uppercase tracking-wider text-charcoal/45">
+            Documentos deste processo
+          </p>
+          {docs.length === 0 ? (
+            <p className="mt-2 text-small text-charcoal/55">
+              Nada enviado ainda. Quando o escritório precisar de algum
+              documento, o pedido aparece no atendimento.
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {docs.map((d: any) => (
+                <li key={d.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-black/5 bg-ice px-3 py-2 text-small">
+                  <span className="truncate text-charcoal/80">{d.observacao || d.tipo}</span>
+                  <span className="flex shrink-0 items-center gap-3 text-caption">
+                    <span className="text-charcoal/45">
+                      {d.enviado_por === "CLIENTE" ? "enviado por você" : "do escritório"}
+                    </span>
+                    <a href={`${API}/api/v1/documentos/${d.id}/baixar`} target="_blank" rel="noreferrer"
+                      className="font-semibold text-electric hover:underline">baixar</a>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div>
+          <p className="text-caption font-semibold uppercase tracking-wider text-charcoal/45">
+            Documentos que você assinou
+          </p>
+          {assinados.length === 0 ? (
+            <p className="mt-2 text-small text-charcoal/55">
+              Nenhum ainda. Quando houver documento para assinar, ele aparece
+              no topo da sua área.
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {assinados.map((a: any) => (
+                <li key={a.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-black/5 bg-ice px-3 py-2 text-small">
+                  <span className="truncate text-charcoal/80">{a.titulo}</span>
+                  <span className="shrink-0 text-caption text-emerald">
+                    assinado em {dataHora(a.assinado_em)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

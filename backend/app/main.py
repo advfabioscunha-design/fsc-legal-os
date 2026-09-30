@@ -3112,8 +3112,20 @@ def cliente_cadastro(authorization: str | None = Header(default=None)):
     não deve cair numa vitrine de venda de documento.
     """
     cli = _cliente_do_token(authorization)
-    dados = {k: cli.get(k) for k in
-             ("id", "nome", "email", "cpf_cnpj", "whatsapp", "origem", "criado_em")}
+    dados = {k: cli.get(k) for k in (
+        "id", "nome", "email", "cpf_cnpj", "whatsapp", "origem", "criado_em",
+        # A qualificação completa. Faltava na resposta, e por isso a tela
+        # abria com os campos vazios mesmo para quem já tinha preenchido:
+        # a pessoa digitava tudo de novo a cada visita.
+        "rg", "nacionalidade", "estado_civil", "profissao",
+        "endereco_cep", "endereco_rua", "endereco_numero",
+        "endereco_complemento", "endereco_bairro", "endereco_cidade",
+        "endereco_uf",
+        # Bancários. Vão para a tela do próprio dono e para mais nenhum
+        # lugar: a prestação de contas lê do banco, não daqui.
+        "banco_nome", "banco_codigo", "agencia", "conta", "conta_tipo",
+        "pix_tipo", "pix_chave", "titular_confirmado", "dados_bancarios_em",
+    )}
     dados["tipo"] = (cli.get("tipo") or "LITIGIOSO").upper()
     return dados
 
@@ -3135,6 +3147,21 @@ class CadastroCliente(BaseModel):
     endereco_uf: str | None = None
     endereco_cep: str | None = None
 
+    # Para onde o dinheiro vai, quando houver. Usado num lugar só: na
+    # prestação de contas. Ver a migração 0044.
+    banco_nome: str | None = None
+    banco_codigo: str | None = None
+    agencia: str | None = None
+    conta: str | None = None
+    conta_tipo: str | None = None
+    pix_tipo: str | None = None
+    pix_chave: str | None = None
+    titular_confirmado: bool | None = None
+
+
+CAMPOS_BANCARIOS = ("banco_nome", "banco_codigo", "agencia", "conta",
+                    "conta_tipo", "pix_tipo", "pix_chave")
+
 
 @app.patch("/api/v1/cliente/cadastro")
 def cliente_atualizar_cadastro(body: CadastroCliente,
@@ -3147,7 +3174,19 @@ def cliente_atualizar_cadastro(body: CadastroCliente,
     com a conta é feito pelo identificador do usuário, não pelo e-mail, então
     trocar o e-mail de contato não tira o acesso dele à própria área."""
     cli = _cliente_do_token(authorization)
-    campos = {k: v for k, v in body.model_dump().items() if v}
+    bruto = body.model_dump()
+    campos = {k: v for k, v in bruto.items() if v}
+
+    # `titular_confirmado` é o único campo que precisa poder virar falso:
+    # o cliente que trocar a conta e não marcar de novo está dizendo que
+    # a nova não é dele, e a prestação de contas tem de parar por aí.
+    if bruto.get("titular_confirmado") is not None:
+        campos["titular_confirmado"] = bool(bruto["titular_confirmado"])
+
+    if any(k in campos for k in CAMPOS_BANCARIOS):
+        from datetime import datetime as _dtb, timezone as _tzb
+        campos["dados_bancarios_em"] = _dtb.now(_tzb.utc).isoformat()
+
     if campos.get("cpf_cnpj"):
         from .core.cpf import cpf_valido
         if not cpf_valido(campos["cpf_cnpj"]):
