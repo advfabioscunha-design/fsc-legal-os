@@ -8,7 +8,7 @@ const MARCADOR = "===CONTRATO EM REVISÃO===";
 type Msg = { autor: "CLIENTE" | "AGENTE"; conteudo: string };
 
 const FALLBACK =
-  "Recebi sua mensagem e já estou cuidando do seu contrato. Me dê só mais um detalhe que eu sigo — não vou te deixar sem resposta.";
+  "Recebi a sua mensagem e ela já está registrada. Me dê só mais um detalhe que eu sigo daqui, e retorno por aqui mesmo.";
 
 export default function ContratoChat({ nome, email, onVoltar }: { nome: string; email: string; onVoltar: () => void }) {
   const [casoId, setCasoId] = useState<string | null>(null);

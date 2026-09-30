@@ -38,6 +38,15 @@ const INTERNAS = new Set([
   // outro lado faz a ligação. Duas portas para salas diferentes com a
   // mesma cara é pior do que uma porta só.
   "balcao",
+  // A ÁREA DO CLIENTE TAMBÉM JÁ TEM ATENDIMENTO
+  //
+  // Ela tem a conversa própria, ligada ao caso da pessoa, com anexo e
+  // foto. Os dois círculos abriam por cima dela uma terceira porta,
+  // de captação, que não sabe nada daquele caso: quem já é cliente
+  // escrevia ali achando que falava com quem cuida do processo dele.
+  // Três portas na mesma tela, e a mais visível levando ao lugar
+  // errado.
+  "cliente",
 ]);
 
 export default function AtendimentoFlutuante() {

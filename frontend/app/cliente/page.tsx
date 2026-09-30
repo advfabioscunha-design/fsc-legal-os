@@ -64,10 +64,13 @@ type Vista = "home" | "casos" | "acompanhar" | "atendimento" | "contrato" | "cad
 
 const WHATS_RO = "5569993225383";
 const WHATS_SC = "5548988357992";
+/* A frase de reserva, para quando a resposta não vem a tempo.
+   Ela mandava a pessoa para o WhatsApp, o que é empurrar para outro
+   canal justamente quem já está no canal certo, com o caso dela na
+   tela. Quem escreveu aqui quer ser respondido aqui. */
 const FALLBACK =
-  "Recebi sua mensagem e já estou cuidando do seu caso. Me dê só mais um detalhe " +
-  "enquanto preparo o próximo passo. Se preferir, fale agora com nossa equipe pelo WhatsApp, " +
-  "não vou te deixar sem resposta.";
+  "Recebi a sua mensagem e ela já está registrada no seu caso. Me dê só mais " +
+  "um detalhe enquanto preparo o próximo passo, que eu retorno por aqui mesmo.";
 
 const dataHora = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
