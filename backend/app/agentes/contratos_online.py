@@ -566,6 +566,22 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
             dados = bloco.input or {}
     apontamentos = dados.get("apontamentos") or []
 
+    # REVISÃO VAZIA NÃO É REVISÃO FEITA
+    #
+    # Quando o modelo não devolvia a ferramenta, `dados` ficava vazio,
+    # e o pedido avançava mesmo assim para o ajuste. Lá, o ajuste
+    # conferia "tem revisão?", não tinha, e travava: o pedido ficava
+    # numa fase de onde nenhum botão saía, e o operador só via a frase
+    # "acione o revisor primeiro" sem ter como acionar ninguém.
+    #
+    # Falhar é aceitável; avançar tendo falhado, não. O pedido fica
+    # onde está, e quem clicou lê o motivo em vez de descobrir o
+    # problema duas fases adiante.
+    if not dados:
+        registrar_evento(None, "CONTRATO_REVISAO_VAZIA", {"pedido": pedido_id})
+        raise ValueError("A revisão não retornou apontamentos. O pedido "
+                         "continua nesta fase; tente de novo em instantes.")
+
     campos = {"revisao": dados, "revisado_em": _agora(),
               "atualizado_em": _agora()}
     if not auto:
@@ -591,9 +607,30 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
     if not achado:
         raise ValueError("Pedido não encontrado.")
     p = achado[0]
+    # SEM REVISÃO, REVISA AGORA, EM VEZ DE TRAVAR
+    #
+    # A trava original estava certa na intenção: não se ajusta o que
+    # ninguém revisou. Mas a mensagem mandava "acionar o revisor
+    # primeiro" e o botão do revisor não existe nesta fase, então o
+    # pedido ficava sem saída nenhuma. Beco sem saída em esteira é
+    # pior do que etapa pulada: alguém tem de mexer no banco para
+    # destravar.
+    #
+    # Agora o ajuste chama o revisor ele mesmo, com `auto` para não
+    # mexer na fase, e segue com o que ele apontar.
     if not p.get("revisao"):
-        raise ValueError("O ajuste só abre depois da revisão. "
-                         "Acione o revisor primeiro.")
+        try:
+            revisar(pedido_id, auto=True)
+        except Exception as e:
+            raise ValueError(
+                "Não consegui revisar agora, e sem revisão não há o que "
+                f"ajustar. Tente de novo em instantes. ({e})")
+        p = db.table("pedidos_contrato").select("*").eq("id", pedido_id) \
+            .limit(1).execute().data[0]
+        if not p.get("revisao"):
+            raise ValueError("A revisão não retornou apontamentos. Tente de "
+                             "novo em instantes.")
+
     apontamentos = (p["revisao"] or {}).get("apontamentos") or []
     if not apontamentos:
         db.table("pedidos_contrato").update({
@@ -1736,6 +1773,14 @@ def esteira_automatica() -> dict:
                 continue
 
             # 3. Chegou a hora? Avança.
+            #
+            # Menos quando o trabalho da fase não existe. Avançar sem
+            # ele leva o pedido para uma fase que depende do que não
+            # foi feito, e é assim que nasce pedido travado.
+            if fase == "REVISAO_IA" and not p.get("revisao"):
+                continue
+            if fase == "REDACAO" and not (p.get("minuta") or "").strip():
+                continue
             if _horas_desde(p["avanca_em"]) >= 0:
                 urgente = bool(p.get("urgente"))
                 db.table("pedidos_contrato").update({

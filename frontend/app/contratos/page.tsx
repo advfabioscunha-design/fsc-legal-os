@@ -352,13 +352,36 @@ function PainelDoPedido({ id, fechar, recarregar }:
           )}
           {fase === "AJUSTE" && (
             <div>
-              <p className="mb-2 text-[11px] leading-relaxed text-white/60">
-                Em até 2 horas o pedido chega à sua revisão sozinho. Dali não
-                passa sem você.
-              </p>
-              <Botao rotulo="Aplicar os apontamentos" ocupado={ocupado === "ajustar"}
-                onClick={() => acao("/ajustar", {}, "ajustar")}
-                nota="Reescreve a minuta atendendo a revisão. A anterior fica guardada." />
+              {/* O PEDIDO QUE CHEGOU AQUI SEM REVISÃO
+
+                  Acontecia quando a revisão falhava e o pedido avançava
+                  assim mesmo: o único botão da fase pedia para "acionar
+                  o revisor primeiro", e o botão do revisor só existia na
+                  fase anterior. Beco sem saída, e alguém precisava mexer
+                  no banco para destravar. Agora a fase mostra o botão
+                  que falta, e o próprio ajuste revisa antes se for
+                  preciso. */}
+              {!p.revisao ? (
+                <>
+                  <p className="mb-2 text-[11px] leading-relaxed text-[#E5A44C]">
+                    Este pedido chegou ao ajuste sem a revisão registrada.
+                    Rode o revisor e o ajuste abre em seguida.
+                  </p>
+                  <Botao rotulo="Revisar agora" ocupado={ocupado === "revisar"}
+                    onClick={() => acao("/revisar", {}, "revisar")}
+                    nota="O revisor lê a íntegra e anota o que precisa mudar." />
+                </>
+              ) : (
+                <>
+                  <p className="mb-2 text-[11px] leading-relaxed text-white/60">
+                    Em até 2 horas o pedido chega à sua revisão sozinho. Dali não
+                    passa sem você.
+                  </p>
+                  <Botao rotulo="Aplicar os apontamentos" ocupado={ocupado === "ajustar"}
+                    onClick={() => acao("/ajustar", {}, "ajustar")}
+                    nota="Reescreve a minuta atendendo a revisão. A anterior fica guardada." />
+                </>
+              )}
             </div>
           )}
           {/* DOIS PASSOS, NÃO UM
