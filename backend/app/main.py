@@ -4891,6 +4891,48 @@ def balcao_pix():
     return negociador.PIX
 
 
+# ── URGÊNCIA PEDIDA DEPOIS QUE O TRABALHO COMEÇOU ──────────────
+#
+# Três rotas, e a separação entre elas é o ponto: o cliente orça e
+# avisa que pagou; o escritório confirma. Só a terceira muda o prazo,
+# e ela fica fora da lista pública, atrás do porteiro, porque prazo
+# declarado por quem não conferiu o extrato é prazo assumido de graça.
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/urgencia")
+def balcao_orcar_urgencia(pedido_id: str):
+    """Quanto custa acelerar, e como pagar. Aberta ao cliente."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.orcar_urgencia(pedido_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+class AvisoDePagamentoDaUrgencia(BaseModel):
+    txid: str = ""
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/urgencia/paguei")
+def balcao_urgencia_paga(pedido_id: str, body: AvisoDePagamentoDaUrgencia):
+    """O cliente avisa que pagou. Não muda prazo, chama quem confere."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.urgencia_paga(pedido_id, body.txid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/urgencia/confirmar")
+def balcao_confirmar_urgencia(pedido_id: str, body: BaixaDePagamento):
+    """O escritório conferiu o PIX. Aqui o prazo passa a 6 horas."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.confirmar_urgencia(
+            pedido_id, body.quem, body.txid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/pagamento")
 def balcao_pagamento(pedido_id: str, body: BaixaDePagamento):
     """Baixa manual do PIX, dada por quem conferiu o extrato."""

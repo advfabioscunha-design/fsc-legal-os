@@ -674,6 +674,18 @@ export default function PedidoDoCliente() {
             se refere a foto que acabou de mandar, e o escritório
             perde tempo perguntando. Aqui a pergunta e o anexo já
             nascem amarrados ao protocolo. */}
+        {/* A PRESSA QUE APARECE NO MEIO DO CAMINHO
+
+            A urgência era escolha da negociação e morria ali. Só que
+            ela quase nunca nasce com o pedido: nasce quando a outra
+            parte antecipa a assinatura, quando marcam a entrega das
+            chaves, quando surge uma reunião. Sem lugar para isso, o
+            cliente perguntava no chat e o atendimento improvisava. */}
+        {["COLETA", "CIENCIA", "REDACAO", "REVISAO_IA", "AJUSTE", "REVISAO_ADV"]
+          .includes(faseAtual) && (
+          <Urgencia pedido={pedido} aoMudar={carregar} />
+        )}
+
         <Conversa pedidoId={String(id)} aoMudar={carregar} />
       </div>
     </main>
@@ -1147,5 +1159,125 @@ function Pendencias({ pedidoId }: { pedidoId: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+/* ── ADIANTAR A ENTREGA ────────────────────────────────────────
+ *
+ * Três estados, e a diferença entre o segundo e o terceiro é o que
+ * protege o escritório de prometer prazo sem ter recebido.
+ *
+ *   nada pedido        um convite discreto, com o valor calculado no
+ *                      servidor. O cliente vê o número antes de
+ *                      decidir qualquer coisa.
+ *   pedido, não pago   o PIX na tela e um botão de avisar que pagou.
+ *                      O prazo continua o mesmo, e a tela diz isso
+ *                      com todas as letras.
+ *   confirmado         a entrega passa a 6 horas e a caixa some.
+ *
+ * O botão "já paguei" não muda prazo nenhum, e é de propósito: quem
+ * muda é o escritório, depois de olhar o extrato.
+ */
+function Urgencia({ pedido, aoMudar }: { pedido: any; aoMudar: () => void }) {
+  const [orcamento, setOrcamento] = useState<any>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState("");
+  const [txid, setTxid] = useState("");
+
+  const pedida = Boolean(pedido?.urgencia_pedida_em);
+  const jaUrgente = Boolean(pedido?.urgente);
+
+  async function orcar() {
+    setOcupado(true); setAviso("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedido.id}/urgencia`);
+      const j = await r.json();
+      if (j?.ja_e_urgente || j?.tarde_demais) { setAviso(j.mensagem); return; }
+      setOrcamento(j);
+      aoMudar();
+    } catch { setAviso("Não consegui calcular agora."); }
+    finally { setOcupado(false); }
+  }
+
+  async function avisarQuePagou() {
+    setOcupado(true); setAviso("");
+    try {
+      const r = await fetch(
+        `${API}/api/v1/contratos/pedidos/${pedido.id}/urgencia/paguei`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ txid: txid.trim() }) });
+      const j = await r.json();
+      setAviso(j?.mensagem || "Aviso registrado.");
+      aoMudar();
+    } catch { setAviso("Não consegui registrar o aviso."); }
+    finally { setOcupado(false); }
+  }
+
+  if (jaUrgente) {
+    return (
+      <section className="rounded-2xl border border-[#1DB954]/40 bg-[#1DB954]/10 p-5">
+        <p className="text-sm font-bold text-[#1DB954]">Entrega acelerada</p>
+        <p className="mt-1 text-xs leading-relaxed text-white/70">
+          Este pedido está com entrega em até 6 horas. Se as 6 horas já
+          passaram desde o pedido, a entrega sai nas próximas 1 a 2 horas.
+        </p>
+      </section>
+    );
+  }
+
+  const valor = orcamento?.valor ?? pedido?.urgencia_valor;
+  const pix = orcamento?.pix;
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
+      <h2 className="text-sm font-bold text-[#C9A24D]">Precisa para hoje?</h2>
+
+      {!pedida && !orcamento ? (
+        <>
+          <p className="mt-1 text-xs leading-relaxed text-white/55">
+            Dá para adiantar a entrega para até 6 horas, com um acréscimo.
+            Veja o valor antes de decidir, sem compromisso.
+          </p>
+          <button onClick={orcar} disabled={ocupado}
+            className="mt-3 rounded-lg border border-[#C9A84C]/60 px-4 py-2 text-xs font-semibold text-[#C9A84C] hover:bg-[#C9A84C]/10 disabled:opacity-50">
+            {ocupado ? "Calculando…" : "Ver quanto custa adiantar"}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-xs leading-relaxed text-white/55">
+            Acréscimo de{" "}
+            <b className="text-white">{brl(valor)}</b> para a entrega em até 6
+            horas. Pague pelo PIX abaixo e avise aqui.
+          </p>
+
+          {pix && (
+            <div className="mt-3 space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
+              <Dado rotulo="Chave PIX" valor={String(pix.chave || "")} copiavel />
+              <Dado rotulo="Favorecido" valor={String(pix.nome || "")} />
+              <Dado rotulo="Valor" valor={brl(valor)} />
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input value={txid} onChange={(e) => setTxid(e.target.value)}
+              placeholder="código do comprovante, se tiver"
+              className={`flex-1 ${cx}`} />
+            <button onClick={avisarQuePagou} disabled={ocupado}
+              className="rounded-lg bg-[#C9A84C] px-4 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
+              {ocupado ? "Registrando…" : "Já paguei"}
+            </button>
+          </div>
+
+          <p className="mt-2 text-[11px] leading-relaxed text-white/40">
+            O prazo muda assim que o escritório conferir o pagamento. Até lá,
+            vale o prazo combinado no pedido.
+          </p>
+        </>
+      )}
+
+      {aviso && <p className="mt-3 text-[11px] text-[#E5A44C]">{aviso}</p>}
+    </section>
   );
 }

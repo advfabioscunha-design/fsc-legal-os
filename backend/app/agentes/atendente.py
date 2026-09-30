@@ -94,6 +94,77 @@ ESTADO_PARA_O_CLIENTE = {
     "ENCERRADO": "encerrado",
 }
 
+# ── O QUE SE PODE DIZER EM CADA FASE ───────────────────────────
+#
+# O rótulo da fase sozinho não segurava o modelo. Com "em elaboração"
+# escrito na situação, ele ainda respondia que o contrato estava
+# pronto, ou oferecia marcar uma reunião com advogado, que é um
+# serviço que este balcão não vende. Rótulo é informação; o que faltava
+# era limite.
+#
+# Cada fase passa a levar junto duas listas curtas: o que é verdade
+# agora e o que não pode ser dito de jeito nenhum. Escrito assim,
+# frase a frase, porque instrução genérica de "não invente" não segura
+# um modelo que quer ser útil.
+LIMITES_DA_FASE = {
+    "PAGAMENTO": {
+        "pode": "que o trabalho começa assim que o pagamento for confirmado, "
+                "e que o PIX está na tela do pedido",
+        "nao": "dizer que o documento já está sendo escrito, porque não está",
+    },
+    "COLETA": {
+        "pode": "pedir as informações que faltam e explicar por que cada uma "
+                "importa",
+        "nao": "prometer data de entrega antes de as informações estarem "
+               "completas",
+    },
+    "CIENCIA": {
+        "pode": "explicar a orientação que está na tela e que o cliente "
+                "escolhe entre adequar ou seguir assim mesmo",
+        "nao": "decidir pelo cliente qual caminho ele deve escolher",
+    },
+    "REDACAO": {
+        "pode": "que o documento está sendo escrito agora, e que ele segue "
+                "para revisão e depois para a conferência final",
+        "nao": "dizer que está pronto, que já foi revisado, que já pode ler "
+               "ou que já foi enviado. Nada disso aconteceu ainda",
+    },
+    "REVISAO_IA": {
+        "pode": "que o texto já existe e está sendo revisado",
+        "nao": "dizer que está pronto ou mandar o cliente conferir agora",
+    },
+    "AJUSTE": {
+        "pode": "que os pontos apontados na revisão estão sendo corrigidos",
+        "nao": "dizer que está pronto ou detalhar o que a revisão apontou",
+    },
+    "REVISAO_ADV": {
+        "pode": "que o escritório está com o documento para a conferência "
+                "final, e que nada é enviado antes dela",
+        "nao": "dar hora exata para essa conferência terminar",
+    },
+    "APROVACAO": {
+        "pode": "que o documento está na tela para o cliente ler, aprovar ou "
+                "pedir ajuste",
+        "nao": "dizer que já está assinado ou entregue",
+    },
+    "ASSINATURA": {
+        "pode": "que o documento foi para assinatura e que a via final chega "
+                "por e-mail quando todos assinarem",
+        "nao": "afirmar que alguém já assinou sem que a situação diga isso",
+    },
+    "ENTREGUE": {
+        "pode": "que o documento foi entregue e até quando cabem ajustes sem "
+                "custo",
+        "nao": "dizer que ainda está sendo feito",
+    },
+    "ARQUIVADO": {
+        "pode": "que o pedido foi arquivado e que dá para pedir o "
+                "desarquivamento pela tela",
+        "nao": "prometer reabertura automática",
+    },
+}
+
+
 SYSTEM = """Você é o atendimento do escritório FC Advocacia e Recuperação
 Patrimonial, falando com um cliente pela plataforma.
 
@@ -136,7 +207,20 @@ Português do Brasil. No máximo dois parágrafos, salvo quando houver
 lista do que falta. Trate o cliente pelo primeiro nome quando ele
 constar da situação.
 
-PROIBIDO
+PROIBIDO, SEM EXCEÇÃO
+
+Oferecer reunião, consulta, ligação, visita ou horário com advogado.
+Este é o balcão de documentos, e agendamento não é serviço daqui. Se o
+cliente pedir, diga que ele pode escrever aqui mesmo a qualquer hora e
+que o escritório responde por este canal.
+
+Dizer que o documento está pronto, revisado, disponível, assinado ou
+entregue quando a fase da situação não disser exatamente isso. Essa é
+a mentira mais cara que existe aqui: o cliente para de esperar,
+descobre depois, e não volta.
+
+Inventar data ou hora de entrega. O único prazo que existe é o que
+está escrito na situação.
 
 Falar em agente, sistema, robô, automação, inteligência artificial,
 revisão automática ou esteira. Prometer resultado. Dar prazo que não
@@ -171,6 +255,24 @@ FERRAMENTAS = [
             },
             "required": ["motivo"],
         },
+    },
+    # QUEM CALCULA É O CATÁLOGO, NUNCA O MODELO
+    #
+    # Sem esta ferramenta o atendimento tinha duas saídas ruins diante
+    # de um cliente com pressa: dizer que não dava, o que é falso, ou
+    # inventar um valor, o que é pior. Agora ele tem uma terceira, e
+    # ela devolve o número certo e o PIX junto.
+    {
+        "name": "orcar_urgencia",
+        "description": (
+            "Calcula quanto custa acelerar este pedido para entrega em até 6 "
+            "horas e devolve o valor e os dados do PIX. Use quando o cliente "
+            "disser que está com pressa, que precisa para hoje, que o prazo "
+            "dele mudou, ou perguntar se dá para adiantar. Só existe para "
+            "pedido de contrato, e só antes da aprovação. Diga ao cliente o "
+            "valor exato que a ferramenta devolver, e nunca outro."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
 ]
 
@@ -299,6 +401,9 @@ def situacao_do_pedido(pedido_id: str) -> dict:
         "ultima_acao_em": ultima[1],
         "valor": float(p.get("valor") or 0),
         "urgente": bool(p.get("urgente")),
+        "urgencia_valor": p.get("urgencia_valor"),
+        "urgencia_aguardando_pagamento": bool(p.get("urgencia_pedida_em"))
+        and not p.get("urgencia_confirmada_em") and not p.get("urgente"),
         "prazo_horas": horas,
         "prazo_limite": limite.isoformat() if limite else None,
         "dentro_do_prazo": dentro,
@@ -363,6 +468,10 @@ def _texto_da_situacao(s: dict) -> str:
         L.append(f"Serviço: {s['servico']}, protocolo {s['numero']}.")
         L.append(f"Cliente: {s['cliente'] or 'não informado'}.")
         L.append(f"Fase atual: {s['fase_rotulo']}.")
+        lim = LIMITES_DA_FASE.get(s["fase"])
+        if lim:
+            L.append(f"NESTA FASE VOCÊ PODE DIZER: {lim['pode']}.")
+            L.append(f"NESTA FASE É PROIBIDO: {lim['nao']}.")
         L.append(f"Última ação: {s['ultima_acao']}, em {_br(s['ultima_acao_em'])} "
                  f"({_faz_quanto(s['ultima_acao_em'])}).")
         if s["prazo_limite"]:
@@ -386,6 +495,21 @@ def _texto_da_situacao(s: dict) -> str:
                      + "; ".join(s["falta_complementar"]) + ".")
         if s["prazo_alteracao_ate"]:
             L.append(f"Ajustes sem custo até {s['prazo_alteracao_ate']}.")
+        if s.get("urgente"):
+            L.append("Este pedido JÁ tem urgência contratada, entrega em até "
+                     "6 horas. Não ofereça urgência de novo.")
+        elif s.get("urgencia_aguardando_pagamento"):
+            L.append(f"A urgência já foi orçada em "
+                     f"R$ {float(s.get('urgencia_valor') or 0):.2f} e está "
+                     f"esperando o pagamento. Não orce de novo: lembre o "
+                     f"cliente de que o PIX está na tela do pedido e que o "
+                     f"prazo muda assim que o escritório conferir.")
+        elif s["fase"] in ("COLETA", "CIENCIA", "REDACAO", "REVISAO_IA",
+                           "AJUSTE", "REVISAO_ADV"):
+            L.append("Se o cliente disser que está com pressa, que precisa "
+                     "para hoje ou que o prazo dele mudou, use a ferramenta "
+                     "orcar_urgencia. Ela devolve o valor e o PIX. Nunca diga "
+                     "um valor que não tenha vindo dela.")
         if s["documentos"]:
             L.append("Documentos já recebidos: " + ", ".join(s["documentos"]) + ".")
     else:
@@ -551,6 +675,12 @@ def responder(escopo: str, alvo_id: str, pergunta: str) -> dict:
                         escopo, alvo_id, d.get("motivo", "sem motivo declarado"),
                         d.get("gravidade", "ALTA"), pergunta)
                     avisos.append(saida)
+                elif u.name == "orcar_urgencia" and escopo == "PEDIDO":
+                    from . import contratos_online
+                    try:
+                        saida = contratos_online.orcar_urgencia(alvo_id)
+                    except Exception as e:
+                        saida = {"erro": str(e)}
                 else:
                     saida = {"erro": "ferramenta desconhecida"}
                 resultados.append({"type": "tool_result", "tool_use_id": u.id,

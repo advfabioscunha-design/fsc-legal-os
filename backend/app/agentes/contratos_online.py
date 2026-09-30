@@ -1387,6 +1387,24 @@ _PROXIMA = {
     "AJUSTE": ("REVISAO_ADV", JANELA_AJUSTE),
 }
 
+# ── O RELÓGIO DE QUEM PAGOU URGÊNCIA ───────────────────────────
+#
+# As janelas normais somam oito horas até a conferência final, o que
+# cabe folgado nas vinte e quatro combinadas. Quem paga a urgência
+# comprou seis horas, e as mesmas oito não cabem mais.
+#
+# Estas somam uma hora e três quartos, de propósito: quem contrata a
+# urgência já com o pedido em andamento há seis horas ou mais recebe
+# dentro de uma a duas horas, e é isso que estas janelas garantem sem
+# precisar de nenhuma conta de exceção espalhada pelo código.
+JANELAS_URGENTE = {"REDACAO": 0.75, "REVISAO_IA": 0.5, "AJUSTE": 0.5}
+
+
+def _janela(fase: str, urgente: bool) -> float:
+    if urgente and fase in JANELAS_URGENTE:
+        return JANELAS_URGENTE[fase]
+    return _PROXIMA[fase][1]
+
 
 def _horas_desde(iso: str | None) -> float:
     if not iso:
@@ -1401,6 +1419,163 @@ def _horas_desde(iso: str | None) -> float:
     return (_d.now(_t.utc) - t).total_seconds() / 3600.0
 
 
+# ── URGÊNCIA PEDIDA NO MEIO DO CAMINHO ─────────────────────────
+#
+# A urgência era uma escolha da negociação e acabava ali. Só que a
+# pressa quase nunca nasce com o pedido: nasce depois, quando a
+# assinatura foi antecipada, quando a outra parte marcou a entrega das
+# chaves, quando apareceu uma reunião. Quem descobria isso no meio não
+# tinha caminho nenhum, e o atendimento improvisava, oferecendo coisa
+# que não existia.
+#
+# O caminho agora tem três passos, e o dinheiro entra no meio deles:
+#
+#   1. `orcar_urgencia`   diz quanto custa a diferença e devolve o PIX.
+#      Quem calcula é o catálogo, nunca o modelo.
+#   2. o cliente paga e avisa (`urgencia_paga`), o que não muda prazo
+#      nenhum: é só um recado, e vira tarefa de prioridade alta.
+#   3. `confirmar_urgencia` é o escritório dizendo que o dinheiro
+#      entrou. Só aqui o prazo muda.
+#
+# Prazo declarado por quem não conferiu o extrato é prazo que o
+# escritório assume sem receber.
+
+def orcar_urgencia(pedido_id: str) -> dict:
+    """Quanto custa acelerar este pedido, e como pagar."""
+    from . import catalogo_contratos as catalogo
+    from . import negociador
+    p = _pedido(pedido_id)
+
+    if p.get("urgente"):
+        return {"ja_e_urgente": True,
+                "mensagem": "Este pedido já está com a entrega em até 6 horas."}
+    if p.get("fase") in ("APROVACAO", "ASSINATURA", "ENTREGUE", "ARQUIVADO"):
+        return {"tarde_demais": True,
+                "mensagem": ("O documento já passou da elaboração. Acelerar "
+                             "agora não muda a data de entrega.")}
+
+    comum = catalogo.precificar(
+        p["tipo"], com_orientacao=bool(p.get("com_orientacao")),
+        desconto_pct=float(p.get("desconto_pct") or 0),
+        urgente=False,
+        assinatura_digital=bool(p.get("assinatura_digital", True)))
+    corrido = catalogo.precificar(
+        p["tipo"], com_orientacao=bool(p.get("com_orientacao")),
+        desconto_pct=float(p.get("desconto_pct") or 0),
+        urgente=True,
+        assinatura_digital=bool(p.get("assinatura_digital", True)))
+    diferenca = round(float(corrido["total"]) - float(comum["total"]), 2)
+
+    get_db().table("pedidos_contrato").update({
+        "urgencia_pedida_em": _agora(),
+        "urgencia_valor": diferenca,
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    registrar_evento(None, "BALCAO_URGENCIA_ORCADA",
+                     {"pedido_id": pedido_id, "valor": diferenca})
+    return {"valor": diferenca, "total_com_urgencia": corrido["total"],
+            "prazo_horas": 6, "pix": negociador.PIX,
+            "numero": p.get("numero")}
+
+
+def urgencia_paga(pedido_id: str, txid: str = "") -> dict:
+    """O cliente avisa que pagou. Não muda prazo, chama quem confere."""
+    p = _pedido(pedido_id)
+    if not p.get("urgencia_pedida_em"):
+        raise ValueError("Não há urgência pedida neste pedido.")
+
+    get_db().table("pedidos_contrato").update({
+        "urgencia_txid": (txid or "")[:120] or None,
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    try:
+        from ..core.db import get_db as _db
+        from datetime import datetime as _d, timedelta as _td, timezone as _tz
+        hoje = (_d.now(_tz.utc) - _td(hours=4)).date().isoformat()
+        _db().table("tarefas").insert({
+            "titulo": f"Conferir PIX da urgência, pedido {p.get('numero')}",
+            "descricao": (f"O cliente informou o pagamento da urgência de "
+                          f"R$ {float(p.get('urgencia_valor') or 0):.2f}."
+                          + (f" Comprovante/txid: {txid}" if txid else "")
+                          + "\n\nConfirmado o recebimento, use o botão de "
+                            "confirmar urgência: o prazo passa a 6 horas e a "
+                            "esteira acelera sozinha."),
+            "origem": "CONTRATO", "pedido_id": pedido_id,
+            "data": hoje, "prioridade": "ALTA",
+            "motivo": "Urgência paga, prazo muda assim que o PIX for conferido.",
+            "criado_por": "ATENDIMENTO",
+        }).execute()
+    except Exception as e:
+        print(f"[balcao] tarefa da urgência não criada: {e}")
+
+    registrar_evento(None, "BALCAO_URGENCIA_PAGA",
+                     {"pedido_id": pedido_id, "txid": txid})
+    return {"registrado": True,
+            "mensagem": ("Recebi o aviso do pagamento. Assim que o escritório "
+                         "conferir o PIX, o prazo passa a ser de 6 horas e "
+                         "você vê a mudança aqui na tela.")}
+
+
+def confirmar_urgencia(pedido_id: str, quem: str = "", txid: str = "") -> dict:
+    """O escritório conferiu o PIX. Agora sim o relógio muda.
+
+    Duas contas acontecem aqui. A primeira é o preço, que passa a
+    incluir o adicional. A segunda é o prazo, e ela tem um caso que
+    parece exceção mas não é: quem pede urgência depois de seis horas
+    de trabalho não pode receber uma data que já passou. Nesse caso o
+    que vale é o tempo que ainda falta, e as janelas de urgência
+    entregam isso dentro de uma a duas horas."""
+    from . import catalogo_contratos as catalogo
+    p = _pedido(pedido_id)
+    if p.get("urgencia_confirmada_em"):
+        return {"ja_confirmada": True}
+
+    conta = catalogo.precificar(
+        p["tipo"], com_orientacao=bool(p.get("com_orientacao")),
+        desconto_pct=float(p.get("desconto_pct") or 0),
+        urgente=True,
+        assinatura_digital=bool(p.get("assinatura_digital", True)))
+
+    campos = {
+        "urgente": True,
+        "prazo_entrega_horas": 6,
+        "valor": conta["total"],
+        "urgencia_confirmada_em": _agora(),
+        "urgencia_confirmada_por": (quem or "escritório")[:120],
+        "atualizado_em": _agora(),
+    }
+    if txid:
+        campos["urgencia_txid"] = txid[:120]
+
+    # O relógio da fase atual é refeito com a janela de urgência. Se a
+    # janela nova já venceu, `_mais` de um número negativo devolveria
+    # uma hora no passado, e a esteira avançaria na próxima passada,
+    # que é exatamente o desejado: sem atalho e sem espera à toa.
+    fase = p.get("fase")
+    if fase in _PROXIMA and p.get("avanca_em") is not None:
+        falta = JANELAS_URGENTE.get(fase, 0.5) - _horas_desde(p.get("fase_em"))
+        campos["avanca_em"] = _mais(max(falta, 0.0))
+
+    get_db().table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+
+    texto = ("Pagamento da urgência confirmado. O seu documento passou para a "
+             "frente da fila e a entrega está prevista para até 6 horas "
+             "contadas do pedido. Se já passou desse tempo, a entrega sai "
+             "nas próximas 1 a 2 horas.")
+    try:
+        recado(pedido_id, texto, canais=["PLATAFORMA", "EMAIL", "WHATSAPP"],
+               autor="AGENTE", assunto="Urgência confirmada no seu documento")
+    except Exception as e:
+        print(f"[balcao] aviso da urgência não enviado: {e}")
+
+    registrar_evento(None, "BALCAO_URGENCIA_CONFIRMADA",
+                     {"pedido_id": pedido_id, "quem": quem,
+                      "valor": conta["total"]})
+    return {"confirmada": True, "valor": conta["total"], "prazo_horas": 6}
+
+
 def esteira_automatica() -> dict:
     """Roda de tempos em tempos e empurra o que já pode andar.
 
@@ -1411,7 +1586,7 @@ def esteira_automatica() -> dict:
     db = get_db()
     pendentes = db.table("pedidos_contrato") \
         .select("id,numero,fase,fase_em,avanca_em,minuta,revisao,ajustado_em,"
-                "redigido_em,revisado_em,pago_em,pendencias") \
+                "redigido_em,revisado_em,pago_em,pendencias,urgente") \
         .in_("fase", list(_PROXIMA)) \
         .is_("excluido_em", "null") \
         .limit(100).execute().data or []
@@ -1420,7 +1595,7 @@ def esteira_automatica() -> dict:
 
     for p in pendentes:
         fase = p["fase"]
-        proxima, janela = _PROXIMA[fase]
+        proxima = _PROXIMA[fase][0]
         try:
             # 1. O trabalho daquela fase ainda não foi feito? Faz agora.
             if fase == "REDACAO" and not (p.get("minuta") or "").strip():
@@ -1450,12 +1625,15 @@ def esteira_automatica() -> dict:
 
             # 3. Chegou a hora? Avança.
             if _horas_desde(p["avanca_em"]) >= 0:
-                seguinte = _PROXIMA.get(proxima)
+                urgente = bool(p.get("urgente"))
                 db.table("pedidos_contrato").update({
                     "fase": proxima, "fase_em": _agora(),
-                    # A fase seguinte já nasce com o próprio relógio.
-                    # REVISAO_ADV não tem: é onde para.
-                    "avanca_em": _mais(seguinte[1]) if seguinte else None,
+                    # A fase seguinte já nasce com o próprio relógio, e
+                    # com a janela do regime dela: quem pagou urgência
+                    # anda em minutos, não em horas. REVISAO_ADV não
+                    # ganha relógio: é onde a automação termina.
+                    "avanca_em": (_mais(_janela(proxima, urgente))
+                                  if proxima in _PROXIMA else None),
                     "atualizado_em": _agora(),
                 }).eq("id", p["id"]).execute()
                 registrar_evento(None, "BALCAO_FASE_AUTOMATICA",
@@ -1614,7 +1792,7 @@ def revisar_pendencias(pedido_id: str) -> dict:
     de chegar. A hora é o tempo de incorporá-la."""
     db = get_db()
     r = db.table("pedidos_contrato") \
-        .select("id,fase,fase_em,avanca_em,pendencias").eq("id", pedido_id) \
+        .select("id,fase,fase_em,avanca_em,pendencias,urgente").eq("id", pedido_id) \
         .limit(1).execute().data
     if not r:
         raise ValueError("Pedido não encontrado.")
@@ -1628,7 +1806,7 @@ def revisar_pendencias(pedido_id: str) -> dict:
         if pend["trava"]:
             campos["avanca_em"] = None
         elif antes_travava:
-            _, janela = _PROXIMA[p["fase"]]
+            janela = _janela(p["fase"], bool(p.get("urgente")))
             ja_passou = _horas_desde(p.get("fase_em")) >= janela
             campos["avanca_em"] = _mais(HORA_DE_GRACA if ja_passou else
                                         janela - _horas_desde(p.get("fase_em")))

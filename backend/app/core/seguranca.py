@@ -71,6 +71,10 @@ PUBLICO = [
     r"^/api/v1/contratos/pedidos/[^/]+/(negociar|negociar/abrir|conversa|"
     r"termo-contratacao|dados|escolhas|documentos|coleta-concluida|"
     r"alteracao|aprovar|mensagem|pdf|vincular|proposta|desarquivar|partes|pendencias)$",
+    # A urgência: o cliente orça e avisa que pagou. Confirmar, não:
+    # essa fica atrás do porteiro, porque é ela que muda o prazo.
+    r"^/api/v1/contratos/pedidos/[^/]+/urgencia$",
+    r"^/api/v1/contratos/pedidos/[^/]+/urgencia/paguei$",
 
     # Convite da equipe: quem recebe ainda não tem conta, e é o token
     # sorteado que faz as vezes de credencial.
