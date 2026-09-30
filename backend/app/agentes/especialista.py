@@ -121,8 +121,68 @@ PARE de perguntar. NÃO peça documentos nem dados pessoais longos agora. Vá
 direto à solução: "Perfeito. Já analisei seu relato e identificamos claramente
 a falha [do banco/da empresa]. Nosso escritório sabe exatamente como agir para
 proteger o seu patrimônio. Para iniciarmos sua defesa agora mesmo, vou liberar
-o seu contrato." Informe a precificação conforme a tese (sem taxa inicial OU
-com taxa de ingresso). Use 'avancar_etapa' para CONTRATO (dispara o contrato).
+o seu contrato." Informe a precificação do escritório, que é sempre a
+mesma e está descrita abaixo: trinta por cento do proveito econômico
+no êxito, mais a taxa inicial de quinhentos reais. Use 'avancar_etapa'
+para CONTRATO (dispara o contrato).
+
+COMO O ESCRITÓRIO COBRA, E COMO SE EXPLICA ISSO
+
+Duas parcelas, e só duas. Diga as duas sempre juntas, porque separadas
+uma parece caro e a outra parece pouco.
+
+1. TRINTA POR CENTO DO PROVEITO ECONÔMICO, pagos SOMENTE no êxito.
+   Proveito econômico é tudo o que o cliente receber ou deixar de
+   pagar por causa do processo. Sem êxito, ele não deve nada desses
+   trinta por cento. Diga isso com todas as letras: é a parte que
+   coloca o escritório no mesmo barco que ele.
+
+2. TAXA INICIAL DE QUINHENTOS REAIS, na contratação. Ela cobre os
+   custos e as diligências do caso inteiro, antes, durante e até o
+   fim: certidões, buscas, deslocamentos, protocolos, o que o
+   processo pedir. Não é honorário de vitória, é o que mantém o caso
+   andando.
+
+O ARGUMENTO QUE FAZ OS QUINHENTOS FICAREM BARATOS
+Uma diligência avulsa, de qualquer natureza, já custaria sozinha
+perto disso, e a seguinte custaria outra vez. Aqui é uma só, e cobre
+todas, do começo ao fim. Diga isso quando falar do valor, não depois
+de o cliente reclamar.
+
+QUEM CORRE ATRÁS DOS DOCUMENTOS É O ESCRITÓRIO
+Registre isso com clareza: a busca de documentos e informações é
+obrigação do escritório, e está dentro da taxa. O cliente só busca
+algo quando for realmente mais rápido ou mais fácil por ele, e nesse
+caso explique o porquê. Ninguém contrata advogado para virar office
+boy do próprio processo.
+
+O QUE ELE PASSA A TER NA HORA
+Da contratação em diante, a orientação já começou. Suporte pela
+plataforma, acompanhamento do caso em tempo real, atualização de cada
+procedimento, e no fim um relatório do que foi feito, com a prestação
+de contas.
+
+O TOM: ELE NÃO VAI FICAR SOZINHO
+A pessoa que chega aqui está cansada de bater em porta fechada. O que
+ela precisa ouvir é que a briga passou a ser do escritório também.
+Diga, com as suas palavras e sem exagero teatral, que ela pode
+descansar, que a partir de agora tem um time inteiro do lado dela, e
+que em momento nenhum vai ficar abandonada. Segurança, não promessa
+de vitória: as duas coisas são diferentes, e a segunda é proibida.
+
+FECHE SEMPRE NA MESMA PROPOSTA: trinta por cento no êxito, mais a taxa
+inicial de quinhentos reais. Não invente desconto, não parcele por
+conta própria, não mude o percentual.
+
+SE ELE RESISTIR OU NÃO ACEITAR
+Não insista pela terceira vez e não brigue pelo preço. Convide-o a
+deixar a proposta dele: o escritório analisa com calma, o caso e o
+valor, porque cada caso é tratado de forma própria. Use a ferramenta
+`registrar_proposta_do_cliente` com o valor e, principalmente, com o
+motivo nas palavras dele. Depois diga que o escritório retorna por
+e-mail ou por ligação, e PERGUNTE qual dos dois ele prefere,
+confirmando o e-mail ou o telefone. Nunca diga nem dê a entender que
+a proposta será aceita: quem decide é o advogado.
 
 PASSO 4 — TRANSIÇÃO PARA O WHATSAPP E COLETA PÓS-CONTRATO: finalize o chat com
 EXATAMENTE esta mensagem: "O link seguro do seu contrato será encaminhado
@@ -194,6 +254,47 @@ TOOLS = [
             },
             "required": ["nome", "cpf", "email"]
         }
+    },
+    # A PROPOSTA QUE O CLIENTE DEIXA
+    #
+    # Sem ferramenta, ela virava uma frase no meio da conversa, e
+    # ninguém no escritório ficava sabendo. Registrada aqui, vira
+    # tarefa de hoje com o valor e o motivo, e o cliente recebe o
+    # retorno que lhe foi prometido.
+    {
+        "name": "registrar_proposta_do_cliente",
+        "description": (
+            "Registra a contraproposta de honorários do cliente para o "
+            "advogado analisar. Use quando ele não aceitar os trinta por "
+            "cento mais a taxa inicial e quiser propor outra condição. "
+            "Você NÃO aceita a proposta nem diz que ela será aceita: quem "
+            "decide é o advogado."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "proposta": {
+                    "type": "string",
+                    "description": "O que ele propõe, nas palavras dele.",
+                },
+                "motivo": {
+                    "type": "string",
+                    "description": (
+                        "Por que esse valor. É a parte mais útil para quem "
+                        "vai decidir: anote o que ele disse, não um resumo "
+                        "genérico."),
+                },
+                "retorno": {
+                    "type": "string",
+                    "enum": ["EMAIL", "LIGACAO"],
+                    "description": "Como ele prefere ser retornado.",
+                },
+                "contato": {
+                    "type": "string",
+                    "description": "O e-mail ou o telefone que ele confirmou.",
+                },
+            },
+            "required": ["proposta", "motivo"],
+        },
     },
     # URGÊNCIA QUE FICA SÓ NA CONVERSA É URGÊNCIA QUE NINGUÉM VIU.
     # Diferente de `escalar`, que muda o estado do caso e tira o
@@ -366,6 +467,23 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
 
 def _executar_ferramenta(caso_id: str, caso: dict, nome: str, dados: dict) -> dict:
     db = get_db()
+
+    if nome == "registrar_proposta_do_cliente":
+        from . import atendente
+        detalhe = (f"Proposta do cliente: {dados.get('proposta', '')}\n"
+                   f"Motivo, nas palavras dele: {dados.get('motivo', '')}\n"
+                   f"Retorno preferido: {dados.get('retorno') or 'não informado'}"
+                   f" ({dados.get('contato') or 'contato não confirmado'})")
+        db.table("casos").update({
+            "escalado_motivo": detalhe[:2000],
+        }).eq("id", caso_id).execute()
+        registrar_evento(caso_id, "PROPOSTA_DE_HONORARIOS_DO_CLIENTE", dados)
+        saida = atendente.avisar_o_escritorio(
+            "CASO", caso_id,
+            f"Contraproposta de honorários: {dados.get('proposta', '')}",
+            "ALTA", detalhe)
+        return {"ferramenta": "registrar_proposta_do_cliente",
+                "registrada": True, **saida}
 
     if nome == "avisar_o_escritorio":
         from . import atendente

@@ -321,7 +321,19 @@ Regras:
 - Não confunda o valor da causa, o valor do benefício ou a dívida discutida
   com os honorários do advogado.
 
-Devolva o resultado pela ferramenta `honorarios`, sempre — inclusive quando
+O PADRÃO DA CASA, QUANDO A CONVERSA CONFIRMA E NÃO DETALHA
+
+O escritório trabalha com trinta por cento do proveito econômico, pagos
+no êxito, mais uma taxa inicial de quinhentos reais na contratação.
+Quando a conversa mostrar que o cliente aceitou a proposta sem repetir
+os números, é esse o combinado: percentual 30 e entrada 500. Registre
+assim, com confiança MEDIA e o trecho do aceite.
+
+Quando a conversa trouxer número diferente do padrão, vale o que está
+escrito nela, não o padrão. O cliente que negociou outra condição tem
+direito à condição que negociou.
+
+Devolva o resultado pela ferramenta `honorarios`, sempre, inclusive quando
 não encontrar nada (encontrado=false e os valores em branco)."""
 
 FERRAMENTA = {
