@@ -74,6 +74,11 @@ PUBLICO = [
     # A urgência: o cliente orça e avisa que pagou. Confirmar, não:
     # essa fica atrás do porteiro, porque é ela que muda o prazo.
     r"^/api/v1/contratos/pedidos/[^/]+/urgencia$",
+    # O retrato do cadastro conhecido é lido com o token do cliente,
+    # dentro da própria rota. Aberto aqui só para não exigir papel de
+    # equipe; sem token ele devolve "não conhecido" e nada mais.
+    r"^/api/v1/contratos/pedidos/[^/]+/conhecido$",
+    r"^/api/v1/cliente/conhecido$",
     r"^/api/v1/contratos/pedidos/[^/]+/urgencia/paguei$",
 
     # Convite da equipe: quem recebe ainda não tem conta, e é o token

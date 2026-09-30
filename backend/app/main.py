@@ -4884,7 +4884,48 @@ def balcao_vincular(pedido_id: str, authorization: str | None = Header(default=N
     if atual != novo_tipo:
         db.table("clientes").update({"tipo": novo_tipo}) \
             .eq("id", cli["id"]).execute()
-    return {"ok": True, "cliente_id": cli["id"], "tipo": novo_tipo}
+
+    # QUEM JÁ É DA CASA NÃO MANDA TUDO DE NOVO
+    #
+    # É aqui que o pedido conhece o dono, e é o primeiro instante em
+    # que dá para saber se essa pessoa já passou por aqui. Os
+    # documentos que ela já tem na pasta entram agora, antes de a
+    # coleta abrir e pedir de novo o que está guardado há meses.
+    from .agentes import cadastro_conhecido
+    reaproveitados = {"trazidos": 0}
+    try:
+        reaproveitados = cadastro_conhecido.reaproveitar(pedido_id, ids or [cli["id"]])
+    except Exception as e:
+        print(f"[balcao] não reaproveitei documentos agora: {e}")
+
+    return {"ok": True, "cliente_id": cli["id"], "tipo": novo_tipo,
+            "documentos_reaproveitados": reaproveitados}
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/conhecido")
+def balcao_cadastro_conhecido(pedido_id: str,
+                              authorization: str | None = Header(default=None)):
+    """O que o escritório já sabe sobre quem está pedindo.
+
+    Serve para a tela pedir CONFIRMAÇÃO em vez de digitação. Não
+    confirma nada sozinha: endereço e estado civil mudam, e um
+    contrato assinado com o endereço de dois anos atrás dá trabalho na
+    hora de citar alguém."""
+    from .agentes import cadastro_conhecido
+    _, ids = _clientes_do_token(authorization)
+    if not ids:
+        return {"conhecido": False}
+    return cadastro_conhecido.retrato(ids, pedido_atual=pedido_id)
+
+
+@app.get("/api/v1/cliente/conhecido")
+def cliente_cadastro_conhecido(authorization: str | None = Header(default=None)):
+    """O mesmo retrato, para o caso judicial e para a área do cliente."""
+    from .agentes import cadastro_conhecido
+    _, ids = _clientes_do_token(authorization)
+    if not ids:
+        return {"conhecido": False}
+    return cadastro_conhecido.retrato(ids)
 
 
 @app.get("/api/v1/contratos/meus-pedidos")

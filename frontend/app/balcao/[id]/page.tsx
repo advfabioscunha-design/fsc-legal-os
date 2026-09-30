@@ -297,6 +297,10 @@ export default function PedidoDoCliente() {
             faltando, impede o contrato de ser executado depois, e é a
             única que o escritório não tem como adivinhar. */}
         {faseAtual === "COLETA" && (
+          <JaTemosSeuCadastro pedidoId={String(id)} />
+        )}
+
+        {faseAtual === "COLETA" && (
           <CaixaDasPartes pedidoId={String(id)} aoCompletar={setPartesOk} />
         )}
 
@@ -1333,6 +1337,105 @@ function Urgencia({ pedido, aoMudar }: { pedido: any; aoMudar: () => void }) {
       )}
 
       {aviso && <p className="mt-3 text-[11px] text-[#E5A44C]">{aviso}</p>}
+    </section>
+  );
+}
+
+
+/* ── O QUE JÁ ESTÁ GUARDADO ────────────────────────────────────
+ *
+ * O cliente que volta para o segundo serviço começava do zero: outra
+ * vez o nome, o CPF, o endereço, e outra vez o documento de
+ * identidade que já estava na plataforma havia meses. Do lado dele
+ * isso não parece cuidado, parece que ninguém guardou nada.
+ *
+ * Esta caixa só aparece para quem já passou por aqui, e ela pede
+ * CONFIRMAÇÃO, não digitação. Os documentos reaproveitados aparecem
+ * nomeados, com a origem, porque o cliente tem direito de saber o que
+ * o escritório está usando do que ele mandou antes, e de dizer que
+ * aquele não serve para este caso.
+ */
+function JaTemosSeuCadastro({ pedidoId }: { pedidoId: string }) {
+  const [dados, setDados] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/conhecido`)
+      .then((r) => r.json()).then(setDados).catch(() => {});
+  }, [pedidoId]);
+
+  if (!dados?.conhecido || !dados?.ja_usou_antes) return null;
+
+  const cad = dados.cadastro || {};
+  const docs = (dados.documentos || []) as any[];
+  const aproveitados = docs.filter((d) => !d.envelhecido);
+  const velhos = docs.filter((d) => d.envelhecido);
+
+  const linhas: [string, string][] = [
+    ["Nome", cad.nome], ["CPF ou CNPJ", cad.cpf_cnpj],
+    ["Endereço", cad.endereco], ["Estado civil", cad.estado_civil],
+    ["Profissão", cad.profissao], ["E-mail", cad.email],
+    ["Telefone", cad.telefone],
+  ].filter(([, v]) => Boolean(v)) as [string, string][];
+
+  return (
+    <section className="rounded-2xl border border-[#2D7DD2]/40 bg-[#2D7DD2]/10 p-5">
+      <h2 className="text-sm font-bold text-[#7FB2E5]">
+        Você já é cliente, então já temos os seus dados
+      </h2>
+      <p className="mt-1 text-xs leading-relaxed text-white/60">
+        Confira abaixo. Se estiver tudo certo, é só seguir. Se alguma coisa
+        mudou, corrija no bloco das partes, logo abaixo, que o cadastro é
+        atualizado junto.
+      </p>
+
+      {linhas.length > 0 && (
+        <div className="mt-3 grid gap-1.5 rounded-xl border border-white/10 bg-black/20 p-4 sm:grid-cols-2">
+          {linhas.map(([rotulo, valor]) => (
+            <p key={rotulo} className="text-[11px] text-white/55">
+              <span className="text-white/35">{rotulo}: </span>
+              <span className="text-white/85">{valor}</span>
+            </p>
+          ))}
+        </div>
+      )}
+
+      {aproveitados.length > 0 && (
+        <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-4">
+          <p className="text-xs font-bold text-white/80">
+            Documentos que você já enviou, aproveitados neste pedido
+          </p>
+          <ul className="mt-1.5 space-y-0.5">
+            {aproveitados.map((d) => (
+              <li key={d.id} className="text-[11px] text-white/55">
+                ✓ {d.nome}
+                {d.de ? <span className="text-white/30"> · do {d.de}</span> : null}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[10px] leading-relaxed text-white/40">
+            Você não precisa mandar de novo. Se algum deles não servir para
+            este contrato, é só avisar na conversa aqui embaixo.
+          </p>
+        </div>
+      )}
+
+      {velhos.length > 0 && (
+        <div className="mt-3 rounded-xl border border-[#E5A44C]/40 bg-[#E5A44C]/10 p-4">
+          <p className="text-xs font-bold text-[#E5A44C]">
+            Estes podem estar desatualizados
+          </p>
+          <ul className="mt-1.5 space-y-0.5">
+            {velhos.map((d) => (
+              <li key={d.id} className="text-[11px] text-white/70">· {d.nome}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[10px] leading-relaxed text-white/50">
+            Foram enviados há mais de um ano. Comprovante de endereço e
+            certidão costumam pedir versão recente, então não usamos estes
+            automaticamente. Se ainda valem, mande de novo pela conversa.
+          </p>
+        </div>
+      )}
     </section>
   );
 }
