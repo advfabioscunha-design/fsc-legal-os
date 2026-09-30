@@ -18,18 +18,20 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
    apagado, porque não adianta cobrar de quem já fez a sua parte. */
 
 const COLUNAS = [
+  { f: "QUALIFICACAO", l: "Qualificação", cor: "#8899AA", cliente: true },
+  { f: "PROPOSTA", l: "Proposta", cor: "#C9A24D", cliente: true },
+  { f: "PAGAMENTO", l: "Pagamento", cor: "#E5A44C", cliente: true },
   { f: "COLETA", l: "Coleta", cor: "#8899AA", cliente: true },
   { f: "CIENCIA", l: "Ciência", cor: "#E5A44C", cliente: true },
-  { f: "PAGAMENTO", l: "Pagamento", cor: "#E5A44C", cliente: true },
   { f: "REDACAO", l: "Redação", cor: "#2D7DD2", cliente: false },
   { f: "REVISAO_IA", l: "Revisão", cor: "#2D7DD2", cliente: false },
   { f: "AJUSTE", l: "Ajuste", cor: "#2D7DD2", cliente: false },
   { f: "CIENCIA_ALTERACAO", l: "Decisão do cliente", cor: "#E5A44C", cliente: true },
   { f: "REVISAO_2", l: "Conferência", cor: "#2D7DD2", cliente: false },
   { f: "REVISAO_ADV", l: "Revisão do advogado", cor: "#C0392B", cliente: false },
-  { f: "APROVACAO", l: "Com o cliente", cor: "#E5A44C", cliente: true },
+  { f: "APROVACAO", l: "Enviado ao cliente", cor: "#E5A44C", cliente: true },
   { f: "ASSINATURA", l: "Assinatura", cor: "#16A085", cliente: true },
-  { f: "ENTREGUE", l: "Entregue", cor: "#1DB954", cliente: false },
+  { f: "ENTREGUE", l: "Concluído", cor: "#1DB954", cliente: false },
 ];
 
 const btn = "rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-40";
@@ -352,6 +354,19 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 nota="O revisor lê a íntegra e anota o que precisa mudar." />
             </div>
           )}
+          {fase === "QUALIFICACAO" && (
+            <p className="text-[11px] leading-relaxed text-white/60">
+              O atendimento está entendendo o que o cliente precisa. O cartão
+              anda sozinho para a proposta assim que o primeiro valor for
+              apresentado.
+            </p>
+          )}
+          {fase === "PROPOSTA" && (
+            <p className="text-[11px] leading-relaxed text-white/60">
+              O valor já foi apresentado e o cliente está decidindo. Aceito,
+              o cartão vai para o pagamento.
+            </p>
+          )}
           {fase === "CIENCIA_ALTERACAO" && (
             <div>
               <p className="mb-2 text-[11px] leading-relaxed text-[#E5A44C]">
@@ -442,6 +457,16 @@ function PainelDoPedido({ id, fechar, recarregar }:
                   ? `Layout conferido em ${new Date(p.visto_advogado_em).toLocaleString("pt-BR")}. O cliente recebe aviso por e-mail e WhatsApp com o link da página dele.`
                   : "O PDF sai no papel que o cliente escolheu, timbrado ou folha branca. Confira antes de liberar."}
               </p>
+
+              {/* AS DUAS SAÍDAS QUE FALTAVAM
+
+                  Lendo o documento, o advogado às vezes precisa de um
+                  dado que só o cliente tem, ou conclui que o texto
+                  pede reescrita e não emenda. Sem estes dois botões
+                  ele tinha de escolher entre perguntar pelo WhatsApp
+                  por fora, deixando a resposta fora do registro, e
+                  devolver o pedido inteiro por causa de uma linha. */}
+              <PerguntarOuDevolver id={id} aoMudar={carregar} />
             </div>
           )}
           {fase === "APROVACAO" && (
@@ -1075,6 +1100,91 @@ function EditorDaMinuta({ pedidoId, minuta, podeEditar, aoSalvar }: {
           opção de baixar até aprovar.
         </p>
       )}
+    </div>
+  );
+}
+
+
+/* ── AS DUAS SAÍDAS DO ADVOGADO NA CONFERÊNCIA FINAL ───────────
+ *
+ * Perguntar sai pelos três canais e a resposta volta pela conversa do
+ * pedido, onde fica registrada. Devolver manda para o ajuste, e não
+ * para a redação: o texto está quase pronto, e reescrever do zero
+ * jogaria fora as duas revisões já feitas.
+ *
+ * As duas ficam recolhidas atrás de um link, de propósito. O caminho
+ * normal desta fase é ler e aprovar; pôr três botões do mesmo tamanho
+ * lado a lado faz a pessoa parar para escolher em vez de fazer o que
+ * veio fazer.
+ */
+function PerguntarOuDevolver({ id, aoMudar }: { id: string; aoMudar: () => void }) {
+  const [aberto, setAberto] = useState<"" | "perguntar" | "devolver">("");
+  const [texto, setTexto] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState("");
+
+  async function enviar(rota: string, campo: string) {
+    if (texto.trim().length < 5) { setAviso("Escreva o que precisa."); return; }
+    setOcupado(true); setAviso("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}${rota}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [campo]: texto.trim(), quem: "advogado" }),
+      });
+      if (!r.ok) { setAviso("Não deu certo. Tente de novo."); return; }
+      setTexto(""); setAberto("");
+      setAviso(rota === "/perguntar"
+        ? "Pergunta enviada pelos três canais. A resposta aparece na conversa."
+        : "Devolvido para ajuste com o seu apontamento.");
+      aoMudar();
+    } catch { setAviso("Falha de conexão."); }
+    finally { setOcupado(false); }
+  }
+
+  return (
+    <div className="mt-3 border-t border-white/10 pt-3">
+      {aberto === "" ? (
+        <div className="flex flex-wrap gap-4">
+          <button onClick={() => { setAberto("perguntar"); setAviso(""); }}
+            className="text-[11px] text-white/50 underline underline-offset-4 hover:text-white">
+            tirar uma dúvida com o cliente
+          </button>
+          <button onClick={() => { setAberto("devolver"); setAviso(""); }}
+            className="text-[11px] text-white/50 underline underline-offset-4 hover:text-white">
+            devolver para ajuste
+          </button>
+        </div>
+      ) : (
+        <div>
+          <p className="mb-1.5 text-[11px] font-bold text-[#C9A24D]">
+            {aberto === "perguntar"
+              ? "O que você precisa confirmar com o cliente?"
+              : "O que o redator precisa corrigir?"}
+          </p>
+          <textarea value={texto} onChange={(e) => setTexto(e.target.value)}
+            rows={3} autoFocus
+            placeholder={aberto === "perguntar"
+              ? "Ex.: o aluguel de R$ 2.000 já inclui o condomínio ou é à parte?"
+              : "Ex.: a cláusula 6 não traz a fórmula da multa proporcional."}
+            className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-xs outline-none focus:border-[#C9A24D]" />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => enviar(aberto === "perguntar" ? "/perguntar" : "/devolver",
+                                    aberto === "perguntar" ? "pergunta" : "motivo")}
+              disabled={ocupado}
+              className="rounded-lg bg-[#C9A24D] px-4 py-2 text-[11px] font-bold text-[#0A1628] disabled:opacity-50">
+              {ocupado ? "Enviando…"
+                : aberto === "perguntar" ? "Perguntar pelos três canais"
+                : "Devolver para ajuste"}
+            </button>
+            <button onClick={() => { setAberto(""); setTexto(""); }}
+              className="text-[11px] text-white/45 underline hover:text-white">
+              cancelar
+            </button>
+          </div>
+        </div>
+      )}
+      {aviso && <p className="mt-2 text-[11px] text-[#C9A24D]">{aviso}</p>}
     </div>
   );
 }

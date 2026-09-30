@@ -346,6 +346,22 @@ def _executar_propor(pedido: dict, args: dict) -> dict:
                         "porque": (args.get("porque") or "")[:300],
                         "recusado": recusado})
 
+    # O QUADRO ACOMPANHA A CONVERSA
+    #
+    # Dito o primeiro valor, o pedido sai da qualificação e passa para
+    # a proposta. Sem isso, o cartão ficava parado na primeira coluna
+    # até o cliente aceitar, e quem olhasse o quadro não saberia
+    # distinguir quem ainda está explicando o que precisa de quem já
+    # está decidindo sobre um número.
+    try:
+        if pedido_atual.get("fase") == "QUALIFICACAO":
+            get_db().table("pedidos_contrato").update({
+                "fase": "PROPOSTA", "fase_em": _agora(),
+                "atualizado_em": _agora(),
+            }).eq("id", pedido_id).execute()
+    except Exception as e:
+        print(f"[negociador] fase não atualizada: {e}")
+
     resposta = dict(conta)
     resposta["pode_descontar_mais"] = pedido_desconto < catalogo.DESCONTO_SAIDA
     if recusado:
@@ -490,6 +506,10 @@ def _executar_fechar(pedido: dict, args: dict) -> dict:
         "desconto_pct": conta["desconto_pct"],
         "valor": conta["total"],
         "prazo_entrega_horas": conta["horas"],
+        # Aceito o valor, o cartão sai da proposta e vai para o
+        # pagamento, que é onde o escritório precisa olhar: PIX
+        # esperando conferência.
+        "fase": "PAGAMENTO", "fase_em": _agora(),
     })
     db.table("pedidos_contrato").update(campos).eq("id", pedido["id"]).execute()
 

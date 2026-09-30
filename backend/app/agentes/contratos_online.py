@@ -222,6 +222,11 @@ def aceitar_contratacao(pedido_id: str, termo: dict, ip: str | None = None) -> d
 # cliente chegaria ao advogado sem ninguém ter lido depois da mudança,
 # que é exatamente o momento em que erro entra.
 FASES = [
+    # O atendimento, que antes acontecia fora do quadro. O pedido
+    # nascia direto em PAGAMENTO, e quem estava conversando sobre
+    # preço não aparecia em lugar nenhum: o escritório só via quem já
+    # tinha decidido. Agora a esteira começa onde o cliente começa.
+    "QUALIFICACAO", "PROPOSTA",
     "PAGAMENTO", "COLETA", "CIENCIA", "REDACAO", "REVISAO_IA", "AJUSTE",
     "CIENCIA_ALTERACAO", "REVISAO_2", "REVISAO_ADV", "APROVACAO",
     "ASSINATURA", "ENTREGUE", "ARQUIVADO",
@@ -1030,6 +1035,92 @@ def revisar_segunda(pedido_id: str, auto: bool = False) -> dict:
     return {"ok": True, "fase": "REVISAO_2" if auto else "REVISAO_ADV",
             "apontamentos": dados.get("apontamentos") or [],
             "parecer": dados.get("parecer", "")}
+
+
+
+# ── A DÚVIDA DO ADVOGADO, NA CONFERÊNCIA FINAL ─────────────────
+#
+# Lendo o documento, o advogado percebe que falta um dado, ou que uma
+# cláusula ficou ambígua porque o cliente descreveu o combinado de um
+# jeito que cabe em duas leituras. Até aqui ele tinha duas saídas
+# ruins: devolver o pedido para ajuste, o que refaz o caminho inteiro
+# por causa de uma pergunta, ou escrever no WhatsApp por fora, o que
+# deixa a resposta fora do registro do pedido.
+#
+# Agora ele pergunta daqui. A pergunta sai pelos três canais, a
+# resposta do cliente volta pela conversa do pedido, por qualquer
+# canal, e fica onde deve ficar. O relógio não anda porque nesta fase
+# não existe relógio: a conferência final espera o advogado.
+
+def perguntar_ao_cliente(pedido_id: str, pergunta: str,
+                         quem: str = "") -> dict:
+    """Uma dúvida do advogado sobre o documento, pelos três canais."""
+    pergunta = (pergunta or "").strip()
+    if len(pergunta) < 5:
+        raise ValueError("Escreva a pergunta.")
+    p = _pedido(pedido_id)
+
+    db = get_db()
+    abertas = list(p.get("duvidas_advogado") or [])
+    abertas.append({"em": _agora(), "quem": quem or "advogado",
+                    "pergunta": pergunta[:2000], "respondida_em": None})
+    db.table("pedidos_contrato").update({
+        "duvidas_advogado": abertas, "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    try:
+        recado(pedido_id,
+               "Estou com o seu documento na conferência final e preciso "
+               "confirmar um ponto com você:\n\n" + pergunta
+               + "\n\nPode responder por aqui, pelo e-mail ou pelo "
+                 "WhatsApp. Assim que responder, eu concluo.",
+               canais=["PLATAFORMA", "EMAIL", "WHATSAPP"], autor="ESCRITORIO",
+               assunto="Uma dúvida sobre o seu documento")
+    except Exception as e:
+        print(f"[balcao] dúvida do advogado não enviada: {e}")
+
+    registrar_evento(None, "BALCAO_DUVIDA_DO_ADVOGADO",
+                     {"pedido_id": pedido_id, "quem": quem})
+    return {"ok": True, "duvidas": len(abertas)}
+
+
+def devolver_para_ajuste(pedido_id: str, motivo: str, quem: str = "") -> dict:
+    """O advogado prefere que o redator refaça, em vez de editar à mão.
+
+    Volta para AJUSTE, e não para REDACAO: o texto está quase pronto e
+    reescrever do zero jogaria fora as duas revisões já feitas. O que
+    o advogado escreveu entra como apontamento de gravidade alta, do
+    lado dos que a revisão já tinha levantado."""
+    motivo = (motivo or "").strip()
+    if len(motivo) < 5:
+        raise ValueError("Escreva o que precisa ser corrigido.")
+    p = _pedido(pedido_id)
+
+    revisao = dict(p.get("revisao") or {})
+    apontamentos = list(revisao.get("apontamentos") or [])
+    apontamentos.append({
+        "clausula": "Apontado pelo advogado na conferência final",
+        "gravidade": "ALTA", "problema": motivo[:2000],
+        "sugestao": motivo[:2000],
+    })
+    revisao["apontamentos"] = apontamentos
+
+    get_db().table("pedidos_contrato").update({
+        "revisao": revisao, "revisao_2": None,
+        "fase": "AJUSTE", "fase_em": _agora(),
+        "avanca_em": _mais(_janela("AJUSTE", bool(p.get("urgente")))),
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    try:
+        ajustar(pedido_id, auto=True)
+    except Exception as e:
+        print(f"[balcao] ajuste não refeito agora: {e}")
+
+    registrar_evento(None, "BALCAO_DEVOLVIDO_PELO_ADVOGADO",
+                     {"pedido_id": pedido_id, "quem": quem,
+                      "motivo": motivo[:300]})
+    return {"ok": True, "fase": "AJUSTE"}
 
 
 def liberar_para_cliente(pedido_id: str, quem: str = "",
@@ -1907,9 +1998,19 @@ def recado_do_que_falta(estado: dict) -> str:
 # antes. As janelas são teto, não piso.
 # ══════════════════════════════════════════════════════════════════
 
-JANELA_REDACAO = 4        # horas em "em elaboração", à vista do cliente
-JANELA_REVISAO = 2
-JANELA_AJUSTE = 2
+# ── AS JANELAS DE CADA FASE ────────────────────────────────────
+#
+# Somam quatro horas e meia da redação até a mesa do advogado, o que
+# cabe folgado nas vinte e quatro combinadas e deixa margem para a
+# conferência humana, que é a única sem relógio.
+#
+# Nenhuma delas é piso: o botão de avançar existe em todas, e quem
+# clicar passa na frente do relógio. A janela é teto, para o documento
+# não parar quando ninguém está olhando, não para segurar quem quer
+# andar.
+JANELA_REDACAO = 2        # horas em "em elaboração", à vista do cliente
+JANELA_REVISAO = 1        # a primeira revisão
+JANELA_AJUSTE = 0.5       # aplicar apontamento é trabalho curto
 
 JANELA_REVISAO_2 = 1      # a segunda revisão é confirmação, não releitura
 

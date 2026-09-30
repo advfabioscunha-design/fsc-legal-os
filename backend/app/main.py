@@ -3880,10 +3880,15 @@ def criar_pedido(body: NovoPedido):
         "dados": body.dados, "observacoes": body.observacoes,
         "com_orientacao": body.com_orientacao, "com_timbre": body.com_timbre,
         "servico_livre": livre[:400] or None,
-        # O pedido nasce em PAGAMENTO porque essa passou a ser a primeira
-        # fase do rito. Antes do aceite ele nem chega à tela do cliente:
-        # o que existe é a conversa da proposta.
-        "valor": valor, "fase": "PAGAMENTO",
+        # O PEDIDO NASCE NA QUALIFICAÇÃO, NÃO NO PAGAMENTO
+        #
+        # Ele nascia em PAGAMENTO, e com isso quem estava conversando
+        # sobre preço não aparecia em lugar nenhum do quadro: o
+        # escritório só via quem já tinha decidido, e nunca via quem
+        # desistiu no meio, que é justamente a informação que ensina
+        # onde a conversa perde gente.
+        "valor": valor, "fase": "QUALIFICACAO", "fase_em":
+            datetime.utcnow().isoformat(),
     }).execute().data[0]
     return row
 
@@ -4065,6 +4070,70 @@ def salvar_minuta(pedido_id: str, body: MinutaEditada):
         campos["minuta_anterior"] = anterior
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     return {"ok": True, "caracteres": len(texto)}
+
+
+class PerguntaDoAdvogado(BaseModel):
+    pergunta: str
+    quem: str = ""
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/perguntar")
+def advogado_pergunta(pedido_id: str, body: PerguntaDoAdvogado):
+    """Dúvida do advogado sobre o documento, pelos três canais."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.perguntar_ao_cliente(
+            pedido_id, body.pergunta, body.quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class DevolucaoParaAjuste(BaseModel):
+    motivo: str
+    quem: str = ""
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/devolver")
+def advogado_devolve(pedido_id: str, body: DevolucaoParaAjuste):
+    """Volta para o ajuste, com o apontamento do advogado junto."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.devolver_para_ajuste(
+            pedido_id, body.motivo, body.quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/documento.doc")
+def baixar_documento_word(pedido_id: str):
+    """O documento em Word, para o advogado e para o cliente aprovado.
+
+    HTML com o cabeçalho que o Word entende. Não depende do
+    LibreOffice, que é o que faz o PDF e é o que sai do ar de vez em
+    quando: quando ele falha, o documento ainda sai por aqui."""
+    from fastapi.responses import Response
+    r = get_db().table("pedidos_contrato") \
+        .select("minuta,numero,fase,aprovado_cliente_em") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r or not (r[0].get("minuta") or "").strip():
+        raise HTTPException(404, "Documento ainda não escrito.")
+    p = r[0]
+
+    linhas = "".join(
+        f"<p>{(l or '&nbsp;').replace('&', '&amp;').replace('<', '&lt;')}</p>"
+        for l in str(p["minuta"]).split("\n"))
+    html = (
+        '<html xmlns:w="urn:schemas-microsoft-com:office:word">'
+        '<head><meta charset="utf-8"><title>'
+        f'{p.get("numero") or "contrato"}</title></head><body>'
+        '<div style="font-family:Times New Roman,serif;font-size:12pt;'
+        'line-height:1.5;text-align:justify">' + linhas + "</div></body></html>")
+
+    nome = f"{p.get('numero') or 'contrato'}.doc"
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="application/msword",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'})
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/revisar")

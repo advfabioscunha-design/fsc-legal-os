@@ -599,12 +599,20 @@ export default function PedidoDoCliente() {
                   className={`mt-2 w-full ${cx}`} />
               </label>
 
+              {/* APROVAR É O ÚNICO BOTÃO ATÉ AQUI
+
+                  Antes de aprovar, o documento é só para leitura: não
+                  há download, e é de propósito. Arquivo baixado antes
+                  da aprovação circula, é assinado e vira contrato sem
+                  que ninguém do escritório saiba que virou. Depois do
+                  aprovado, o download abre. */}
               <button onClick={aprovar} disabled={ocupado}
                 className="w-full rounded-lg bg-[#1DB954] py-3 text-sm font-bold text-white hover:bg-[#17a349] disabled:opacity-50">
-                {pedido.assinatura_digital === false
-                  ? "Aprovar e receber o arquivo"
-                  : "Aprovar e seguir para assinatura"}
+                {ocupado ? "Registrando…" : "Aprovar este documento"}
               </button>
+              <p className="text-center text-[10px] leading-relaxed text-white/35">
+                O arquivo para baixar fica disponível assim que você aprovar.
+              </p>
 
               <div className="rounded-xl border border-white/10 p-3">
                 <p className="text-xs font-semibold text-white/70">
@@ -652,6 +660,16 @@ export default function PedidoDoCliente() {
               <p>{pedido.assinatura_digital === false
                 ? "Preparando o arquivo para você baixar."
                 : "Enviado para assinatura eletrônica. Quando todos assinarem, a cópia final vai para o seu e-mail."}</p>
+            )}
+            {(faseAtual === "ASSINATURA" || faseAtual === "ENTREGUE") && (
+              <a href={`${API}/api/v1/contratos/pedidos/${id}/documento.doc`}
+                className="mb-3 inline-flex items-center gap-2 rounded-lg bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#17a349]">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"
+                  stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" />
+                </svg>
+                Baixar o meu documento em Word
+              </a>
             )}
             {faseAtual === "ENTREGUE" && (
               <div className="space-y-2">
