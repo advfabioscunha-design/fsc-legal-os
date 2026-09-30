@@ -277,20 +277,52 @@ function PainelDoPedido({ id, fechar, recarregar }:
             <BaixaPix onConfirmar={(txid) => acao("/pagamento", { txid, quem: "escritório" }, "pago")}
               ocupado={ocupado === "pago"} />
           )}
+          {/* AS TRÊS PRIMEIRAS FASES ANDAM SOZINHAS
+
+              A minuta é escrita assim que a coleta fecha, e o pedido
+              fica quatro horas visível como "em elaboração" para o
+              cliente. Depois disso vai para revisão sozinho, e de duas
+              em duas horas segue, até parar na revisão do advogado.
+
+              O botão continua aqui porque a janela é teto, não piso:
+              quem clicar, passa na frente do relógio. O que ele mostra
+              agora é se o trabalho daquela fase já está pronto. */}
           {fase === "REDACAO" && (
-            <Botao rotulo="Redigir a minuta" ocupado={ocupado === "redigir"}
-              onClick={() => acao("/redigir", {}, "redigir")}
-              nota="O redator escreve seguindo a legislação do tipo." />
+            <div>
+              <p className="mb-2 text-[11px] leading-relaxed text-white/60">
+                {p.minuta
+                  ? "Minuta já escrita. O cliente vê o pedido em elaboração por 4 horas; depois disso vai para revisão sozinho."
+                  : "A minuta está sendo escrita. Se demorar, a esteira tenta de novo a cada 15 minutos."}
+              </p>
+              <Botao rotulo={p.minuta ? "Mandar para revisão agora" : "Redigir a minuta"}
+                ocupado={ocupado === "redigir"}
+                onClick={() => acao(p.minuta ? "/revisar" : "/redigir", {},
+                                    p.minuta ? "revisar" : "redigir")}
+                nota="Passar na frente do relógio é sempre permitido." />
+            </div>
           )}
           {fase === "REVISAO_IA" && (
-            <Botao rotulo="Revisar" ocupado={ocupado === "revisar"}
-              onClick={() => acao("/revisar", {}, "revisar")}
-              nota="O revisor lê a íntegra e anota o que precisa mudar." />
+            <div>
+              <p className="mb-2 text-[11px] leading-relaxed text-white/60">
+                {p.revisao
+                  ? "Revisão feita. Em até 2 horas segue para ajuste sozinho."
+                  : "O revisor está lendo a íntegra."}
+              </p>
+              <Botao rotulo="Revisar" ocupado={ocupado === "revisar"}
+                onClick={() => acao("/revisar", {}, "revisar")}
+                nota="O revisor lê a íntegra e anota o que precisa mudar." />
+            </div>
           )}
           {fase === "AJUSTE" && (
-            <Botao rotulo="Aplicar os apontamentos" ocupado={ocupado === "ajustar"}
-              onClick={() => acao("/ajustar", {}, "ajustar")}
-              nota="Reescreve a minuta atendendo a revisão. A anterior fica guardada." />
+            <div>
+              <p className="mb-2 text-[11px] leading-relaxed text-white/60">
+                Em até 2 horas o pedido chega à sua revisão sozinho. Dali não
+                passa sem você.
+              </p>
+              <Botao rotulo="Aplicar os apontamentos" ocupado={ocupado === "ajustar"}
+                onClick={() => acao("/ajustar", {}, "ajustar")}
+                nota="Reescreve a minuta atendendo a revisão. A anterior fica guardada." />
+            </div>
           )}
           {/* DOIS PASSOS, NÃO UM
 

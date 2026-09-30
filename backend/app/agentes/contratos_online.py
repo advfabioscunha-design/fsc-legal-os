@@ -374,8 +374,18 @@ def _claude():
     return anthropic.Anthropic(api_key=get_settings().claude_api_key)
 
 
-def redigir(pedido_id: str) -> dict:
-    """Escreve a primeira versão a partir dos dados coletados."""
+def redigir(pedido_id: str, auto: bool = False) -> dict:
+    """Escreve a primeira versão a partir dos dados coletados.
+
+    `auto` muda uma coisa só: a fase não avança. A minuta fica pronta e
+    guardada, e o pedido continua em REDACAO pelo tempo da janela.
+
+    Parece contraintuitivo escrever e não mostrar, mas é o que o rito
+    pede: o cliente acabou de mandar as informações e o documento
+    aparecer pronto no mesmo minuto não passa confiança, passa a
+    impressão de formulário preenchido por máquina. E o escritório
+    ganha a janela para agir antes, se quiser, com o trabalho já
+    adiantado em vez de por fazer."""
     db = get_db()
     achado = db.table("pedidos_contrato").select("*").eq("id", pedido_id) \
         .limit(1).execute().data
@@ -414,16 +424,19 @@ def redigir(pedido_id: str) -> dict:
     )
     texto = "".join(b.text for b in r.content if b.type == "text").strip()
 
-    db.table("pedidos_contrato").update({
-        "minuta": texto, "fase": "REVISAO_IA", "redigido_em": _agora(),
-        "atualizado_em": _agora(),
-    }).eq("id", pedido_id).execute()
+    campos = {"minuta": texto, "redigido_em": _agora(),
+              "atualizado_em": _agora()}
+    if not auto:
+        campos.update({"fase": "REVISAO_IA", "fase_em": _agora()})
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_REDIGIDO",
-                     {"pedido": pedido_id, "tipo": p["tipo"], "caracteres": len(texto)})
-    return {"ok": True, "fase": "REVISAO_IA", "caracteres": len(texto)}
+                     {"pedido": pedido_id, "tipo": p["tipo"],
+                      "caracteres": len(texto), "auto": auto})
+    return {"ok": True, "fase": "REDACAO" if auto else "REVISAO_IA",
+            "caracteres": len(texto)}
 
 
-def revisar(pedido_id: str) -> dict:
+def revisar(pedido_id: str, auto: bool = False) -> dict:
     """O revisor lê a íntegra e anota. Só depois disso o ajuste abre."""
     db = get_db()
     achado = db.table("pedidos_contrato").select("*").eq("id", pedido_id) \
@@ -453,17 +466,20 @@ def revisar(pedido_id: str) -> dict:
             dados = bloco.input or {}
     apontamentos = dados.get("apontamentos") or []
 
-    db.table("pedidos_contrato").update({
-        "revisao": dados, "fase": "AJUSTE", "revisado_em": _agora(),
-        "atualizado_em": _agora(),
-    }).eq("id", pedido_id).execute()
+    campos = {"revisao": dados, "revisado_em": _agora(),
+              "atualizado_em": _agora()}
+    if not auto:
+        campos.update({"fase": "AJUSTE", "fase_em": _agora()})
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_REVISADO",
-                     {"pedido": pedido_id, "apontamentos": len(apontamentos)})
-    return {"ok": True, "fase": "AJUSTE", "apontamentos": apontamentos,
+                     {"pedido": pedido_id, "apontamentos": len(apontamentos),
+                      "auto": auto})
+    return {"ok": True, "fase": "REVISAO_IA" if auto else "AJUSTE",
+            "apontamentos": apontamentos,
             "parecer": dados.get("parecer", "")}
 
 
-def ajustar(pedido_id: str) -> dict:
+def ajustar(pedido_id: str, auto: bool = False) -> dict:
     """O redator corrige o que o revisor apontou.
 
     A trava está aqui: sem revisão feita, não há o que ajustar, e
@@ -498,13 +514,16 @@ def ajustar(pedido_id: str) -> dict:
     )
     texto = "".join(b.text for b in r.content if b.type == "text").strip()
 
-    db.table("pedidos_contrato").update({
-        "minuta": texto, "minuta_anterior": p["minuta"],
-        "fase": "REVISAO_ADV", "ajustado_em": _agora(), "atualizado_em": _agora(),
-    }).eq("id", pedido_id).execute()
+    campos = {"minuta": texto, "minuta_anterior": p["minuta"],
+              "ajustado_em": _agora(), "atualizado_em": _agora()}
+    if not auto:
+        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora()})
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_AJUSTADO",
-                     {"pedido": pedido_id, "apontamentos": len(apontamentos)})
-    return {"ok": True, "fase": "REVISAO_ADV", "aplicados": len(apontamentos)}
+                     {"pedido": pedido_id, "apontamentos": len(apontamentos),
+                      "auto": auto})
+    return {"ok": True, "fase": "AJUSTE" if auto else "REVISAO_ADV",
+            "aplicados": len(apontamentos)}
 
 
 def liberar_para_cliente(pedido_id: str, quem: str = "",
@@ -666,7 +685,8 @@ def concluir_coleta(pedido_id: str, com_timbre: bool | None = None) -> dict:
     if not estado["completo"]:
         raise ValueError(recado_do_que_falta(estado))
 
-    campos = {"fase": "REDACAO", "atualizado_em": _agora()}
+    campos = {"fase": "REDACAO", "fase_em": _agora(),
+              "atualizado_em": _agora()}
     if com_timbre is not None:
         campos["com_timbre"] = bool(com_timbre)
         campos["timbre_escolhido"] = True
@@ -674,6 +694,22 @@ def concluir_coleta(pedido_id: str, com_timbre: bool | None = None) -> dict:
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "BALCAO_COLETA_CONCLUIDA",
                      {"pedido_id": pedido_id, "com_timbre": com_timbre})
+
+    # A REDAÇÃO COMEÇA AGORA, NÃO NO PRÓXIMO CICLO
+    #
+    # Esperar o agendador significaria até quinze minutos de nada
+    # acontecendo logo depois do gesto mais importante do cliente, que
+    # é terminar de informar. A minuta fica pronta em cerca de um
+    # minuto; a fase é que continua em elaboração pelas quatro horas.
+    #
+    # A falha aqui não derruba a conclusão da coleta: se a redação
+    # falhar, o agendador tenta de novo no próximo ciclo, e o cliente
+    # nem fica sabendo que houve um tropeço.
+    try:
+        redigir(pedido_id, auto=True)
+    except Exception as e:
+        print(f"[balcao] redação imediata falhou, fica para a esteira: {e}")
+
     return {"ok": True, "fase": "REDACAO"}
 
 
@@ -1272,3 +1308,117 @@ def recado_do_que_falta(estado: dict) -> str:
             + "; ".join(partes)
             + ". Sem isso o contrato até sai, mas fica difícil de executar "
               "se um dia precisar ir para a Justiça.")
+
+
+# ══════════════════════════════════════════════════════════════════
+# A ESTEIRA QUE ANDA SOZINHA, ATÉ ONDE PODE
+#
+# O pedido parava em cada fase esperando alguém clicar. Num escritório
+# de duas pessoas, isso significa que um contrato pago às nove da noite
+# fica parado até a manhã seguinte, não porque falte trabalho, mas
+# porque falta um clique.
+#
+# Agora as três primeiras fases andam sozinhas, com janelas:
+#
+#   REDACAO      a minuta é escrita assim que a coleta fecha, mas o
+#                pedido fica visível como "em elaboração" por 4 horas
+#   REVISAO_IA   +2 horas
+#   AJUSTE       +2 horas
+#   REVISAO_ADV  para. Daqui em diante só com o advogado.
+#
+# POR QUE ESCREVER ANTES E MOSTRAR DEPOIS
+#
+# Porque o trabalho estar pronto e o rito estar cumprido são coisas
+# diferentes. Documento que aparece pronto no minuto seguinte ao
+# pagamento não passa confiança, passa impressão de formulário
+# automático. E o escritório ganha a janela para agir antes, se quiser,
+# com o trabalho adiantado em vez de por fazer.
+#
+# POR QUE PARA NA REVISÃO DO ADVOGADO
+#
+# Porque é a única etapa que a máquina não pode cumprir. Tudo antes
+# dela é rascunho; o que sai daqui leva a assinatura de alguém inscrito
+# na OAB, que responde pelo que assina. Automatizar esse passo seria
+# assinar sem ler.
+#
+# A ação humana sempre atropela o relógio: quem clicar antes, avança
+# antes. As janelas são teto, não piso.
+# ══════════════════════════════════════════════════════════════════
+
+JANELA_REDACAO = 4        # horas em "em elaboração", à vista do cliente
+JANELA_REVISAO = 2
+JANELA_AJUSTE = 2
+
+_PROXIMA = {
+    "REDACAO": ("REVISAO_IA", JANELA_REDACAO),
+    "REVISAO_IA": ("AJUSTE", JANELA_REVISAO),
+    "AJUSTE": ("REVISAO_ADV", JANELA_AJUSTE),
+}
+
+
+def _horas_desde(iso: str | None) -> float:
+    if not iso:
+        return 999.0
+    from datetime import datetime as _d, timezone as _t
+    try:
+        t = _d.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return 999.0
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=_t.utc)
+    return (_d.now(_t.utc) - t).total_seconds() / 3600.0
+
+
+def esteira_automatica() -> dict:
+    """Roda de tempos em tempos e empurra o que já pode andar.
+
+    Duas responsabilidades, e é importante que sejam as duas: produzir
+    o trabalho da fase quando ele ainda não existe, e avançar a fase
+    quando a janela vence. Fazer só a segunda deixaria o pedido mudar
+    de nome sem mudar de estado, que é pior do que não mudar nada."""
+    db = get_db()
+    pendentes = db.table("pedidos_contrato") \
+        .select("id,numero,fase,fase_em,minuta,revisao,ajustado_em,"
+                "redigido_em,revisado_em,pago_em") \
+        .in_("fase", list(_PROXIMA)) \
+        .is_("excluido_em", "null") \
+        .limit(100).execute().data or []
+
+    feitos = {"redigidos": 0, "revisados": 0, "ajustados": 0, "avancados": 0}
+
+    for p in pendentes:
+        fase = p["fase"]
+        proxima, janela = _PROXIMA[fase]
+        try:
+            # 1. O trabalho daquela fase ainda não foi feito? Faz agora.
+            if fase == "REDACAO" and not (p.get("minuta") or "").strip():
+                redigir(p["id"], auto=True)
+                feitos["redigidos"] += 1
+                continue                       # a janela conta da fase, não daqui
+            if fase == "REVISAO_IA" and not p.get("revisao"):
+                revisar(p["id"], auto=True)
+                feitos["revisados"] += 1
+                continue
+            if fase == "AJUSTE" and _horas_desde(p.get("ajustado_em")) > \
+                    _horas_desde(p.get("fase_em")):
+                # ajustado antes de entrar nesta fase quer dizer que o
+                # ajuste desta rodada ainda não aconteceu
+                ajustar(p["id"], auto=True)
+                feitos["ajustados"] += 1
+                continue
+
+            # 2. Janela vencida? Avança.
+            if _horas_desde(p.get("fase_em") or p.get("pago_em")) >= janela:
+                db.table("pedidos_contrato").update({
+                    "fase": proxima, "fase_em": _agora(),
+                    "atualizado_em": _agora(),
+                }).eq("id", p["id"]).execute()
+                registrar_evento(None, "BALCAO_FASE_AUTOMATICA",
+                                 {"pedido_id": p["id"], "de": fase,
+                                  "para": proxima, "numero": p.get("numero")})
+                feitos["avancados"] += 1
+        except Exception as e:
+            # Um pedido com problema não pode parar a fila inteira.
+            print(f"[balcao] esteira parou em {p.get('numero')}: {e}")
+
+    return feitos

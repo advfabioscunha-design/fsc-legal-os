@@ -105,6 +105,20 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[lembretes] job não agendado: {e}")
+        # Esteira do balcão: redige, revisa, ajusta e avança as fases
+        # sozinha, até parar na revisão do advogado. De quinze em quinze
+        # minutos porque as janelas são de horas: rodar mais rápido só
+        # gastaria chamada, rodar mais devagar atrasaria a virada em até
+        # um quarto de hora, que ninguém percebe num prazo de quatro.
+        try:
+            from .agentes import contratos_online as _balcao
+            sched.add_job(
+                _balcao.esteira_automatica,
+                CronTrigger(minute="*/15"),
+                id="esteira_balcao", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[balcao] esteira não agendada: {e}")
         # Caixa de entrada: recebe a via assinada devolvida por e-mail
         try:
             if s.imap_auto:
@@ -4946,6 +4960,17 @@ def balcao_responder_desarquivamento(chamado_id: str,
             chamado_id, body.aprovado, body.resposta, body.quem)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/contratos/esteira")
+def balcao_esteira():
+    """Roda a esteira automática na hora, sem esperar os 15 minutos.
+
+    Serve ao teste e ao dia em que alguém quiser destravar a fila
+    manualmente, e é a mesma função que o agendador chama: não existe
+    um caminho para o teste e outro para a produção."""
+    from .agentes import contratos_online
+    return contratos_online.esteira_automatica()
 
 
 @app.post("/api/v1/contratos/arquivar-vencidos")

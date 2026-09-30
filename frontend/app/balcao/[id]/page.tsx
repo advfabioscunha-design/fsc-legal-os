@@ -516,7 +516,17 @@ export default function PedidoDoCliente() {
         {["REDACAO", "REVISAO_IA", "AJUSTE", "REVISAO_ADV",
           "ASSINATURA", "ENTREGUE", "ARQUIVADO"].includes(faseAtual) && (
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5 text-sm text-white/70">
-            {faseAtual === "REDACAO" && <p>Seu documento está sendo elaborado.</p>}
+            {faseAtual === "REDACAO" && (
+              <>
+                <p>Seu documento está em elaboração.</p>
+                <p className="mt-1 text-[11px] text-white/45">
+                  O escritório está escrevendo a partir do que você informou.
+                  Assim que a primeira versão ficar pronta, ela segue para
+                  revisão e depois para a leitura do advogado. Você é avisado
+                  por e-mail quando puder ler e aprovar.
+                </p>
+              </>
+            )}
             {faseAtual === "REVISAO_IA" && <p>O documento está em revisão técnica.</p>}
             {faseAtual === "AJUSTE" && <p>Aplicando os ajustes apontados na revisão.</p>}
             {faseAtual === "REVISAO_ADV" && (
