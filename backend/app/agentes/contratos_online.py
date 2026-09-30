@@ -37,6 +37,7 @@ situações diferentes, e tratá-las igual seria desonesto:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 import anthropic
@@ -654,6 +655,43 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
 
     campos = {"minuta": texto, "minuta_anterior": p["minuta"],
               "ajustado_em": _agora(), "atualizado_em": _agora()}
+
+    # O QUE O AJUSTE DESCOBRIU QUE FALTA, E SÓ O CLIENTE TEM
+    #
+    # O redator marca o que não pode inventar com [A PREENCHER: ...].
+    # Até aqui essas marcas seguiam em frente e chegavam à conferência
+    # final, quando já era tarde: o advogado devolvia o documento e o
+    # pedido perdia um dia por um dado de uma linha.
+    #
+    # Agora o ajuste lê as próprias marcas, transforma cada uma em
+    # pendência e pergunta ao cliente pelos três canais. O relógio
+    # para enquanto a resposta não vem, que é o mesmo tratamento das
+    # pendências da coleta: esperar o cliente não pode consumir o
+    # prazo que o escritório prometeu.
+    faltas = _faltas_da_minuta(texto)
+    if faltas and not auto:
+        campos["avanca_em"] = None
+        db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+        estado = revisar_pendencias(pedido_id)
+        try:
+            recado(pedido_id,
+                   "Estou finalizando o seu documento e preciso de "
+                   + ("uma informação" if len(faltas) == 1 else
+                      f"{len(faltas)} informações")
+                   + " que só você tem:\n\n"
+                   + "\n".join(f"· {f}" for f in faltas)
+                   + "\n\nPode responder por aqui, pelo e-mail ou pelo "
+                     "WhatsApp, como for melhor. Assim que chegar, eu "
+                     "complemento e o documento segue.",
+                   canais=["PLATAFORMA", "EMAIL", "WHATSAPP"], autor="AGENTE",
+                   assunto="Falta uma informação para concluir o seu documento")
+        except Exception as e:
+            print(f"[balcao] pedido de informação não enviado: {e}")
+        registrar_evento(None, "CONTRATO_AJUSTE_PEDIU_INFORMACAO",
+                         {"pedido": pedido_id, "faltas": faltas})
+        return {"ok": True, "fase": "AJUSTE", "aguardando_cliente": True,
+                "faltas": faltas, "pendencias": estado}
+
     if not auto:
         # A conferência final não tem relógio: é onde a esteira para.
         campos.update({"fase": "REVISAO_ADV", "fase_em": _agora(),
@@ -664,6 +702,24 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
                       "auto": auto})
     return {"ok": True, "fase": "AJUSTE" if auto else "REVISAO_ADV",
             "aplicados": len(apontamentos)}
+
+
+_MARCA_DE_FALTA = re.compile(r"\[A PREENCHER:?\s*([^\]]{3,160})\]", re.I)
+
+
+def _faltas_da_minuta(texto: str) -> list[str]:
+    """As marcas que o redator deixou onde não podia inventar.
+
+    Sem duplicar: o mesmo dado costuma aparecer no quadro resumo e no
+    corpo, e pedir duas vezes a mesma coisa faz o cliente achar que
+    ninguém leu a resposta dele."""
+    vistos: list[str] = []
+    for achado in _MARCA_DE_FALTA.findall(texto or ""):
+        limpo = " ".join(achado.split()).strip(" .:;,")
+        chave = limpo.lower()
+        if limpo and chave not in [v.lower() for v in vistos]:
+            vistos.append(limpo)
+    return vistos[:12]
 
 
 def liberar_para_cliente(pedido_id: str, quem: str = "",
@@ -1797,6 +1853,25 @@ def esteira_automatica() -> dict:
                                  {"pedido_id": p["id"], "de": fase,
                                   "para": proxima, "numero": p.get("numero")})
                 feitos["avancados"] += 1
+
+                # O TRABALHO DA FASE NOVA COMEÇA AGORA, NÃO NA PRÓXIMA
+                # PASSADA
+                #
+                # A esteira roda de quinze em quinze minutos. Avançar
+                # para a revisão e só revisar no ciclo seguinte jogava
+                # fora até quinze minutos por fase, três vezes, o que
+                # num pedido com urgência de seis horas é muito. Quem
+                # chega na fase já sai trabalhando.
+                try:
+                    if proxima == "REVISAO_IA":
+                        revisar(p["id"], auto=True)
+                        feitos["revisados"] += 1
+                    elif proxima == "AJUSTE":
+                        ajustar(p["id"], auto=True)
+                        feitos["ajustados"] += 1
+                except Exception as e:
+                    print(f"[balcao] fase nova ainda sem trabalho em "
+                          f"{p.get('numero')}: {e}")
         except Exception as e:
             # Um pedido com problema não pode parar a fila inteira.
             print(f"[balcao] esteira parou em {p.get('numero')}: {e}")
@@ -2221,11 +2296,22 @@ def complementar_com_a_resposta(pedido_id: str, texto: str) -> dict:
     # O redator refaz a minuta com o que chegou. Sem isto, o documento
     # seguiria para a conferência final sem a informação que acabou de
     # ser prestada, que é o pior desfecho possível desta espera.
+    # CADA FASE REFAZ O SEU PRÓPRIO TRABALHO
+    #
+    # Isto chamava o redator sempre, e o redator reescreve a minuta do
+    # zero. Num pedido que já estava em ajuste, a resposta do cliente
+    # apagava as correções da revisão e o documento voltava ao ponto
+    # de partida, sem ninguém perceber.
     if not estado.get("travado"):
-        try:
-            redigir(pedido_id, auto=True)
-        except Exception as e:
-            print(f"[balcao] minuta não refeita agora, fica para a esteira: {e}")
+        fase = (db.table("pedidos_contrato").select("fase")
+                .eq("id", pedido_id).limit(1).execute().data or [{}])[0].get("fase")
+        trabalho = {"REDACAO": redigir, "REVISAO_IA": revisar,
+                    "AJUSTE": ajustar}.get(fase)
+        if trabalho:
+            try:
+                trabalho(pedido_id, auto=True)
+            except Exception as e:
+                print(f"[balcao] {fase} não refeita agora, fica para a esteira: {e}")
 
     return {"preenchidos": len(preenchidos), "campos": preenchidos,
             "ainda_falta": estado.get("travado"),
