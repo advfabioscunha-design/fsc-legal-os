@@ -17,7 +17,7 @@ import { useEffect } from "react";
  * silêncio. Este componente fecha o buraco do lado de cá.
  *
  * Ele fica no layout, então roda em qualquer página. Se a URL trouxer
- * a marca de recuperação, ele leva para /entrar carregando junto a
+ * a marca de recuperação, ele leva para /nova-senha carregando junto a
  * âncora com o token, que é o que a tela de lá espera. Em qualquer
  * outro caso não faz absolutamente nada.
  */
@@ -26,7 +26,7 @@ export default function LevaParaRedefinirSenha() {
     if (typeof window === "undefined") return;
 
     const caminho = window.location.pathname;
-    if (caminho.startsWith("/entrar")) return;   // já está no lugar certo
+    if (caminho.startsWith("/nova-senha")) return;   // já está no lugar certo
 
     const ancora = window.location.hash || "";
     const busca = new URLSearchParams(window.location.search);
@@ -37,14 +37,16 @@ export default function LevaParaRedefinirSenha() {
     const ehRecuperacao =
       naAncora.get("type") === "recovery"
       || busca.get("type") === "recovery"
-      || (Boolean(busca.get("code")) && busca.get("fluxo") !== "outro");
+      || Boolean(busca.get("token_hash"))
+      || naAncora.get("error_code") === "otp_expired"
+      || Boolean(busca.get("code"));
 
     if (!ehRecuperacao) return;
 
     // `replace`, e não `push`: voltar para trás depois de trocar a
     // senha levaria a pessoa a um link já gasto.
     window.location.replace(
-      `/entrar?recuperar=1${busca.toString() ? `&${busca.toString()}` : ""}${ancora}`);
+      `/nova-senha${busca.toString() ? `?${busca.toString()}` : ""}${ancora}`);
   }, []);
 
   return null;

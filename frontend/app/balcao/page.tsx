@@ -174,7 +174,7 @@ export default function Balcao() {
     } catch { /* contador fora do ar não pode travar quem precisa */ }
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/balcao`,
+      redirectTo: `${window.location.origin}/nova-senha`,
     });
     // Resposta igual exista ou não a conta: dizer que o e-mail "não
     // está cadastrado" entrega a informação a quem está tentando

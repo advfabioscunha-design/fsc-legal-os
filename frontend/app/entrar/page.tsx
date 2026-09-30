@@ -21,6 +21,11 @@ export default function Entrar() {
     // Quem chega pelo "esqueci a senha" da porta da equipe já cai na
     // tela certa, sem ter de procurar o link de novo aqui dentro.
     if (p.get("recuperar") === "1") setModo("recuperar");
+    // Quem vem da troca de senha entra com a senha nova, e saber que
+    // ela foi gravada é metade da tranquilidade.
+    if (p.get("senha") === "nova") {
+      setMsg("Senha alterada. Entre com a sua nova senha.");
+    }
 
     /* QUEM CHEGA PELO LINK DO E-MAIL
      *
@@ -109,7 +114,7 @@ export default function Entrar() {
       } catch { /* contador fora do ar não pode travar quem precisa */ }
 
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/entrar`,
+        redirectTo: `${window.location.origin}/nova-senha`,
       });
       if (error) console.warn(error.message);
       setMsg("Se houver conta com este e-mail, enviamos agora o link para criar "
