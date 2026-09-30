@@ -77,7 +77,8 @@ PUBLICO = [
     r"^/api/v1/convites/[^/]+$",
     r"^/api/v1/convites/[^/]+/aceitar$",
 
-    # Recuperação de acesso.
+    # Recuperação de acesso e a porta da equipe, que é lida por quem
+    # ainda não entrou.
     r"^/api/v1/acesso/(limite|trocar-email)$",
 
     # Feed da agenda para o Google Calendar: o calendário não tem como

@@ -23,7 +23,7 @@ const INTERNAS = new Set([
   "tarefas", "pendencias",
   // O convite é a primeira tela que um futuro colega vê. Oferecer ali
   // o atendimento ao cliente seria oferecer a porta errada.
-  "convite",
+  "convite", "acesso-equipe",
   // "atendimento" tem dois sentidos: a esteira da primeira fase do caso
   // (tela da equipe) e a sala de telepresença em /atendimento/<id>. As
   // duas ficam de fora — na sala, dois círculos por cima do vídeo

@@ -233,9 +233,9 @@ export default function AreaLanding({
             © {new Date().getFullYear()} FC Advocacia. Conteúdo informativo, nos
             termos do Provimento 205/2021 da OAB.
           </p>
-          <Link href="/entrar?next=/inicio"
+          <Link href="/acesso-equipe"
             className="mt-4 inline-block text-caption text-slate transition hover:text-white">
-            Acesso da equipe
+            Área da equipe
           </Link>
         </div>
       </footer>

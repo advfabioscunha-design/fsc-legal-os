@@ -387,13 +387,13 @@ export default function Home() {
                   estava em cinza sobre cinza e quem trabalha aqui não
                   achava. */}
               <li className="pt-2">
-                <Link href="/entrar?next=/inicio"
+                <Link href="/acesso-equipe"
                   className="inline-flex items-center gap-1.5 text-small font-medium text-slate transition hover:text-white">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}
                     strokeLinecap="round" className="h-4 w-4" aria-hidden="true">
                     <path d="M15 3h4v18h-4M11 16l4-4-4-4M15 12H3" />
                   </svg>
-                  Acesso da equipe
+                  Área da equipe
                 </Link>
               </li>
             </ul>

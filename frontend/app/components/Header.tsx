@@ -90,6 +90,14 @@ export default function Header() {
             Área do cliente
           </Link>
 
+          {/* A porta de quem trabalha aqui. Fica ao lado da do cliente,
+              em tom menor: não é conteúdo de marketing, mas quem
+              começa na equipe precisa achar sem perguntar a alguém. */}
+          <Link href="/acesso-equipe"
+            className="text-small font-medium text-slate/70 transition hover:text-white">
+            Área da equipe
+          </Link>
+
           <AtendimentoChat variant="inline" label="Falar com o escritório"
             className="inline-flex items-center justify-center rounded-lg bg-electric px-6 py-2.5 text-small font-semibold text-white shadow-card transition-all hover:bg-indigo hover:shadow-glow" />
         </nav>
@@ -116,6 +124,10 @@ export default function Header() {
             <Link href="/entrar?next=/cliente"
               className="py-3.5 text-body font-medium text-slate">
               Área do cliente
+            </Link>
+            <Link href="/acesso-equipe"
+              className="py-3.5 text-body font-medium text-slate/70">
+              Área da equipe
             </Link>
           </div>
           <div className="mt-4">
