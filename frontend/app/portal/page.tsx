@@ -85,7 +85,7 @@ export default function Portal() {
             <img src="/logo.svg" alt="FC Advocacia" className="h-9 w-auto" />
             <span className="text-[10px] text-[#8899AA] tracking-widest uppercase">Portal de Atendimento</span>
           </div>
-          <span className="text-xs text-[#8899AA] hidden md:block">OAB/RO 10.849</span>
+          <span className="text-xs text-[#8899AA] hidden md:block">Recuperação Patrimonial</span>
         </div>
       </header>
 

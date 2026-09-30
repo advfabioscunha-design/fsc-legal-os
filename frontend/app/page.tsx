@@ -100,26 +100,65 @@ export default function Home() {
               Advocacia digital, atendimento em todo o Brasil
             </span>
 
+            {/* A ABERTURA
+
+                Era uma pergunta acusatória: "Cobraram de você o que não
+                deviam?". Funciona como anúncio e falha como recepção.
+                Quem chega a um escritório já sabe que algo deu errado;
+                o que ele não sabe é como será atendido, se vai
+                conseguir falar com alguém e se vai ficar no escuro.
+
+                A abertura passa a responder isso: quem somos, como
+                trabalhamos e o que a pessoa encontra aqui. */}
             <h1 className="mt-6 font-display text-display-lg font-bold">
-              Cobraram de você
+              Seu caso,
               <br />
               <span className="bg-gradient-to-r from-electric to-indigo bg-clip-text text-transparent">
-                o que não deviam?
+                acompanhado de perto.
               </span>
             </h1>
 
             <p className="mt-6 max-w-xl text-subtitle text-white/70">
-              Bancos, construtoras, concessionárias e o próprio Fisco erram, e o
-              erro costuma sair do seu bolso. O primeiro passo é entender o que
-              aconteceu no seu caso. Esse passo não custa nada.
+              Você é recebido, ouvido e acompanha tudo em tempo real. Cada
+              movimentação do seu processo aparece na sua área na plataforma, e
+              você fala com o escritório por ali, sem intermediário e sem
+              esperar retorno de ligação.
             </p>
 
+            <ul className="mt-7 grid max-w-xl gap-2.5">
+              {[
+                "Sua área na plataforma, com o andamento e os documentos do seu caso",
+                "Conversa direta com o escritório, registrada e disponível a qualquer hora",
+                "Aviso por e-mail a cada passo, sem você precisar perguntar",
+                "A primeira análise do seu caso não custa nada",
+              ].map((t) => (
+                <li key={t} className="flex gap-3 text-body text-white/75">
+                  <svg className="mt-1 h-4 w-4 shrink-0 text-electric" viewBox="0 0 20 20"
+                    fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" clipRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.7-9.3a1 1 0 00-1.4-1.4L9 10.6 7.7 9.3a1 1 0 10-1.4 1.4l2 2a1 1 0 001.4 0l4-4z" />
+                  </svg>
+                  {t}
+                </li>
+              ))}
+            </ul>
+
             <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <AtendimentoChat
-                variant="inline"
-                label="Analisar meu caso"
+              {/* ANALISAR MEU CASO LEVA AO CADASTRO
+
+                  Antes abria uma janela de conversa que sumia quando a
+                  pessoa fechava a aba: nem ela nem o escritório
+                  conseguiam retomar do ponto em que pararam. Agora o
+                  primeiro passo é criar o acesso com senha, e a partir
+                  dali toda conversa e cada solicitação ficam
+                  registradas na área dela. Sair e voltar passa a ser
+                  continuar, e não recomeçar. */}
+              <Link
+                href="/entrar?next=/cliente&novo=1"
                 className="inline-flex w-full items-center justify-center rounded-lg bg-electric px-8 py-4 text-subtitle font-semibold text-white shadow-glow transition-all hover:bg-indigo sm:w-auto"
-              />
+              >
+                Analisar meu caso
+              </Link>
               <Link
                 href="#areas"
                 className="inline-flex w-full items-center justify-center rounded-lg border border-white/25 px-8 py-4 text-subtitle font-medium text-white transition hover:border-white/60 hover:bg-white/5 sm:w-auto"
@@ -130,9 +169,9 @@ export default function Home() {
 
             <dl className="mt-12 grid max-w-lg grid-cols-3 gap-6 border-t border-white/10 pt-7">
               {[
-                ["OAB/RO", "10.849"],
-                ["Atuação", "Nacional"],
-                ["Atendimento", "Digital"],
+                ["Acompanhamento", "Tempo real"],
+                ["Atuação", "Todo o Brasil"],
+                ["Primeira análise", "Sem custo"],
               ].map(([k, v]) => (
                 <div key={k}>
                   <dt className="text-caption uppercase tracking-wider text-slate">{k}</dt>
@@ -144,21 +183,75 @@ export default function Home() {
 
           <div className="relative mx-auto w-full max-w-sm">
             <div className="absolute -inset-3 rounded-xl2 bg-gradient-to-br from-electric/25 to-transparent blur-2xl" />
+            {/* A FOTO DENTRO DA PALETA
+
+                O retrato foi feito num ambiente de madeira e luz
+                quente, e o site é marinho e azul frio. Lado a lado, as
+                duas temperaturas brigam e a página parece montada com
+                peças de origens diferentes.
+
+                Em vez de trocar a foto, ela é trazida para a paleta:
+                uma camada de marinho em multiply apaga o excesso de
+                âmbar do fundo, e uma de azul elétrico em soft-light
+                devolve contraste. O rosto continua natural, porque
+                essas camadas mordem mais as áreas escuras do fundo do
+                que a pele. */}
             <div className="relative overflow-hidden rounded-xl2 border border-white/10 shadow-lift">
               <Image
                 src="/dr-fabio-hero.jpg"
-                alt="Dr. Fábio Cunha, advogado responsável pelo escritório"
+                alt="Dr. Fábio Cunha, responsável pelo escritório"
                 width={520}
                 height={640}
                 priority
-                className="h-auto w-full object-cover"
+                className="h-auto w-full object-cover saturate-[0.85] contrast-[1.05]"
               />
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-navy via-navy/80 to-transparent p-5">
+              <div className="pointer-events-none absolute inset-0 bg-navy/45 mix-blend-multiply" />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-electric/25 to-transparent mix-blend-soft-light" />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-navy via-navy/85 to-transparent p-5">
                 <p className="font-display text-body font-bold">Dr. Fábio Cunha</p>
-                <p className="text-small text-slate">Advogado responsável, OAB/RO 10.849</p>
+                <p className="text-small text-slate">Responsável pelo escritório</p>
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* COMO O ESCRITÓRIO TRABALHA
+           Vem antes das áreas de atuação de propósito. Quem chega já
+           sabe qual é o problema dele; o que decide se ele fica é
+           entender como será atendido. */}
+      <section className="border-y border-white/10 bg-petrol py-20">
+        <div className="mx-auto max-w-content px-6">
+          <span className="text-caption font-semibold uppercase tracking-[0.16em] text-electric">
+            Como trabalhamos
+          </span>
+          <h2 className="mt-3 max-w-2xl font-display text-display font-bold">
+            Você não fica no escuro em nenhum momento
+          </h2>
+          <p className="mt-4 max-w-2xl text-subtitle text-white/65">
+            A parte mais desgastante de ter um processo não é a espera: é não
+            saber. Aqui cada passo aparece na sua área, no mesmo dia em que
+            acontece.
+          </p>
+
+          <ol className="mt-12 grid gap-px overflow-hidden rounded-xl2 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ["01", "Você cria o seu acesso",
+               "Leva um minuto. A partir dali, tudo o que você conversar e enviar fica guardado, e você retoma de onde parou."],
+              ["02", "Conta o que aconteceu",
+               "Pela plataforma, no seu tempo. O escritório estuda o caso e responde o que dá para fazer, com o custo na mão."],
+              ["03", "Acompanha em tempo real",
+               "Fase do caso, documentos, prazos e cada movimentação do processo, na sua área e no seu e-mail."],
+              ["04", "Fala direto com quem cuida",
+               "Sem intermediário e sem esperar retorno de ligação. A conversa fica registrada dentro do seu caso."],
+            ].map(([n, t, d]) => (
+              <li key={n} className="bg-petrol p-7">
+                <span className="font-mono text-caption font-bold text-gold">{n}</span>
+                <h3 className="mt-3 font-display text-body font-bold">{t}</h3>
+                <p className="mt-2 text-small text-white/65">{d}</p>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
 
@@ -340,8 +433,22 @@ export default function Home() {
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-electric to-indigo font-display text-body font-bold text-white">
                 FC
               </span>
-              <span className="font-display text-body font-bold text-white">Advocacia</span>
+              <span className="flex flex-col leading-none">
+                <span className="font-display text-body font-bold text-white">Advocacia</span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate">
+                  Recuperação Patrimonial
+                </span>
+              </span>
             </div>
+            {/* O NÚMERO DA OAB FICA, E FICA AQUI
+
+                Saiu do cabeçalho, do hero e da legenda da foto, que é
+                onde ele não ajudava ninguém. Permanece no rodapé
+                porque o Provimento 205/2021 da OAB exige que a
+                comunicação profissional identifique o advogado
+                responsável e o número de inscrição. Tirar de todo
+                lugar deixaria o site em desacordo com a norma que ele
+                próprio cita no fim da página. */}
             <p className="mt-4 text-small text-slate">
               Dr. Fábio Cunha
               <br />

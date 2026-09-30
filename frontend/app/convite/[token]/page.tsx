@@ -69,7 +69,7 @@ export default function Convite() {
           <span className="flex flex-col leading-none">
             <span className="font-display text-body font-bold text-white">Advocacia</span>
             <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate">
-              OAB/RO 10.849
+              Recuperação Patrimonial
             </span>
           </span>
         </div>

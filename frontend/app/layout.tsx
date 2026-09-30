@@ -32,12 +32,12 @@ const mono = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "FC Advocacia | Dr. Fábio Cunha, OAB/RO 10.849",
+  title: "FC Advocacia e Recuperação Patrimonial",
   description:
     "Escritório digital com atuação em todo o país. Direito bancário, distrato imobiliário, execução fiscal e recuperação de consumo de energia. Elaboração de contratos sob medida.",
   icons: { icon: "/icon.svg" },
   openGraph: {
-    title: "FC Advocacia | Dr. Fábio Cunha",
+    title: "FC Advocacia e Recuperação Patrimonial",
     description:
       "Cobraram de você o que não deviam? Entenda o que pode ser feito no seu caso.",
     locale: "pt_BR",

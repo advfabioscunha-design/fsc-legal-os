@@ -224,7 +224,8 @@ export default function AreaLanding({
       <footer className="border-t border-white/10 bg-navy py-12">
         <div className="mx-auto max-w-content px-6 text-center">
           <p className="text-small text-slate">
-            FC Advocacia. Dr. Fábio Cunha, OAB/RO 10.849.
+            FC Advocacia e Recuperação Patrimonial. Dr. Fábio Cunha,
+            OAB/RO 10.849.
           </p>
           <p className="mt-2 text-small text-slate">
             Porto Velho, RO e Florianópolis, SC. Atendimento em todo o país.

@@ -68,7 +68,7 @@ export default function Header() {
               Advocacia
             </span>
             <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate">
-              OAB/RO 10.849
+              Recuperação Patrimonial
             </span>
           </span>
         </Link>

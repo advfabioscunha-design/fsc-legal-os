@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
@@ -7,6 +7,14 @@ import { supabase } from "../../lib/supabaseClient";
 export default function Entrar() {
   const router = useRouter();
   const [modo, setModo] = useState<"login" | "cadastro">("login");
+
+  /* Quem chega pelo "Analisar meu caso" ainda não tem conta, e abrir a
+     tela em "Entrar" faz essa pessoa procurar o link de cadastro antes
+     de conseguir começar. O `novo=1` na URL diz de onde ela veio. */
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("novo") === "1") setModo("cadastro");
+  }, []);
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -75,15 +83,17 @@ export default function Entrar() {
     <main className="flex min-h-screen items-center justify-center bg-navy px-4">
       <div className="w-full max-w-md rounded-2xl border border-black/5 bg-white p-8 shadow-2xl">
         <Link href="/" className="mb-6 block text-center text-sm font-medium text-gold">
-          ← FC Advocacia
+          ← FC Advocacia e Recuperação Patrimonial
         </Link>
-        <h1 className="mb-1 text-center font-serif text-2xl font-bold text-navy">
-          {modo === "login" ? "Entrar" : "Criar conta"}
+        <h1 className="mb-1 text-center font-display text-2xl font-bold text-navy">
+          {modo === "login" ? "Entrar" : "Criar seu acesso"}
         </h1>
-        <p className="mb-6 text-center text-sm text-charcoal/55">
+        <p className="mb-6 text-center text-sm leading-relaxed text-charcoal/55">
           {modo === "login"
-            ? "Acesse para acompanhar seu processo."
-            : "Cadastre-se para iniciar e acompanhar sua causa."}
+            ? "Entre para acompanhar o seu caso e retomar a conversa de onde parou."
+            : "Com a senha criada, tudo o que você conversar e solicitar fica "
+              + "guardado na sua área. Se sair e voltar depois, continua do "
+              + "mesmo ponto."}
         </p>
 
         <form onSubmit={enviar} className="space-y-4">
@@ -101,7 +111,7 @@ export default function Entrar() {
           />
           <input
             type="password" className="w-full rounded-lg border border-black/10 bg-white px-4 py-3 text-sm text-charcoal outline-none focus:border-gold"
-            placeholder="Senha" value={senha}
+            placeholder={modo === "cadastro" ? "Crie uma senha" : "Senha"} value={senha}
             onChange={(e) => setSenha(e.target.value)} required minLength={6}
           />
           <button
