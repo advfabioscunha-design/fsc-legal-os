@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Playfair_Display, Inter, Space_Grotesk } from "next/font/google";
 import AtendimentoFlutuante from "./components/AtendimentoFlutuante";
+import TokenNasChamadas from "./components/TokenNasChamadas";
 
 /* TIPOGRAFIA
  *
@@ -48,6 +49,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR" className={`${display.variable} ${inter.variable} ${mono.variable}`}>
       <body className="bg-white text-charcoal antialiased">
+        {/* Anexa o token da sessão a toda chamada feita à API do
+            escritório. Fica antes do conteúdo para já estar de pé
+            quando a primeira tela pedir dados. */}
+        <TokenNasChamadas />
         {children}
         {/* Só no site e na área do cliente. Quem decide é o componente. */}
         <AtendimentoFlutuante />

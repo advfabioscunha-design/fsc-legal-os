@@ -2,7 +2,7 @@ services:
   api:
     build: .
     env_file: .env
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]   # só o Caddy alcança; a internet, não
     restart: unless-stopped
     depends_on: [redis]
 
@@ -31,7 +31,7 @@ services:
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
         NEXT_PUBLIC_WHATSAPP_NUMBER: ${NEXT_PUBLIC_WHATSAPP_NUMBER:-}
         NEXT_PUBLIC_AGENDA_URL: ${NEXT_PUBLIC_AGENDA_URL:-}
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]   # idem
     restart: unless-stopped
 
 volumes:

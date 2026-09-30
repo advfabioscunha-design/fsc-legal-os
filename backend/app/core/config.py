@@ -12,6 +12,11 @@ class Settings(BaseModel):
                                       "adv.fabios.cunha@gmail.com")
     ambiente: str = os.getenv("AMBIENTE", "dev")  # dev | staging | prod
 
+    # Quem pode chamar esta API a partir do navegador. Separados por
+    # vírgula. Vazio aqui significa cair na lista dos domínios do
+    # escritório, escrita em main.py.
+    origens_permitidas: str = os.getenv("ORIGENS_PERMITIDAS", "")
+
     # Supabase
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_service_key: str = os.getenv("SUPABASE_SERVICE_KEY", "")

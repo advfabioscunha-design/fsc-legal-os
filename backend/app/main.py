@@ -15,12 +15,52 @@ from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
 from .integracoes import asaas, zapsign, whatsapp, avisos, email_entrada
 
-app = FastAPI(title="FC Legal OS", version="4.0")
+app = FastAPI(title="FC Legal OS", version="4.0",
+              # A documentação automática desenha o mapa inteiro da API:
+              # as duzentas e trinta e quatro rotas, com os campos que
+              # cada uma aceita. Útil em desenvolvimento, e em produção
+              # é entregar a planta da casa na portaria.
+              docs_url=None, redoc_url=None, openapi_url=None)
+
+# O CORS estava em "*", o que significa qualquer site do mundo podendo
+# chamar esta API do navegador de quem estivesse logado. Agora só os
+# endereços do escritório. A lista vem do .env para o dia em que houver
+# um domínio novo, e cai nos conhecidos quando ninguém configurou.
+_ORIGENS = [o.strip() for o in
+            (get_settings().origens_permitidas or "").split(",") if o.strip()] or [
+    "https://app.fscadvocaciadigital.com.br",
+    "https://www.fscadvocaciadigital.com.br",
+    "https://fscadvocaciadigital.com.br",
+    "http://localhost:3000",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restringir ao domínio do app em produção
+    allow_origins=_ORIGENS,
+    allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _porteiro(request: Request, call_next):
+    """Ninguém entra sem dizer quem é, salvo a lista curta de rotas
+    públicas escrita em core/seguranca.py.
+
+    Fica aqui, e não rota por rota, porque rota nova precisa nascer
+    fechada. Marcar uma a uma faria a próxima nascer aberta, e a que
+    alguém esquecesse ficaria aberta para sempre."""
+    from fastapi.responses import JSONResponse
+    from .core import seguranca
+    try:
+        usuario = seguranca.checar(request)
+    except HTTPException as e:
+        return JSONResponse({"detail": e.detail}, status_code=e.status_code)
+    except Exception as e:                       # banco fora do ar, por exemplo
+        print(f"[seguranca] falha ao validar: {e}")
+        return JSONResponse({"detail": "Não foi possível validar o acesso."},
+                            status_code=503)
+    request.state.usuario = usuario
+    return await call_next(request)
 
 
 @app.on_event("startup")
