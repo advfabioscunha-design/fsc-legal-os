@@ -34,6 +34,8 @@ const FASES: { id: string; rotulo: string }[] = [
   { id: "REDACAO", rotulo: "Elaboração" },
   { id: "REVISAO_IA", rotulo: "Revisão técnica" },
   { id: "AJUSTE", rotulo: "Ajustes" },
+  { id: "CIENCIA_ALTERACAO", rotulo: "Sua decisão" },
+  { id: "REVISAO_2", rotulo: "Conferência" },
   { id: "REVISAO_ADV", rotulo: "Revisão final" },
   { id: "APROVACAO", rotulo: "Sua aprovação" },
   { id: "ASSINATURA", rotulo: "Assinatura" },
@@ -637,6 +639,10 @@ export default function PedidoDoCliente() {
               </>
             )}
             {faseAtual === "REVISAO_IA" && <p>O documento está em revisão técnica.</p>}
+            {faseAtual === "REVISAO_2" && (
+              <p>O documento está na conferência antes da leitura final do
+                 escritório.</p>
+            )}
             {faseAtual === "AJUSTE" && <p>Aplicando os ajustes apontados na revisão.</p>}
             {faseAtual === "REVISAO_ADV" && (
               <p>O escritório está com o seu documento para a conferência
@@ -689,6 +695,10 @@ export default function PedidoDoCliente() {
         {["COLETA", "CIENCIA", "REDACAO", "REVISAO_IA", "AJUSTE", "REVISAO_ADV"]
           .includes(faseAtual) && (
           <Urgencia pedido={pedido} aoMudar={carregar} />
+        )}
+
+        {faseAtual === "CIENCIA_ALTERACAO" && (
+          <SuaDecisao pedido={pedido} aoMudar={carregar} />
         )}
 
         <Conversa pedidoId={String(id)} aoMudar={carregar} />
@@ -1436,6 +1446,92 @@ function JaTemosSeuCadastro({ pedidoId }: { pedidoId: string }) {
           </p>
         </div>
       )}
+    </section>
+  );
+}
+
+
+/* ── A DECISÃO QUE É DO CLIENTE ────────────────────────────────
+ *
+ * A revisão encontrou um ponto em que o que ele pediu contraria a lei
+ * ou a jurisprudência. O escritório tem duas saídas honestas, e
+ * nenhuma delas é decidir sozinho: escrever do jeito que ele pediu,
+ * com a ciência do risco registrada, ou adequar.
+ *
+ * A tela mostra os dois caminhos lado a lado, com o mesmo peso. Pôr um
+ * dos botões em destaque seria escolher por ele com o desenho, que é
+ * a forma silenciosa de tirar a decisão de quem a tem.
+ */
+function SuaDecisao({ pedido, aoMudar }: { pedido: any; aoMudar: () => void }) {
+  const [obs, setObs] = useState<Record<string, string>>({});
+  const [ocupado, setOcupado] = useState("");
+  const [erro, setErro] = useState("");
+
+  const pendentes = (pedido?.decisoes_pendentes || []) as any[];
+  if (pendentes.length === 0) return null;
+
+  async function decidir(chave: string, escolha: "MANTER" | "ADEQUAR") {
+    setOcupado(chave + escolha); setErro("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedido.id}/decisao`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chave, escolha, observacao: obs[chave] || "" }),
+      });
+      if (!r.ok) { setErro("Não consegui registrar. Tente de novo."); return; }
+      aoMudar();
+    } catch { setErro("Sem conexão com o servidor."); }
+    finally { setOcupado(""); }
+  }
+
+  return (
+    <section className="rounded-2xl border border-[#E5A44C]/50 bg-[#E5A44C]/10 p-5">
+      <h2 className="text-sm font-bold text-[#E5A44C]">
+        Precisamos de uma decisão sua
+      </h2>
+      <p className="mt-1 text-xs leading-relaxed text-white/65">
+        Na revisão apareceu {pendentes.length === 1 ? "um ponto" : `${pendentes.length} pontos`}
+        {" "}em que o que você pediu vai contra a lei ou contra o entendimento
+        dos tribunais. Quem decide é você, e a sua escolha fica registrada.
+        O prazo fica parado até você responder.
+      </p>
+
+      <div className="mt-4 space-y-4">
+        {pendentes.map((d: any) => (
+          <div key={d.chave} className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <p className="text-sm font-bold text-white">{d.clausula}</p>
+            <p className="mt-1.5 text-xs leading-relaxed text-white/70">
+              {d.o_que_a_lei_diz}
+            </p>
+            {d.sugestao && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-white/45">
+                Como ficaria adequado: {d.sugestao}
+              </p>
+            )}
+
+            <textarea value={obs[d.chave] || ""}
+              onChange={(e) => setObs({ ...obs, [d.chave]: e.target.value })}
+              rows={2} placeholder="quer acrescentar alguma coisa? (opcional)"
+              className={`mt-3 w-full ${cx}`} />
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <button onClick={() => decidir(d.chave, "MANTER")}
+                disabled={Boolean(ocupado)}
+                className="rounded-lg border border-white/25 px-4 py-2.5 text-xs font-semibold text-white/85 transition hover:border-white/50 disabled:opacity-40">
+                {ocupado === d.chave + "MANTER" ? "Registrando…"
+                  : "Manter como pedi, ciente do risco"}
+              </button>
+              <button onClick={() => decidir(d.chave, "ADEQUAR")}
+                disabled={Boolean(ocupado)}
+                className="rounded-lg border border-white/25 px-4 py-2.5 text-xs font-semibold text-white/85 transition hover:border-white/50 disabled:opacity-40">
+                {ocupado === d.chave + "ADEQUAR" ? "Registrando…"
+                  : "Adequar à lei"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {erro && <p className="mt-3 text-[11px] text-[#ff9a8f]">{erro}</p>}
     </section>
   );
 }

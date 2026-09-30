@@ -3995,6 +3995,78 @@ def redigir_contrato(pedido_id: str):
         raise HTTPException(400, str(e))
 
 
+# ── A DECISÃO DO CLIENTE SOBRE O QUE A LEI NÃO ADMITE ──────────
+
+class DecisaoDoCliente(BaseModel):
+    chave: str
+    escolha: str          # MANTER | ADEQUAR
+    observacao: str = ""
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/decisao")
+def registrar_decisao_do_cliente(pedido_id: str, body: DecisaoDoCliente):
+    """MANTER como pediu, com ciência do risco, ou ADEQUAR à lei.
+
+    Aberta ao cliente: é ele quem decide, e exigir login de operador
+    aqui seria pedir que o escritório decidisse por ele."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.registrar_decisao(
+            pedido_id, body.chave, body.escolha, body.observacao)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/revisar-2")
+def segunda_revisao(pedido_id: str):
+    """A conferência do que mudou, antes da mesa do advogado."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.revisar_segunda(pedido_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# ── O EDITOR DO ADVOGADO ───────────────────────────────────────
+#
+# A minuta chega à conferência final e, até aqui, o advogado só podia
+# aprovar ou devolver para ajuste. Corrigir uma vírgula exigia pedir
+# ao redator que reescrevesse o documento inteiro, o que muda muito
+# mais do que uma vírgula.
+#
+# Agora ele edita direto. Salva sozinho enquanto escreve, e tem o
+# botão de salvar para quem não confia em salvamento automático, o que
+# é uma desconfiança justa: o automático falha calado, o botão não.
+
+class MinutaEditada(BaseModel):
+    texto: str
+    quem: str = ""
+
+
+@app.put("/api/v1/contratos/pedidos/{pedido_id}/minuta")
+def salvar_minuta(pedido_id: str, body: MinutaEditada):
+    """Grava o texto que o advogado está editando.
+
+    Guarda a versão anterior antes de sobrescrever. Autossalvamento
+    sem histórico é uma forma elegante de perder trabalho: basta uma
+    seleção acidental seguida de uma tecla."""
+    texto = (body.texto or "").strip()
+    if not texto:
+        raise HTTPException(400, "O documento está vazio.")
+    db = get_db()
+    r = db.table("pedidos_contrato").select("minuta").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    anterior = r[0].get("minuta") or ""
+
+    campos = {"minuta": texto, "atualizado_em": datetime.utcnow().isoformat()}
+    if anterior and anterior != texto:
+        campos["minuta_anterior"] = anterior
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+    return {"ok": True, "caracteres": len(texto)}
+
+
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/revisar")
 def revisar_contrato(pedido_id: str):
     from .agentes import contratos_online

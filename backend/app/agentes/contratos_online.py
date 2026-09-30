@@ -204,9 +204,27 @@ def aceitar_contratacao(pedido_id: str, termo: dict, ip: str | None = None) -> d
 # e pergunta o que o documento exige. É também quando se pergunta sobre
 # timbre ou folha branca: antes disso a pergunta não significa nada
 # para quem nem sabe se vai contratar.
+# ── O RITO, E POR QUE ELE TEM DUAS REVISÕES ────────────────────
+#
+# A primeira revisão olha o contrato contra a lei e contra o que o
+# cliente pediu. Ela acha três tipos de coisa: o que o redator corrige
+# sozinho, o que é nulo e precisa mudar, e o que o cliente pediu mas a
+# lei não admite. O terceiro tipo não se resolve dentro do escritório:
+# ninguém pode escolher pelo cliente entre perder o que ele pediu e
+# assinar algo que pode cair.
+#
+# Daí a fase nova. CIENCIA_ALTERACAO é a espera pela decisão dele, com
+# o relógio parado. Respondida, o redator refaz o texto com a escolha
+# registrada, e a SEGUNDA revisão confere justamente isso: se o que
+# voltou está coerente com a decisão que ele tomou.
+#
+# Sem essa segunda passada, a alteração feita por causa da resposta do
+# cliente chegaria ao advogado sem ninguém ter lido depois da mudança,
+# que é exatamente o momento em que erro entra.
 FASES = [
     "PAGAMENTO", "COLETA", "CIENCIA", "REDACAO", "REVISAO_IA", "AJUSTE",
-    "REVISAO_ADV", "APROVACAO", "ASSINATURA", "ENTREGUE", "ARQUIVADO",
+    "CIENCIA_ALTERACAO", "REVISAO_2", "REVISAO_ADV", "APROVACAO",
+    "ASSINATURA", "ENTREGUE", "ARQUIVADO",
 ]
 
 
@@ -362,6 +380,33 @@ O contrato tem de sair impecável e sem lacuna, e respeitar o que o
 cliente pediu. Quando as duas coisas não couberem juntas, é ele quem
 escolhe, sabendo do risco."""
 
+SYSTEM_REVISAO_2 = """Você é o advogado que faz a conferência final do
+escritório antes de o documento chegar à mesa do sócio.
+
+Esta NÃO é uma releitura do contrato inteiro. A primeira revisão já leu
+tudo e apontou o que precisava mudar. Você confere uma coisa só: o
+texto que voltou depois do ajuste atende ao que foi apontado e ao que
+o cliente decidiu?
+
+Procure, nesta ordem:
+1. Apontamento da primeira revisão que ficou sem atendimento.
+2. Decisão do cliente contrariada no texto. Se ele escolheu manter como
+   pediu, o texto tem de estar como ele pediu, e com a cláusula de
+   ciência registrando que a orientação foi prestada. Se escolheu
+   adequar, a cláusula tem de estar adequada.
+3. Estrago colateral: o ajuste que corrigiu um ponto e quebrou outro,
+   numeração fora de ordem, referência cruzada apontando para o lugar
+   errado, cláusula duplicada.
+4. Campo [A PREENCHER] que sobrou.
+
+NÃO aponte preferência de redação, sinônimo melhor nem reorganização de
+cláusula que já está correta. Isso aqui não é gosto, é conferência: a
+cada rodada de opinião nova o documento atrasa um dia e não melhora.
+
+Se estiver tudo atendido, diga que está pronto para a conferência do
+advogado e deixe a lista de apontamentos vazia."""
+
+
 FERRAMENTA_REVISAO = {
     "name": "revisao",
     "description": "Apontamentos da revisão do contrato",
@@ -461,6 +506,38 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
                 contexto.append(f"- {ponto.get('o_que_a_lei_diz')}")
     if p.get("com_timbre") is False:
         contexto += ["", "O cliente pediu o documento SEM o timbre do escritório."]
+
+    # O QUE ELE PEDIU PARA MUDAR, E SÓ ISSO
+    #
+    # Quando o cliente pede alteração depois de ler, o documento volta
+    # para cá inteiro. Sem esta instrução o redator reescreve tudo de
+    # novo, e o cliente recebe de volta um texto diferente do que ele
+    # aprovou em tudo menos no ponto que pediu. Mudar o que ninguém
+    # pediu é a forma mais rápida de perder a confiança de quem já
+    # tinha lido e concordado.
+    pedidos_mudanca = [a for a in (p.get("pedidos_alteracao") or [])
+                       if not a.get("atendido")]
+    if pedidos_mudanca:
+        contexto += ["", "=" * 60,
+                     "O CLIENTE JÁ LEU ESTE DOCUMENTO E PEDIU ESTAS "
+                     "MUDANÇAS. Altere APENAS o que está aqui, e mantenha o "
+                     "resto do texto exatamente como estava:"]
+        for a in pedidos_mudanca:
+            contexto.append(f"- {a.get('texto')}")
+        if p.get("minuta_anterior"):
+            contexto += ["", "VERSÃO QUE ELE LEU E APROVOU NO RESTANTE:",
+                         str(p["minuta_anterior"])[:40000]]
+
+    # AS DECISÕES QUE ELE JÁ TOMOU CONTINUAM VALENDO
+    if p.get("decisoes"):
+        contexto += ["", "PONTOS JÁ DECIDIDOS PELO CLIENTE, não pergunte de "
+                     "novo e respeite a escolha:"]
+        for d in p["decisoes"]:
+            contexto.append(
+                f"- {d.get('clausula')}: "
+                + ("manter como ele pediu, incluindo a cláusula de ciência "
+                   "de que a orientação foi prestada"
+                   if d.get("escolha") == "MANTER" else "adequar à lei"))
 
     # A QUALIFICAÇÃO DAS PARTES VEM DA CAIXA DELAS
     #
@@ -695,6 +772,22 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
     # para enquanto a resposta não vem, que é o mesmo tratamento das
     # pendências da coleta: esperar o cliente não pode consumir o
     # prazo que o escritório prometeu.
+    # O QUE DEPENDE DA DECISÃO DO CLIENTE
+    #
+    # A revisão marca esses pontos um a um. Eles não se resolvem aqui
+    # dentro: o cliente pediu uma coisa, a lei diz outra, e a escolha
+    # entre perder o que pediu e assinar algo frágil é dele. O pedido
+    # para em CIENCIA_ALTERACAO, com o relógio parado, e a pergunta
+    # sai pelos três canais.
+    a_decidir = [a for a in apontamentos if a.get("precisa_autorizacao")]
+    if a_decidir and not auto and not _ja_perguntado(p, a_decidir):
+        campos.update({"fase": "CIENCIA_ALTERACAO", "fase_em": _agora(),
+                       "avanca_em": None})
+        db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+        _pedir_ciencia_da_alteracao(pedido_id, p, a_decidir)
+        return {"ok": True, "fase": "CIENCIA_ALTERACAO",
+                "aguardando_decisao": [a.get("clausula") for a in a_decidir]}
+
     faltas = _faltas_da_minuta(texto)
     if faltas and not auto:
         campos["avanca_em"] = None
@@ -720,14 +813,17 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
                 "faltas": faltas, "pendencias": estado}
 
     if not auto:
-        # A conferência final não tem relógio: é onde a esteira para.
-        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora(),
-                       "avanca_em": None})
+        # Vai para a segunda revisão, não direto para o advogado. Texto
+        # que acabou de mudar e não foi lido por ninguém depois da
+        # mudança é onde o erro entra.
+        campos.update({"fase": "REVISAO_2", "fase_em": _agora(),
+                       "avanca_em": _mais(_janela("REVISAO_2",
+                                                  bool(p.get("urgente"))))})
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_AJUSTADO",
                      {"pedido": pedido_id, "apontamentos": len(apontamentos),
                       "auto": auto})
-    return {"ok": True, "fase": "AJUSTE" if auto else "REVISAO_ADV",
+    return {"ok": True, "fase": "AJUSTE" if auto else "REVISAO_2",
             "aplicados": len(apontamentos)}
 
 
@@ -747,6 +843,193 @@ def _faltas_da_minuta(texto: str) -> list[str]:
         if limpo and chave not in [v.lower() for v in vistos]:
             vistos.append(limpo)
     return vistos[:12]
+
+
+
+# ── A DECISÃO QUE É DO CLIENTE, E DE MAIS NINGUÉM ──────────────
+#
+# A revisão encontra um ponto em que o que o cliente pediu contraria a
+# lei ou a jurisprudência. O escritório tem duas saídas honestas, e
+# nenhuma delas é decidir sozinho: escrever do jeito que ele pediu,
+# com a ciência do risco registrada, ou adequar. Quem escolhe é ele.
+#
+# O registro importa tanto quanto a pergunta. Se um dia a cláusula
+# cair, a diferença entre o escritório ter avisado e não ter avisado
+# está guardada aqui, com data, hora e o texto exato que ele leu.
+
+def _chave_do_ponto(a: dict) -> str:
+    return f"{a.get('clausula', '')}|{(a.get('problema') or '')[:80]}".lower()
+
+
+def _ja_perguntado(pedido: dict, pontos: list[dict]) -> bool:
+    """Evita perguntar duas vezes a mesma coisa.
+
+    O ajuste roda de novo a cada resposta do cliente, e sem isto a
+    segunda passada repetiria a pergunta que ele acabou de responder."""
+    decididos = {d.get("chave") for d in (pedido.get("decisoes") or [])}
+    return all(_chave_do_ponto(a) in decididos for a in pontos)
+
+
+def _pedir_ciencia_da_alteracao(pedido_id: str, pedido: dict,
+                                pontos: list[dict]) -> None:
+    db = get_db()
+    abertos = []
+    for a in pontos:
+        abertos.append({
+            "chave": _chave_do_ponto(a),
+            "clausula": a.get("clausula"),
+            "o_que_a_lei_diz": a.get("o_que_a_lei_diz") or a.get("problema"),
+            "sugestao": a.get("sugestao"),
+            "perguntado_em": _agora(),
+            "escolha": None,
+        })
+    db.table("pedidos_contrato").update({
+        "decisoes_pendentes": abertos, "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    lista = "\n\n".join(
+        f"{i + 1}. {a['clausula']}\n{a['o_que_a_lei_diz']}"
+        for i, a in enumerate(abertos))
+    texto = (
+        "Terminei a primeira revisão do seu documento e preciso de uma "
+        "decisão sua antes de seguir.\n\n" + lista + "\n\n"
+        "Você escolhe: manter do jeito que pediu, e fica registrado que "
+        "o escritório te explicou o risco, ou adequar à lei. Pode "
+        "responder por aqui, pelo e-mail ou pelo WhatsApp. O prazo fica "
+        "parado até a sua resposta.")
+    try:
+        recado(pedido_id, texto, canais=["PLATAFORMA", "EMAIL", "WHATSAPP"],
+               autor="AGENTE",
+               assunto="Uma decisão sua para concluir o documento")
+    except Exception as e:
+        print(f"[balcao] ciência da alteração não enviada: {e}")
+
+    registrar_evento(None, "BALCAO_CIENCIA_PEDIDA",
+                     {"pedido_id": pedido_id,
+                      "pontos": [a["clausula"] for a in abertos]})
+
+
+def registrar_decisao(pedido_id: str, chave: str, escolha: str,
+                      observacao: str = "") -> dict:
+    """MANTER ou ADEQUAR, com data, hora e o texto que ele leu.
+
+    Só quando a última pendência é decidida o pedido volta a andar: um
+    contrato com metade das escolhas feitas não pode ir para a segunda
+    revisão, porque o revisor não teria como saber o que é definitivo."""
+    db = get_db()
+    p = _pedido(pedido_id)
+    escolha = (escolha or "").upper()
+    if escolha not in ("MANTER", "ADEQUAR"):
+        raise ValueError("A escolha precisa ser MANTER ou ADEQUAR.")
+
+    pendentes = list(p.get("decisoes_pendentes") or [])
+    decisoes = list(p.get("decisoes") or [])
+    achou = None
+    for item in pendentes:
+        if item.get("chave") == chave:
+            achou = item
+            break
+    if not achou:
+        raise ValueError("Este ponto não está pendente de decisão.")
+
+    achou["escolha"] = escolha
+    achou["observacao"] = (observacao or "")[:1000]
+    achou["decidido_em"] = _agora()
+    decisoes.append(achou)
+    pendentes = [x for x in pendentes if x.get("chave") != chave]
+
+    campos = {"decisoes": decisoes, "decisoes_pendentes": pendentes,
+              "atualizado_em": _agora()}
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_DECISAO_REGISTRADA",
+                     {"pedido_id": pedido_id, "clausula": achou.get("clausula"),
+                      "escolha": escolha})
+
+    if pendentes:
+        return {"ok": True, "faltam": len(pendentes)}
+
+    # Todas decididas. O redator refaz o texto com as escolhas, e a
+    # segunda revisão confere se o que voltou está coerente com elas.
+    try:
+        ajustar(pedido_id, auto=True)
+    except Exception as e:
+        print(f"[balcao] minuta não refeita agora: {e}")
+    db.table("pedidos_contrato").update({
+        "fase": "REVISAO_2", "fase_em": _agora(),
+        "avanca_em": _mais(_janela("REVISAO_2", bool(p.get("urgente")))),
+        "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    try:
+        recado(pedido_id,
+               "Obrigado, já registrei a sua decisão. O documento foi "
+               "atualizado e está na conferência final antes de chegar "
+               "até você.",
+               canais=["PLATAFORMA", "EMAIL"], autor="AGENTE")
+    except Exception as e:
+        print(f"[balcao] confirmação da decisão não enviada: {e}")
+    return {"ok": True, "faltam": 0, "fase": "REVISAO_2"}
+
+
+def revisar_segunda(pedido_id: str, auto: bool = False) -> dict:
+    """A conferência do que mudou, não uma releitura do contrato todo.
+
+    A primeira revisão já leu tudo. Esta olha uma coisa só: o texto
+    que voltou depois do ajuste está coerente com o que foi apontado e
+    com o que o cliente decidiu? Reler o contrato inteiro de novo
+    produziria uma lista nova de preferências de redação e um ciclo
+    que não fecha nunca."""
+    db = get_db()
+    p = _pedido(pedido_id)
+    if not (p.get("minuta") or "").strip():
+        raise ValueError("Não há minuta para conferir.")
+
+    anteriores = (p.get("revisao") or {}).get("apontamentos") or []
+    decisoes = p.get("decisoes") or []
+    s = get_settings()
+
+    contexto = [
+        "O QUE A PRIMEIRA REVISÃO APONTOU:",
+        "\n".join(f"- [{a.get('gravidade')}] {a.get('clausula')}: "
+                   f"{a.get('problema')}" for a in anteriores) or "nada",
+    ]
+    if decisoes:
+        contexto += ["", "O QUE O CLIENTE DECIDIU, e que é definitivo:"]
+        for d in decisoes:
+            contexto.append(
+                f"- {d.get('clausula')}: o cliente escolheu "
+                f"{'MANTER como pediu, ciente do risco' if d.get('escolha') == 'MANTER' else 'ADEQUAR à lei'}."
+                + (f" Observação dele: {d.get('observacao')}"
+                   if d.get("observacao") else ""))
+    contexto += ["", "CONTRATO ATUAL:", p["minuta"][:40000]]
+
+    r = _claude().messages.create(
+        model=s.claude_model, max_tokens=4000, system=SYSTEM_REVISAO_2,
+        tools=[FERRAMENTA_REVISAO],
+        tool_choice={"type": "tool", "name": "revisao"},
+        messages=[{"role": "user", "content": "\n".join(contexto)}],
+    )
+    if getattr(r, "stop_reason", "") == "max_tokens":
+        raise ValueError("A conferência veio cortada. Tente de novo.")
+    dados = {}
+    for bloco in r.content:
+        if bloco.type == "tool_use" and bloco.name == "revisao":
+            dados = bloco.input or {}
+    if not dados:
+        raise ValueError("A conferência não retornou resultado. Tente de novo.")
+
+    campos = {"revisao_2": dados, "revisado_2_em": _agora(),
+              "atualizado_em": _agora()}
+    if not auto:
+        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora(),
+                       "avanca_em": None})
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+    registrar_evento(None, "CONTRATO_SEGUNDA_REVISAO",
+                     {"pedido": pedido_id,
+                      "apontamentos": len(dados.get("apontamentos") or []),
+                      "auto": auto})
+    return {"ok": True, "fase": "REVISAO_2" if auto else "REVISAO_ADV",
+            "apontamentos": dados.get("apontamentos") or [],
+            "parecer": dados.get("parecer", "")}
 
 
 def liberar_para_cliente(pedido_id: str, quem: str = "",
@@ -801,17 +1084,45 @@ def liberar_para_cliente(pedido_id: str, quem: str = "",
 
 
 def pedir_alteracao(pedido_id: str, texto: str) -> dict:
-    """O cliente leu e quer mudança. Volta para ajuste, com o pedido
-    dele junto, e a fila do escritório mostra que voltou."""
+    """O cliente leu e quer mudança. O documento volta ao começo.
+
+    Volta para o redator e refaz o caminho inteiro, primeira revisão
+    inclusive. Parece caro, e é o único jeito honesto: mudar uma
+    cláusula mexe em outras, e emendar direto na versão que o advogado
+    já tinha aprovado entregaria ao cliente um texto que ninguém leu
+    depois da emenda.
+
+    O que não se refaz é a conversa já tida. As decisões que ele já
+    tomou ficam gravadas e valem: a revisão não vai perguntar de novo
+    o que ele já respondeu, e o redator mexe SÓ no que foi pedido
+    agora. Repetir a mesma pergunta a cada rodada é o jeito mais
+    rápido de fazer alguém desistir de pedir ajuste."""
     db = get_db()
-    achado = db.table("pedidos_contrato").select("pedidos_alteracao") \
+    achado = db.table("pedidos_contrato") \
+        .select("pedidos_alteracao,minuta,urgente") \
         .eq("id", pedido_id).limit(1).execute().data
-    anteriores = (achado[0].get("pedidos_alteracao") if achado else None) or []
-    anteriores.append({"em": _agora(), "texto": texto})
+    p = achado[0] if achado else {}
+    anteriores = (p.get("pedidos_alteracao") or [])
+    anteriores.append({"em": _agora(), "texto": texto, "atendido": False})
+
     db.table("pedidos_contrato").update({
-        "pedidos_alteracao": anteriores, "fase": "REDACAO",
+        "pedidos_alteracao": anteriores,
+        "fase": "REDACAO", "fase_em": _agora(),
+        "avanca_em": _mais(_janela("REDACAO", bool(p.get("urgente")))),
+        # A revisão anterior sai de cena: ela leu um texto que vai
+        # mudar. As decisões do cliente, não: aquilo ele já respondeu.
+        "revisao": None, "revisao_2": None,
+        "minuta_anterior": p.get("minuta"),
         "atualizado_em": _agora(),
     }).eq("id", pedido_id).execute()
+
+    # O redator já começa, sem esperar a esteira. Quem pediu ajuste
+    # está olhando a tela agora.
+    try:
+        redigir(pedido_id, auto=True)
+    except Exception as e:
+        print(f"[balcao] minuta não refeita agora, fica para a esteira: {e}")
+
     registrar_evento(None, "CONTRATO_ALTERACAO_PEDIDA",
                      {"pedido": pedido_id, "texto": texto[:300]})
     return {"ok": True, "fase": "REDACAO"}
@@ -1600,10 +1911,13 @@ JANELA_REDACAO = 4        # horas em "em elaboração", à vista do cliente
 JANELA_REVISAO = 2
 JANELA_AJUSTE = 2
 
+JANELA_REVISAO_2 = 1      # a segunda revisão é confirmação, não releitura
+
 _PROXIMA = {
     "REDACAO": ("REVISAO_IA", JANELA_REDACAO),
     "REVISAO_IA": ("AJUSTE", JANELA_REVISAO),
-    "AJUSTE": ("REVISAO_ADV", JANELA_AJUSTE),
+    "AJUSTE": ("REVISAO_2", JANELA_AJUSTE),
+    "REVISAO_2": ("REVISAO_ADV", JANELA_REVISAO_2),
 }
 
 # ── O RELÓGIO DE QUEM PAGOU URGÊNCIA ───────────────────────────
@@ -1616,7 +1930,8 @@ _PROXIMA = {
 # urgência já com o pedido em andamento há seis horas ou mais recebe
 # dentro de uma a duas horas, e é isso que estas janelas garantem sem
 # precisar de nenhuma conta de exceção espalhada pelo código.
-JANELAS_URGENTE = {"REDACAO": 0.75, "REVISAO_IA": 0.5, "AJUSTE": 0.5}
+JANELAS_URGENTE = {"REDACAO": 0.75, "REVISAO_IA": 0.5, "AJUSTE": 0.5,
+                   "REVISAO_2": 0.25}
 
 
 def _janela(fase: str, urgente: bool) -> float:
@@ -1818,7 +2133,8 @@ def esteira_automatica() -> dict:
     db = get_db()
     pendentes = db.table("pedidos_contrato") \
         .select("id,numero,fase,fase_em,avanca_em,minuta,revisao,ajustado_em,"
-                "redigido_em,revisado_em,pago_em,pendencias,urgente,revisao") \
+                "redigido_em,revisado_em,pago_em,pendencias,urgente,"
+                "revisao,revisao_2") \
         .in_("fase", list(_PROXIMA)) \
         .is_("excluido_em", "null") \
         .limit(100).execute().data or []
@@ -1845,6 +2161,11 @@ def esteira_automatica() -> dict:
             # avançava assim mesmo. A esteira agora repara isso na
             # passagem seguinte, em vez de deixar o pedido parado à
             # espera de alguém notar.
+            if fase == "REVISAO_2" and not p.get("revisao_2"):
+                revisar_segunda(p["id"], auto=True)
+                feitos["revisados"] += 1
+                continue
+
             if fase == "AJUSTE" and not p.get("revisao"):
                 revisar(p["id"], auto=True)
                 feitos["revisados"] += 1
@@ -1908,6 +2229,9 @@ def esteira_automatica() -> dict:
                     elif proxima == "AJUSTE":
                         ajustar(p["id"], auto=True)
                         feitos["ajustados"] += 1
+                    elif proxima == "REVISAO_2":
+                        revisar_segunda(p["id"], auto=True)
+                        feitos["revisados"] += 1
                 except Exception as e:
                     print(f"[balcao] fase nova ainda sem trabalho em "
                           f"{p.get('numero')}: {e}")

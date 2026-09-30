@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PainelLayout from "../components/PainelLayout";
 import VisualizadorProtegido from "../components/VisualizadorProtegido";
 
@@ -24,6 +24,8 @@ const COLUNAS = [
   { f: "REDACAO", l: "Redação", cor: "#2D7DD2", cliente: false },
   { f: "REVISAO_IA", l: "Revisão", cor: "#2D7DD2", cliente: false },
   { f: "AJUSTE", l: "Ajuste", cor: "#2D7DD2", cliente: false },
+  { f: "CIENCIA_ALTERACAO", l: "Decisão do cliente", cor: "#E5A44C", cliente: true },
+  { f: "REVISAO_2", l: "Conferência", cor: "#2D7DD2", cliente: false },
   { f: "REVISAO_ADV", l: "Revisão do advogado", cor: "#C0392B", cliente: false },
   { f: "APROVACAO", l: "Com o cliente", cor: "#E5A44C", cliente: true },
   { f: "ASSINATURA", l: "Assinatura", cor: "#16A085", cliente: true },
@@ -350,6 +352,31 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 nota="O revisor lê a íntegra e anota o que precisa mudar." />
             </div>
           )}
+          {fase === "CIENCIA_ALTERACAO" && (
+            <div>
+              <p className="mb-2 text-[11px] leading-relaxed text-[#E5A44C]">
+                A revisão encontrou pontos que contrariam a lei e o cliente
+                precisa decidir entre manter como pediu ou adequar. Ele já foi
+                avisado pelos três canais, e o prazo está parado até responder.
+              </p>
+              <p className="text-[11px] text-white/45">
+                Assim que ele decidir, o documento volta a andar sozinho.
+              </p>
+            </div>
+          )}
+          {fase === "REVISAO_2" && (
+            <div>
+              <p className="mb-2 text-[11px] leading-relaxed text-white/60">
+                {p.revisao_2
+                  ? "Conferência feita. Em até 1 hora chega à sua revisão sozinho."
+                  : "Conferindo se o ajuste atendeu ao que foi apontado."}
+              </p>
+              <Botao rotulo="Enviar para a minha revisão"
+                ocupado={ocupado === "revisar2"}
+                onClick={() => acao("/revisar-2", {}, "revisar2")}
+                nota="Passar na frente do relógio é sempre permitido." />
+            </div>
+          )}
           {fase === "AJUSTE" && (
             <div>
               {/* O PEDIDO QUE CHEGOU AQUI SEM REVISÃO
@@ -539,12 +566,21 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 ))}
               </Bloco>
             )}
+            {p.revisao_2 && (
+              <Bloco titulo="O que a conferência apontou">
+                <p className="mb-2 text-[11px] leading-relaxed text-white/70">
+                  {p.revisao_2.parecer || ""}
+                </p>
+                {(p.revisao_2.apontamentos || []).map((a: any, i: number) => (
+                  <p key={i} className="text-[11px] text-white/55">
+                    · {typeof a === "string" ? a : `${a.clausula}: ${a.problema}`}
+                  </p>
+                ))}
+              </Bloco>
+            )}
             {p.minuta ? (
-              <div className="rounded-xl border border-white/10 bg-[#0B1F3B] p-3">
-                <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-white/80">
-                  {p.minuta}
-                </pre>
-              </div>
+              <EditorDaMinuta pedidoId={id} minuta={p.minuta}
+                podeEditar={fase === "REVISAO_ADV"} aoSalvar={carregar} />
             ) : (
               <p className="text-xs text-white/40">A minuta ainda não foi escrita.</p>
             )}
@@ -902,5 +938,143 @@ function Desarquivamentos({ recarregar }: { recarregar: () => void }) {
         })}
       </div>
     </section>
+  );
+}
+
+
+/* ── O EDITOR DO ADVOGADO ──────────────────────────────────────
+ *
+ * Até aqui a minuta chegava à conferência final e o advogado só podia
+ * aprovar ou devolver para ajuste. Corrigir uma vírgula exigia pedir
+ * ao redator que reescrevesse o documento inteiro, o que muda muito
+ * mais do que uma vírgula e obriga a reler tudo de novo.
+ *
+ * Três decisões que não são de estilo:
+ *
+ * SALVA SOZINHO, E TEM BOTÃO. O automático roda dois segundos depois
+ * da última tecla. O botão existe porque salvamento automático falha
+ * calado, e quem está com um contrato de meia hora na tela tem direito
+ * de ver o "salvo" com os próprios olhos.
+ *
+ * GUARDA A VERSÃO ANTERIOR. Do lado do servidor, a cada gravação. Uma
+ * seleção acidental seguida de uma tecla apaga meia hora de trabalho,
+ * e sem histórico não há volta.
+ *
+ * SÓ EDITA NA FASE DELE. Antes da conferência final o texto ainda vai
+ * mudar pela mão dos agentes, e editar ali é escrever por cima de
+ * algo que vai ser sobrescrito.
+ */
+function EditorDaMinuta({ pedidoId, minuta, podeEditar, aoSalvar }: {
+  pedidoId: string; minuta: string; podeEditar: boolean; aoSalvar: () => void;
+}) {
+  const [texto, setTexto] = useState(minuta || "");
+  const [estado, setEstado] = useState<"" | "salvando" | "salvo" | "erro">("");
+  const [editando, setEditando] = useState(false);
+  const relogio = useRef<any>(null);
+  const ultimoSalvo = useRef(minuta || "");
+
+  // A minuta muda por fora quando o agente reescreve. Enquanto o
+  // advogado não começou a editar, a tela acompanha; depois que ele
+  // começou, não: sobrescrever o que alguém está digitando é o pior
+  // erro que uma tela pode cometer.
+  useEffect(() => {
+    if (!editando) { setTexto(minuta || ""); ultimoSalvo.current = minuta || ""; }
+  }, [minuta, editando]);
+
+  const salvar = useCallback(async (conteudo: string) => {
+    if (!conteudo.trim() || conteudo === ultimoSalvo.current) return;
+    setEstado("salvando");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/minuta`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto: conteudo }),
+      });
+      if (!r.ok) { setEstado("erro"); return; }
+      ultimoSalvo.current = conteudo;
+      setEstado("salvo");
+    } catch { setEstado("erro"); }
+  }, [pedidoId]);
+
+  function digitou(valor: string) {
+    setTexto(valor); setEditando(true); setEstado("");
+    if (relogio.current) clearTimeout(relogio.current);
+    relogio.current = setTimeout(() => salvar(valor), 2000);
+  }
+
+  // Sair da página com alteração por salvar é perder trabalho.
+  useEffect(() => {
+    const avisar = (e: BeforeUnloadEvent) => {
+      if (texto !== ultimoSalvo.current) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", avisar);
+    return () => window.removeEventListener("beforeunload", avisar);
+  }, [texto]);
+
+  function baixar() {
+    // .doc com conteúdo HTML: o Word abre, o Google Docs abre, e não
+    // depende de biblioteca nenhuma no navegador.
+    const html = `<html xmlns:w="urn:schemas-microsoft-com:office:word">`
+      + `<head><meta charset="utf-8"></head><body>`
+      + `<div style="font-family:Times New Roman,serif;font-size:12pt;line-height:1.5">`
+      + texto.split("\n").map((l) =>
+          `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;") || "&nbsp;"}</p>`).join("")
+      + `</div></body></html>`;
+    const url = URL.createObjectURL(
+      new Blob([html], { type: "application/msword" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "contrato.doc"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#0B1F3B] p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-bold text-[#C9A24D]">
+          {podeEditar ? "Documento, aberto para edição" : "Documento"}
+        </span>
+        <span className="text-[10px] text-white/35">
+          {estado === "salvando" ? "salvando…"
+            : estado === "salvo" ? "salvo"
+            : estado === "erro" ? "não consegui salvar"
+            : texto !== ultimoSalvo.current ? "alterações não salvas" : ""}
+        </span>
+        <div className="ml-auto flex flex-wrap gap-2">
+          {podeEditar && (
+            <button onClick={() => salvar(texto)}
+              disabled={estado === "salvando" || texto === ultimoSalvo.current}
+              className="rounded-lg bg-[#C9A24D] px-3 py-1.5 text-[11px] font-bold text-[#0A1628] disabled:opacity-40">
+              Salvar
+            </button>
+          )}
+          <button onClick={baixar}
+            className="rounded-lg border border-white/20 px-3 py-1.5 text-[11px] text-white/70 hover:border-white/45">
+            Baixar em Word
+          </button>
+        </div>
+      </div>
+
+      {podeEditar ? (
+        <textarea
+          value={texto}
+          onChange={(e) => digitou(e.target.value)}
+          onBlur={() => salvar(texto)}
+          spellCheck
+          className="h-[58vh] w-full resize-y rounded-lg border border-white/10 bg-white px-6 py-5 font-serif text-[13px] leading-relaxed text-[#111] outline-none focus:border-[#C9A24D]"
+        />
+      ) : (
+        <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-white/80">
+          {texto}
+        </pre>
+      )}
+
+      {podeEditar && (
+        <p className="mt-2 text-[10px] leading-relaxed text-white/35">
+          O texto salva sozinho dois segundos depois que você para de
+          digitar, e a versão anterior fica guardada a cada gravação. O
+          cliente só vê o documento depois que você liberar, e em PDF, sem
+          opção de baixar até aprovar.
+        </p>
+      )}
+    </div>
   );
 }

@@ -79,6 +79,9 @@ PUBLICO = [
     # equipe; sem token ele devolve "não conhecido" e nada mais.
     r"^/api/v1/contratos/pedidos/[^/]+/conhecido$",
     r"^/api/v1/cliente/conhecido$",
+    # A decisão sobre o que a lei não admite é do cliente, e ele a toma
+    # pela tela do pedido dele, sem conta de operador.
+    r"^/api/v1/contratos/pedidos/[^/]+/decisao$",
     r"^/api/v1/contratos/pedidos/[^/]+/urgencia/paguei$",
 
     # Convite da equipe: quem recebe ainda não tem conta, e é o token
