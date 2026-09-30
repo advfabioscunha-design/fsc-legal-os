@@ -33,7 +33,7 @@ const FASES: { id: string; rotulo: string }[] = [
   { id: "REDACAO", rotulo: "Elaboração" },
   { id: "REVISAO_IA", rotulo: "Revisão técnica" },
   { id: "AJUSTE", rotulo: "Ajustes" },
-  { id: "REVISAO_ADV", rotulo: "Revisão do advogado" },
+  { id: "REVISAO_ADV", rotulo: "Revisão final" },
   { id: "APROVACAO", rotulo: "Sua aprovação" },
   { id: "ASSINATURA", rotulo: "Assinatura" },
   { id: "ENTREGUE", rotulo: "Entregue" },
@@ -55,6 +55,7 @@ export default function PedidoDoCliente() {
   const [observacoes, setObservacoes] = useState("");
   const [clausulas, setClausulas] = useState("");
   const [alteracao, setAlteracao] = useState("");
+  const [observacao, setObservacao] = useState("");
   const [comoEnviar, setComoEnviar] = useState<"" | "DOCUMENTOS" | "FORMULARIO">("");
   const [comTimbre, setComTimbre] = useState(true);
   // As partes conferidas. Enquanto faltar alguém, o botão de
@@ -154,7 +155,14 @@ export default function PedidoDoCliente() {
     if (!confirm("Aprovar este documento?")) return;
     setOcupado(true);
     try {
-      await fetch(`${API}/api/v1/contratos/pedidos/${id}/aprovar`, { method: "POST" });
+      await fetch(`${API}/api/v1/contratos/pedidos/${id}/aprovar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        // A observação vai junto da aprovação. É o recado de quem
+        // aprovou mas quer registrar algo: uma dúvida, um detalhe que
+        // percebeu, um aviso para o próximo documento. Não é pedido de
+        // alteração, e por isso não devolve a peça para ajuste.
+        body: JSON.stringify({ observacao: observacao.trim() || null }),
+      });
       carregar();
     } finally { setOcupado(false); }
   }
@@ -234,7 +242,7 @@ export default function PedidoDoCliente() {
               Proposta em análise
             </p>
             <p className="mt-2 text-xs leading-relaxed text-white/75">
-              Você propôs {brl(pedido.proposta_valor)}. Um advogado do escritório
+              Você propôs {brl(pedido.proposta_valor)}. O escritório
               está analisando e responde pelo seu e-mail em até um dia útil.
             </p>
           </section>
@@ -356,6 +364,45 @@ export default function PedidoDoCliente() {
                     {c.porque && (
                       <span className="block text-[10px] text-white/35">por que pedimos: {c.porque}</span>
                     )}
+
+                    {/* A ESCOLHA MAIS COMUM, DITA EM VOZ ALTA
+
+                        Campos como índice de reajuste, prazo e garantia
+                        são onde quem não é do ramo trava: a pergunta é
+                        clara e a resposta não. Dizer qual é a prática
+                        do mercado, e por quê, resolve em um clique o
+                        que antes virava uma pergunta no chat.
+
+                        É sugestão, não imposição: o campo continua
+                        aberto, e quem tem o próprio combinado digita o
+                        dele. */}
+                    {c.sugestao && (
+                      <span className="mt-1 block rounded-lg border border-[#2D7DD2]/30 bg-[#2D7DD2]/10 px-3 py-2">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] text-white/70">
+                            Mais usado no mercado:
+                          </span>
+                          <button type="button"
+                            onClick={() => setValores({ ...valores, [c.campo]: c.sugestao })}
+                            className="rounded-md bg-[#2D7DD2] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#4361EE]">
+                            {c.sugestao}
+                          </button>
+                          {(c.opcoes || []).filter((o: string) => o !== c.sugestao).map((o: string) => (
+                            <button key={o} type="button"
+                              onClick={() => setValores({ ...valores, [c.campo]: o })}
+                              className="rounded-md border border-white/20 px-2.5 py-1 text-[11px] text-white/70 hover:border-white/45">
+                              {o}
+                            </button>
+                          ))}
+                        </span>
+                        {c.porque_sugestao && (
+                          <span className="mt-1.5 block text-[10px] leading-relaxed text-white/45">
+                            {c.porque_sugestao}
+                          </span>
+                        )}
+                      </span>
+                    )}
+
                     <input value={valores[c.campo] || ""}
                       onChange={(e) => setValores({ ...valores, [c.campo]: e.target.value })}
                       className={`mt-1 w-full ${cx}`} />
@@ -427,14 +474,18 @@ export default function PedidoDoCliente() {
                   className="rounded-lg border border-white/20 px-5 py-2.5 text-sm font-semibold text-white/80 hover:border-white/40 disabled:opacity-50">
                   {ocupado ? "Salvando…" : "Salvar e continuar depois"}
                 </button>
-                <button onClick={concluirColeta} disabled={ocupado || !partesOk}
-                  title={partesOk ? "" : "Complete os dados das partes acima"}
+                {/* O botão não trava mais por falta de informação.
+                    O trabalho começa, e o que falta é cobrado depois:
+                    a maior parte do contrato não depende daquele dado,
+                    e segurar tudo por causa de um campo faz o cliente
+                    esperar por nada. */}
+                <button onClick={concluirColeta} disabled={ocupado}
                   className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-40">
                   Terminei, pode escrever
                 </button>
                 {!partesOk && (
-                  <span className="text-xs text-[#E5A44C]">
-                    faltam dados das partes, acima
+                  <span className="text-xs text-white/45">
+                    o escritório começa e avisa o que ainda falta
                   </span>
                 )}
                 {comoEnviar === "FORMULARIO" && (
@@ -489,6 +540,27 @@ export default function PedidoDoCliente() {
               titulo={tipo?.nome} />
 
             <div className="mt-5 space-y-3">
+              {/* A OBSERVAÇÃO DE QUEM APROVA
+
+                  Nem tudo o que o cliente quer dizer sobre o documento
+                  é pedido de mudança. Às vezes é uma dúvida que ficou,
+                  um detalhe que ele notou, um aviso para o próximo
+                  contrato. Sem este campo, isso virava pedido de
+                  alteração, o documento voltava para ajuste e os dois
+                  lados perdiam um dia. */}
+              <label className="block rounded-xl border border-white/10 p-3">
+                <span className="text-xs text-white/70">
+                  Quer registrar alguma observação junto com a aprovação?
+                </span>
+                <span className="block text-[10px] text-white/35">
+                  opcional, e não atrasa nada: fica anotada no seu pedido
+                </span>
+                <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)}
+                  rows={2}
+                  placeholder="Ex.: conferir o nome da rua na hora de assinar; da próxima vez quero o mesmo modelo…"
+                  className={`mt-2 w-full ${cx}`} />
+              </label>
+
               <button onClick={aprovar} disabled={ocupado}
                 className="w-full rounded-lg bg-[#1DB954] py-3 text-sm font-bold text-white hover:bg-[#17a349] disabled:opacity-50">
                 {pedido.assinatura_digital === false
@@ -519,10 +591,11 @@ export default function PedidoDoCliente() {
             {faseAtual === "REDACAO" && (
               <>
                 <p>Seu documento está em elaboração.</p>
+                <Pendencias pedidoId={String(id)} />
                 <p className="mt-1 text-[11px] text-white/45">
                   O escritório está escrevendo a partir do que você informou.
                   Assim que a primeira versão ficar pronta, ela segue para
-                  revisão e depois para a leitura do advogado. Você é avisado
+                  revisão e depois para a conferência final. Você é avisado
                   por e-mail quando puder ler e aprovar.
                 </p>
               </>
@@ -771,5 +844,71 @@ function CaixaDasPartes({ pedidoId, aoCompletar }: {
         guardado.
       </p>
     </section>
+  );
+}
+
+
+/* ── O QUE AINDA FALTA ─────────────────────────────────────────
+ *
+ * Duas listas, e a separação entre elas é o ponto.
+ *
+ * O que é indispensável segura a entrega e para o relógio. Dizer isso
+ * com clareza é mais honesto do que prometer um prazo que depende de
+ * algo que o escritório não tem: o cliente entende que a bola está com
+ * ele, e entende por quê.
+ *
+ * O que é complementar aparece em tom menor, com o aviso de que pode
+ * chegar depois. Tratar as duas coisas com a mesma urgência faria o
+ * cliente ignorar as duas.
+ */
+function Pendencias({ pedidoId }: { pedidoId: string }) {
+  const [pend, setPend] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/pendencias`)
+      .then((r) => r.json()).then(setPend).catch(() => {});
+  }, [pedidoId]);
+
+  if (!pend || (pend.itens || []).length === 0) return null;
+
+  return (
+    <div className="mt-3 space-y-3 text-left">
+      {(pend.obrigatorias || []).length > 0 && (
+        <div className="rounded-xl border border-[#E5A44C]/40 bg-[#E5A44C]/10 p-4">
+          <p className="text-xs font-bold text-[#E5A44C]">
+            Falta uma informação para concluir
+          </p>
+          <ul className="mt-2 space-y-1">
+            {pend.obrigatorias.map((i: any, k: number) => (
+              <li key={k} className="text-xs text-white/80">
+                • {i.rotulo}{i.papel ? ` do ${String(i.papel).replaceAll("_", " ")}` : ""}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] leading-relaxed text-white/60">
+            O documento já está sendo escrito, mas a entrega espera por isso.
+            Assim que você informar, o prazo volta a correr e o escritório
+            complementa o texto.
+          </p>
+        </div>
+      )}
+
+      {(pend.complementares || []).length > 0 && (
+        <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+          <p className="text-xs font-semibold text-white/70">
+            Pode enviar depois, sem pressa
+          </p>
+          <ul className="mt-2 space-y-1">
+            {pend.complementares.map((i: any, k: number) => (
+              <li key={k} className="text-xs text-white/55">• {i.rotulo}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-white/40">
+            Isso deixa o documento mais completo e não segura nada. Dá para
+            mandar a qualquer momento antes de ele ficar pronto.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

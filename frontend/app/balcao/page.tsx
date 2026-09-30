@@ -204,8 +204,8 @@ export default function Balcao() {
           <p className="text-lg font-bold">FC <span className="text-[#C9A24D]">Advocacia</span></p>
           <h1 className="mt-2 text-2xl font-bold">Contratos e documentos</h1>
           <p className="mt-1 text-sm text-white/60">
-            Documento elaborado conforme a lei aplicável, revisado por advogado
-            e assinado eletronicamente, sem sair de casa.
+            Documento elaborado conforme a lei aplicável, revisado antes da
+            entrega e assinado eletronicamente, sem sair de casa.
           </p>
         </header>
 
@@ -361,7 +361,7 @@ export default function Balcao() {
                       className="mt-0.5 h-4 w-4 accent-[#C9A84C]" />
                     <span>
                       Quero <b>orientação jurídica antes</b>: atendimento por vídeo com
-                      um advogado, agendado por aqui, antes da elaboração. Esse
+                      o escritório, agendado por aqui, antes da elaboração. Esse
                       atendimento é contratado à parte.
                     </span>
                   </label>
@@ -515,7 +515,7 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
             Sua proposta foi registrada
           </p>
           <p className="mt-1 text-[11px] leading-relaxed text-white/70">
-            Um advogado do escritório vai analisar e responder pelo seu e-mail
+            O escritório vai analisar e responder pelo seu e-mail
             em até um dia útil. Você não precisa fazer mais nada agora.
           </p>
         </div>

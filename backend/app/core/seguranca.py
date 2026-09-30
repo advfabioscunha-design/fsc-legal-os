@@ -70,7 +70,7 @@ PUBLICO = [
     r"^/api/v1/contratos/pedidos/[^/]+$",
     r"^/api/v1/contratos/pedidos/[^/]+/(negociar|negociar/abrir|conversa|"
     r"termo-contratacao|dados|escolhas|documentos|coleta-concluida|"
-    r"alteracao|aprovar|mensagem|pdf|vincular|proposta|desarquivar|partes)$",
+    r"alteracao|aprovar|mensagem|pdf|vincular|proposta|desarquivar|partes|pendencias)$",
 
     # Convite da equipe: quem recebe ainda não tem conta, e é o token
     # sorteado que faz as vezes de credencial.

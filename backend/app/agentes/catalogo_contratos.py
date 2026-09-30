@@ -66,13 +66,29 @@ CATALOGO: dict[str, dict] = {
             {"campo": "imovel_matricula", "rotulo": "Matrícula e cartório de registro", "obrigatorio": False},
             {"campo": "finalidade", "rotulo": "Residencial ou não residencial", "obrigatorio": True,
              "porque": "muda o prazo, a renovação e as hipóteses de retomada"},
-            {"campo": "prazo_meses", "rotulo": "Prazo da locação, em meses", "obrigatorio": True},
+            {"campo": "prazo_meses", "rotulo": "Prazo da locação, em meses", "obrigatorio": True,
+             "sugestao": "30 meses",
+             "porque_sugestao": "É o prazo mais usado em locação residencial. Com 30 meses ou mais, terminado o prazo o locador pode retomar o imóvel sem precisar justificar (Lei 8.245/1991, art. 46). Abaixo disso, a retomada exige uma das hipóteses da lei."},
             {"campo": "valor_aluguel", "rotulo": "Valor mensal do aluguel", "obrigatorio": True},
             {"campo": "dia_vencimento", "rotulo": "Dia do vencimento", "obrigatorio": True},
-            {"campo": "indice_reajuste", "rotulo": "Índice de reajuste (IGP-M, IPCA…)", "obrigatorio": True},
-            {"campo": "garantia", "rotulo": "Garantia: caução, fiador, seguro-fiança ou nenhuma",
+            {"campo": "indice_reajuste",
+             "rotulo": "Índice de reajuste anual",
              "obrigatorio": True,
-             "porque": "a lei admite UMA só; duas invalidam a segunda"},
+             "sugestao": "IPCA",
+             "porque_sugestao": "Hoje é o índice mais usado em locação residencial. O IGP-M era o padrão do mercado até 2020, quando disparou muito acima da inflação ao consumidor e provocou uma onda de renegociações; desde então boa parte dos contratos migrou para o IPCA, que acompanha mais de perto o custo de vida. Quem prefere manter o IGP-M costuma combinar um teto, por exemplo o menor entre IGP-M e IPCA.",
+             "opcoes": ["IPCA", "IGP-M", "INPC", "IGP-M limitado ao IPCA"]},
+            {"campo": "garantia", "rotulo": "Garantia da locação",
+             "obrigatorio": True,
+             "porque": "a lei admite UMA só; duas invalidam a segunda",
+             "sugestao": "Caução de 3 aluguéis",
+             "porque_sugestao": "É a garantia mais comum e a mais simples de "
+                                "executar: o dinheiro já está depositado. O "
+                                "fiador é o segundo mais usado, e depende de "
+                                "alguém aceitar o encargo. O seguro-fiança "
+                                "protege mais o locador e encarece para o "
+                                "inquilino.",
+             "opcoes": ["Caução de 3 aluguéis", "Fiador", "Seguro-fiança",
+                        "Sem garantia"]},
             {"campo": "encargos", "rotulo": "Quem paga IPTU, condomínio, água, luz", "obrigatorio": True},
             {"campo": "estado_imovel", "rotulo": "Estado do imóvel e benfeitorias existentes", "obrigatorio": False},
         ],

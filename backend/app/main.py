@@ -3846,7 +3846,17 @@ def salvar_dados_pedido(pedido_id: str, body: DadosPedido):
     }).eq("id", pedido_id).execute().data
     if not r:
         raise HTTPException(404, "Pedido não encontrado.")
-    return {"ok": True}
+
+    # Salvar dados é a outra forma de atender pendência. Recalcular
+    # aqui é o que faz o relógio voltar a andar sem o cliente precisar
+    # avisar ninguém.
+    from .agentes import contratos_online
+    try:
+        pend = contratos_online.revisar_pendencias(pedido_id)
+    except Exception as e:
+        print(f"[balcao] pendências não recalculadas: {e}")
+        pend = {}
+    return {"ok": True, **({"pendencias": pend} if pend else {})}
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/termo")
@@ -3921,16 +3931,41 @@ def alteracao_contrato(pedido_id: str, body: AlteracaoBody):
     return contratos_online.pedir_alteracao(pedido_id, body.texto.strip())
 
 
+class AprovacaoDoCliente(BaseModel):
+    # Observação não é pedido de alteração: fica registrada e o
+    # documento segue. Sem este campo, todo comentário virava pedido de
+    # mudança e devolvia a peça para ajuste, custando um dia aos dois
+    # lados por causa de uma frase.
+    observacao: str | None = None
+
+
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/aprovar")
-def aprovar_contrato(pedido_id: str):
+def aprovar_contrato(pedido_id: str, body: AprovacaoDoCliente | None = None):
     """O cliente aprovou o que viu: segue para assinatura."""
     from .core.db import registrar_evento
     from datetime import datetime as _dt, timezone as _tz2
     agora = _dt.now(_tz2.utc).isoformat()
+    obs = ((body.observacao if body else None) or "").strip()
+
     get_db().table("pedidos_contrato").update({
-        "aprovado_cliente_em": agora, "fase": "ASSINATURA", "atualizado_em": agora,
+        "aprovado_cliente_em": agora, "fase": "ASSINATURA",
+        "observacao_cliente": obs[:2000] or None, "atualizado_em": agora,
     }).eq("id", pedido_id).execute()
-    registrar_evento(None, "CONTRATO_APROVADO_CLIENTE", {"pedido": pedido_id})
+
+    if obs:
+        # Entra na conversa do pedido para o escritório ler, e não só
+        # numa coluna que ninguém abre.
+        try:
+            get_db().table("pedidos_mensagens").insert({
+                "pedido_id": pedido_id, "autor": "CLIENTE",
+                "texto": f"[observação na aprovação] {obs[:1500]}",
+                "canais": ["PLATAFORMA"],
+            }).execute()
+        except Exception as e:
+            print(f"[balcao] observação não registrada na conversa: {e}")
+
+    registrar_evento(None, "CONTRATO_APROVADO_CLIENTE",
+                     {"pedido": pedido_id, "com_observacao": bool(obs)})
     return {"ok": True, "fase": "ASSINATURA"}
 
 
@@ -4842,6 +4877,17 @@ def balcao_pagamento(pedido_id: str, body: BaixaDePagamento):
 
 class PartesDoPedido(BaseModel):
     partes: list[dict] = []
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/pendencias")
+def balcao_pendencias(pedido_id: str):
+    """O que falta, separado entre o que segura a entrega e o que não."""
+    from .agentes import contratos_online
+    try:
+        pend = contratos_online.pendencias_do_pedido(pedido_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {**pend, "recado": contratos_online.recado_de_pendencia(pend)}
 
 
 @app.get("/api/v1/contratos/pedidos/{pedido_id}/partes")

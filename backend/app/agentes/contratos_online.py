@@ -84,7 +84,7 @@ def termo_de_contratacao(tipo: str, com_orientacao: bool = False,
         "",
         "O QUE O ESCRITÓRIO FAZ",
         f"Elabora o documento conforme a legislação aplicável "
-        f"({t.get('base_legal', ',')}), com revisão por advogado antes de "
+        f"({t.get('base_legal', ',')}), com revisão e conferência antes de "
         f"ser enviado a você, e disponibiliza assinatura eletrônica com "
         f"validade jurídica (Lei 14.063/2020 e MP 2.200-2/2001).",
         "",
@@ -427,7 +427,8 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
     campos = {"minuta": texto, "redigido_em": _agora(),
               "atualizado_em": _agora()}
     if not auto:
-        campos.update({"fase": "REVISAO_IA", "fase_em": _agora()})
+        campos.update({"fase": "REVISAO_IA", "fase_em": _agora(),
+                       "avanca_em": _mais(JANELA_REVISAO)})
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_REDIGIDO",
                      {"pedido": pedido_id, "tipo": p["tipo"],
@@ -469,7 +470,8 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
     campos = {"revisao": dados, "revisado_em": _agora(),
               "atualizado_em": _agora()}
     if not auto:
-        campos.update({"fase": "AJUSTE", "fase_em": _agora()})
+        campos.update({"fase": "AJUSTE", "fase_em": _agora(),
+                       "avanca_em": _mais(JANELA_AJUSTE)})
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_REVISADO",
                      {"pedido": pedido_id, "apontamentos": len(apontamentos),
@@ -498,7 +500,7 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
         db.table("pedidos_contrato").update({
             "fase": "REVISAO_ADV", "atualizado_em": _agora()}).eq("id", pedido_id).execute()
         return {"ok": True, "fase": "REVISAO_ADV",
-                "aviso": "A revisão não apontou correções; segue para o advogado."}
+                "aviso": "A revisão não apontou correções; segue para a conferência final."}
 
     s = get_settings()
     lista = "\n".join(
@@ -517,7 +519,9 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
     campos = {"minuta": texto, "minuta_anterior": p["minuta"],
               "ajustado_em": _agora(), "atualizado_em": _agora()}
     if not auto:
-        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora()})
+        # A conferência final não tem relógio: é onde a esteira para.
+        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora(),
+                       "avanca_em": None})
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_AJUSTADO",
                      {"pedido": pedido_id, "apontamentos": len(apontamentos),
@@ -678,22 +682,43 @@ def concluir_coleta(pedido_id: str, com_timbre: bool | None = None) -> dict:
     if not r[0].get("pago_em"):
         raise ValueError("A coleta começa depois do pagamento confirmado.")
 
-    # A conferência acontece aqui, e não na redação, porque aqui o
-    # cliente ainda está na tela. Descobrir que falta o CPF do fiador
-    # duas horas depois significa e-mail, espera e prazo perdido.
-    estado = partes_do_pedido(pedido_id)
-    if not estado["completo"]:
-        raise ValueError(recado_do_que_falta(estado))
+    # O QUE FALTA NÃO IMPEDE COMEÇAR
+    #
+    # Antes, faltando qualquer coisa a coleta era recusada e o cliente
+    # ficava parado. Agora o trabalho começa: a maior parte do contrato
+    # não depende daquele dado, e escrever o que já dá para escrever
+    # adianta o prazo de todo mundo.
+    #
+    # O que falta vira pendência, e é a pendência que decide o rito:
+    # a que é indispensável segura a entrega e para o relógio; a que é
+    # complementar só avisa, e pode chegar até o fim da confecção.
+    pend = pendencias_do_pedido(pedido_id)
 
     campos = {"fase": "REDACAO", "fase_em": _agora(),
+              "pendencias": pend["itens"],
               "atualizado_em": _agora()}
     if com_timbre is not None:
         campos["com_timbre"] = bool(com_timbre)
         campos["timbre_escolhido"] = True
 
+    # O RELÓGIO SÓ ANDA COM O PEDIDO COMPLETO
+    #
+    # Faltando informação indispensável, contar as quatro horas seria
+    # medir uma espera que não é do escritório. `avanca_em` nulo é o
+    # relógio parado; ele volta a andar quando a última pendência for
+    # atendida.
+    campos["avanca_em"] = None if pend["trava"] else _mais(JANELA_REDACAO)
+
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "BALCAO_COLETA_CONCLUIDA",
-                     {"pedido_id": pedido_id, "com_timbre": com_timbre})
+                     {"pedido_id": pedido_id, "com_timbre": com_timbre,
+                      "pendencias": len(pend["itens"]), "trava": pend["trava"]})
+
+    if pend["itens"]:
+        try:
+            _guardar_recado_de_pendencia(pedido_id, pend)
+        except Exception as e:
+            print(f"[balcao] aviso de pendência não registrado: {e}")
 
     # A REDAÇÃO COMEÇA AGORA, NÃO NO PRÓXIMO CICLO
     #
@@ -1287,6 +1312,13 @@ def salvar_partes(pedido_id: str, partes: list[dict]) -> dict:
         "partes_completas": estado["completo"],
     }).eq("id", pedido_id).execute()
 
+    # Salvar parte é uma das formas de atender pendência, e é aqui que
+    # o relógio pode voltar a andar.
+    try:
+        revisar_pendencias(pedido_id)
+    except Exception as e:
+        print(f"[balcao] pendências não recalculadas: {e}")
+
     registrar_evento(None, "BALCAO_PARTES_SALVAS",
                      {"pedido_id": pedido_id, "completo": estado["completo"],
                       "faltas": estado["faltas"]})
@@ -1378,8 +1410,8 @@ def esteira_automatica() -> dict:
     de nome sem mudar de estado, que é pior do que não mudar nada."""
     db = get_db()
     pendentes = db.table("pedidos_contrato") \
-        .select("id,numero,fase,fase_em,minuta,revisao,ajustado_em,"
-                "redigido_em,revisado_em,pago_em") \
+        .select("id,numero,fase,fase_em,avanca_em,minuta,revisao,ajustado_em,"
+                "redigido_em,revisado_em,pago_em,pendencias") \
         .in_("fase", list(_PROXIMA)) \
         .is_("excluido_em", "null") \
         .limit(100).execute().data or []
@@ -1407,10 +1439,23 @@ def esteira_automatica() -> dict:
                 feitos["ajustados"] += 1
                 continue
 
-            # 2. Janela vencida? Avança.
-            if _horas_desde(p.get("fase_em") or p.get("pago_em")) >= janela:
+            # 2. O relógio está parado esperando o cliente? Não anda.
+            #
+            # `avanca_em` nulo significa pendência indispensável em
+            # aberto. O documento continua sendo escrito, mas a fase
+            # não muda: prometer revisão de um texto que ainda vai
+            # mudar é prometer duas vezes o mesmo trabalho.
+            if p.get("avanca_em") is None:
+                continue
+
+            # 3. Chegou a hora? Avança.
+            if _horas_desde(p["avanca_em"]) >= 0:
+                seguinte = _PROXIMA.get(proxima)
                 db.table("pedidos_contrato").update({
                     "fase": proxima, "fase_em": _agora(),
+                    # A fase seguinte já nasce com o próprio relógio.
+                    # REVISAO_ADV não tem: é onde para.
+                    "avanca_em": _mais(seguinte[1]) if seguinte else None,
                     "atualizado_em": _agora(),
                 }).eq("id", p["id"]).execute()
                 registrar_evento(None, "BALCAO_FASE_AUTOMATICA",
@@ -1422,3 +1467,184 @@ def esteira_automatica() -> dict:
             print(f"[balcao] esteira parou em {p.get('numero')}: {e}")
 
     return feitos
+
+
+# ══════════════════════════════════════════════════════════════════
+# PENDÊNCIAS: O QUE FALTA, E O QUE ISSO IMPEDE
+#
+# Antes havia uma resposta só para qualquer falta: recusar a coleta e
+# deixar o cliente parado. Mas nem toda falta é igual.
+#
+#   INDISPENSÁVEL   sem isso o documento não se conclui. Nome e CPF de
+#                   quem assina, endereço do imóvel, valor do aluguel.
+#                   O trabalho começa, o documento é escrito até onde
+#                   dá, e a entrega espera.
+#
+#   COMPLEMENTAR    melhora o documento e não o impede. Profissão,
+#                   telefone, estado civil em contrato que não depende
+#                   dele. Pode chegar a qualquer momento antes do fim.
+#
+# A diferença muda três coisas: o que se diz ao cliente, se o relógio
+# anda, e se a peça pode ser entregue.
+#
+# O RELÓGIO PARADO
+#
+# Enquanto houver pendência indispensável, `avanca_em` fica nulo e a
+# esteira não move o pedido. Não é castigo: contar quatro horas de uma
+# espera que é do cliente seria medir o tempo errado e prometer prazo
+# que não se cumpre.
+#
+# Atendida a última, o relógio volta. Se as quatro horas já tinham
+# passado enquanto se esperava, o pedido não salta direto para a fase
+# seguinte: ganha uma hora, que é o tempo de o redator incorporar o que
+# chegou. Avançar no mesmo segundo entregaria um documento sem a
+# informação que acabou de chegar.
+# ══════════════════════════════════════════════════════════════════
+
+HORA_DE_GRACA = 1        # depois de atendida a pendência atrasada
+
+
+def _mais(horas: float) -> str:
+    from datetime import datetime as _d, timedelta as _td, timezone as _t
+    return (_d.now(_t.utc) + _td(hours=horas)).isoformat()
+
+
+def pendencias_do_pedido(pedido_id: str) -> dict:
+    """O que falta, separado entre o que trava e o que não trava."""
+    db = get_db()
+    r = db.table("pedidos_contrato").select("id,tipo,dados,partes") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    p = r[0]
+    t = catalogo.detalhe(p["tipo"]) or {}
+    dados = p.get("dados") or {}
+
+    itens: list[dict] = []
+
+    # 1. Os campos do tipo de contrato. O catálogo já diz o que é
+    #    obrigatório, e essa marcação foi escrita caso a caso, com o
+    #    motivo ao lado. É ela que manda aqui.
+    for c in t.get("campos") or []:
+        campo = c.get("campo") or ""
+        if str(dados.get(campo) or "").strip():
+            continue
+        # A qualificação das partes é conferida no bloco seguinte, com
+        # a estrutura própria. Aqui ficariam duplicadas.
+        if any(campo.endswith(suf) for suf in
+               ("_nome", "_cpf_cnpj", "_endereco", "_email", "_telefone",
+                "_estado_civil", "_profissao", "_nacionalidade")):
+            continue
+        itens.append({
+            "campo": campo, "rotulo": c.get("rotulo") or campo,
+            "obrigatorio": bool(c.get("obrigatorio")),
+            "porque": c.get("porque"), "origem": "CONTRATO",
+        })
+
+    # 2. A qualificação de quem assina.
+    estado = partes_do_pedido(pedido_id)
+    for f in estado["faltas"]:
+        for rotulo in f["falta"]:
+            itens.append({
+                "campo": f"{f['papel']}_{rotulo}", "rotulo": rotulo,
+                "obrigatorio": True, "papel": f["papel"], "origem": "PARTE",
+            })
+
+    trava = any(i["obrigatorio"] for i in itens)
+    return {"itens": itens, "trava": trava,
+            "obrigatorias": [i for i in itens if i["obrigatorio"]],
+            "complementares": [i for i in itens if not i["obrigatorio"]]}
+
+
+def recado_de_pendencia(pend: dict) -> str:
+    """O que o atendimento diz ao cliente sobre o que falta.
+
+    Escrito aqui, e não deixado para o modelo, porque é lista com
+    consequência: o modelo resume, perde um item, e o cliente volta
+    duas vezes. E a frase precisa separar o que segura a entrega do que
+    não segura, senão a pessoa trata tudo como urgente ou nada como
+    urgente."""
+    if not pend["itens"]:
+        return ""
+
+    partes = []
+    if pend["obrigatorias"]:
+        lista = ", ".join(_rotulo(i) for i in pend["obrigatorias"])
+        partes.append(
+            f"Para concluir o seu documento, o escritório precisa de: {lista}. "
+            f"O trabalho já começou e a redação está em andamento, mas a "
+            f"entrega só acontece com essa informação em mãos. Assim que você "
+            f"enviar, o prazo volta a correr.")
+    if pend["complementares"]:
+        lista = ", ".join(_rotulo(i) for i in pend["complementares"])
+        partes.append(
+            f"Há ainda o que ajuda a deixar o documento mais completo: "
+            f"{lista}. Isso não segura nada: pode mandar depois, a qualquer "
+            f"momento antes de o documento ficar pronto.")
+    return "\n\n".join(partes)
+
+
+def _rotulo(item: dict) -> str:
+    if item.get("papel"):
+        return f"{item['rotulo']} do {str(item['papel']).replace('_', ' ')}"
+    return item["rotulo"]
+
+
+def _guardar_recado_de_pendencia(pedido_id: str, pend: dict) -> None:
+    texto = recado_de_pendencia(pend)
+    if not texto:
+        return
+    get_db().table("pedidos_mensagens").insert({
+        "pedido_id": pedido_id, "autor": "AGENTE", "texto": texto,
+        "canais": ["PLATAFORMA"],
+    }).execute()
+    try:
+        recado(pedido_id, texto, canais=["EMAIL"], autor="AGENTE",
+               assunto="Falta uma informação para concluir o seu documento")
+    except Exception as e:
+        print(f"[balcao] pendência não enviada por e-mail: {e}")
+
+
+def revisar_pendencias(pedido_id: str) -> dict:
+    """Roda toda vez que o cliente salva algo. Solta o relógio se der.
+
+    É aqui que o relógio volta a andar, e a hora de graça nasce: se as
+    quatro horas já passaram enquanto o pedido esperava, avançar no
+    mesmo segundo entregaria um documento sem a informação que acabou
+    de chegar. A hora é o tempo de incorporá-la."""
+    db = get_db()
+    r = db.table("pedidos_contrato") \
+        .select("id,fase,fase_em,avanca_em,pendencias").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    p = r[0]
+    antes_travava = p.get("avanca_em") is None and p.get("fase") in _PROXIMA
+
+    pend = pendencias_do_pedido(pedido_id)
+    campos = {"pendencias": pend["itens"], "atualizado_em": _agora()}
+
+    if p.get("fase") in _PROXIMA:
+        if pend["trava"]:
+            campos["avanca_em"] = None
+        elif antes_travava:
+            _, janela = _PROXIMA[p["fase"]]
+            ja_passou = _horas_desde(p.get("fase_em")) >= janela
+            campos["avanca_em"] = _mais(HORA_DE_GRACA if ja_passou else
+                                        janela - _horas_desde(p.get("fase_em")))
+
+    db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+
+    if antes_travava and not pend["trava"]:
+        registrar_evento(None, "BALCAO_PENDENCIA_ATENDIDA",
+                         {"pedido_id": pedido_id})
+        try:
+            recado(pedido_id,
+                   "Recebemos a informação que faltava. O documento está sendo "
+                   "complementado e segue para a revisão em cerca de uma hora.",
+                   canais=["PLATAFORMA"], autor="AGENTE")
+        except Exception as e:
+            print(f"[balcao] confirmação não registrada: {e}")
+
+    return {**pend, "recado": recado_de_pendencia(pend),
+            "travado": bool(pend["trava"])}

@@ -31,7 +31,7 @@ import { IlustraContrato } from "../components/ui/Ilustracoes";
 export const metadata = {
   title: "Elaboração de contratos | FC Advocacia",
   description:
-    "Contrato escrito por advogado, sob medida para o seu caso, revisado antes da entrega e pronto em até 24 horas.",
+    "Contrato sob medida para o seu caso, com revisão e ajustes antes da entrega, pronto em até 24 horas.",
 };
 
 const PASSOS = [
@@ -48,7 +48,7 @@ const PASSOS = [
   {
     n: "03",
     t: "O escritório redige e revisa",
-    d: "O texto é escrito conforme a lei que rege aquele tipo de contrato e conferido por advogado antes de chegar até você.",
+    d: "O texto segue a lei que rege aquele tipo de contrato e passa por revisão e conferência antes de chegar até você.",
   },
   {
     n: "04",
@@ -85,7 +85,7 @@ export default function ContratoLanding() {
             <h1 className="mt-6 font-display text-display-lg font-bold">
               Seu contrato escrito
               <br />
-              <span className="text-gold">por um advogado</span>
+              <span className="text-gold">sob medida</span>
             </h1>
 
             <p className="mt-6 max-w-xl text-subtitle text-white/70">
@@ -176,7 +176,7 @@ export default function ContratoLanding() {
           <div className="mt-10 grid gap-5 sm:grid-cols-3 text-left">
             {[
               ["Você descreve", "Conta o que precisa e o escritório informa as condições do serviço."],
-              ["O escritório escreve", "Texto conforme a lei daquele contrato, revisado por advogado."],
+              ["O escritório escreve", "Texto conforme a lei daquele contrato, revisado e ajustado antes de sair."],
               ["Você aprova", "Lê com calma, pede ajuste se precisar e só então assina."],
             ].map(([t, d]) => (
               <div key={t} className="rounded-xl2 border border-white/10 bg-navy p-6">

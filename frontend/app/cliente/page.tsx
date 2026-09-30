@@ -548,7 +548,7 @@ export default function AreaCliente() {
               onClick={() => setVista("contrato")}
               icone={ICONES.caneta}
               titulo="Pedir um contrato"
-              texto="Contrato ou notificação escrito por advogado, sob medida para o seu caso, revisado antes da entrega."
+              texto="Contrato ou notificação sob medida para o seu caso, com revisão e ajustes antes da entrega."
             />
 
             <Cartao
