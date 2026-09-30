@@ -46,6 +46,7 @@ cartório: o alerta do tipo continua aparecendo antes do pagamento.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 import anthropic
@@ -125,6 +126,32 @@ nem que substitui escritura pública quando o tipo exige cartório.
 - Se a pessoa perguntar algo jurídico do caso dela, responda o geral e diga \
 que a análise do caso concreto é o atendimento jurídico prévio, que é um \
 serviço à parte e pode ser somado.
+
+COMO CONVIDAR A FECHAR, SEM PARECER GRAVAÇÃO
+Nunca repita o mesmo convite duas vezes na mesma conversa. Nem a mesma \
+frase, nem variação próxima dela. Quem lê "Topa por R$ 230,00?" duas vezes \
+percebe na hora que não tem gente do outro lado.
+
+Prefira o convite indireto, que soa a quem está tocando o serviço e não a \
+quem está vendendo. Alterne entre caminhos diferentes, e escolha o que faz \
+sentido para o que ela acabou de dizer:
+
+  · dar andamento: "Vamos dar andamento?", "Sigo com o seu documento?", \
+"Posso começar a preparar?"
+  · ensinar o caminho: "Se estiver bom para você, é só escrever aceito \
+aqui, ou clicar no botão verde Quero contratar, que eu sigo."
+  · perguntar o que falta: "Ficou alguma dúvida antes de eu começar?", \
+"Tem algo que você queira ajustar antes?"
+  · falar do próximo passo: "O passo seguinte é o pagamento e a lista do \
+que eu preciso saber. Quer que eu já abra?"
+  · silêncio de convite: às vezes a melhor saída é responder a dúvida dela \
+e parar. Não é obrigatório convidar em toda mensagem.
+
+PELO MENOS UMA VEZ, ENSINE COMO SE CONTRATA
+Muita gente não fecha porque não sabe o que clicar. Em algum momento da \
+conversa, de preferência logo depois do primeiro valor, diga em uma linha \
+que basta escrever aceito ou quero contratar, ou clicar no botão verde \
+Quero contratar. Diga uma vez, com naturalidade, e não repita a cada fala.
 
 QUANDO ELA ACEITAR
 Chame `fechar` com o valor combinado. Depois disso, diga que o próximo passo é \
@@ -511,6 +538,36 @@ def abrir(pedido_id: str) -> dict:
     return {"texto": texto, "tipo": t.get("nome"), "alerta": t.get("alerta")}
 
 
+def _fechos_ja_usados(historico: list[dict]) -> list[str]:
+    """As últimas frases de cada fala do agente, que é onde mora o convite.
+
+    Pega a última frase porque é ali que o convite a fechar aparece, e
+    é ela que soa robótica quando se repete. Guarda na ordem em que
+    saíram e sem duplicar, para a lista não virar um parágrafo."""
+    vistos: list[str] = []
+    for m in historico:
+        if str(m.get("autor", "")).upper() not in ("AGENTE", "ESCRITORIO"):
+            continue
+        texto = (m.get("texto") or "").strip()
+        if not texto:
+            continue
+        # A última frase terminada em interrogação, se houver; senão, a
+        # última linha não vazia.
+        frases = [f.strip() for f in re.split(r"(?<=[.?!])\s+", texto) if f.strip()]
+        ultima = ""
+        for f in reversed(frases):
+            if f.endswith("?"):
+                ultima = f
+                break
+        if not ultima:
+            linhas = [l.strip() for l in texto.splitlines() if l.strip()]
+            ultima = linhas[-1] if linhas else ""
+        ultima = ultima[:160]
+        if ultima and ultima not in vistos:
+            vistos.append(ultima)
+    return vistos[-8:]
+
+
 def conversar(pedido_id: str, mensagem: str,
               vai_sair: bool = False) -> dict:
     """Um turno da negociação.
@@ -570,6 +627,21 @@ def conversar(pedido_id: str, mensagem: str,
         f"Último valor que você ofereceu: R$ {conta_atual['total']:.2f}.\n"
         f"Urgência contratada: {'sim' if pedido.get('urgente') else 'não'}."
     )
+
+    # O QUE VOCÊ JÁ DISSE, PARA NÃO DIZER DE NOVO
+    #
+    # "Topa por R$ 230,00?" duas vezes seguidas é o que faz a pessoa
+    # perceber que está falando com máquina, e é um defeito que nenhuma
+    # instrução genérica de "varie" resolve: o modelo não relê a
+    # própria conversa procurando repetição, ele responde ao último
+    # turno. Então a lista das frases de fecho já usadas vai escrita,
+    # do mesmo jeito que o estado da negociação.
+    usados = _fechos_ja_usados(historico)
+    if usados:
+        contexto += ("\n\nFRASES DE FECHO QUE VOCÊ JÁ USOU NESTA CONVERSA. "
+                     "Não repita nenhuma delas, nem variação próxima. "
+                     "Escolha outro caminho:\n"
+                     + "\n".join(f"  · {u}" for u in usados))
     if pedido.get("proposta_status") == "PENDENTE":
         contexto += (
             f"\n\nATENÇÃO: este cliente já deixou uma proposta de "

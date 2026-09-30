@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import anthropic
@@ -124,6 +125,12 @@ Nunca prometa hora exata.
 LINGUAGEM
 
 """ + REGRA_DE_ESCRITA + """
+
+NUNCA REPITA A SI MESMO
+Se a situação trouxer a lista de frases já usadas nesta conversa, não use
+nenhuma delas de novo, nem variação próxima. Diga a mesma coisa de outro
+jeito, ou não diga. Saudação e frase de fecho repetidas são o que faz a
+pessoa perceber que não tem gente do outro lado.
 
 Português do Brasil. No máximo dois parágrafos, salvo quando houver
 lista do que falta. Trate o cliente pelo primeiro nome quando ele
@@ -413,7 +420,42 @@ def _texto_da_situacao(s: dict) -> str:
                 else "escritório"
             L.append(f"  [{quem}, {_br(m.get('criado_em'))}] "
                      + str(m.get("texto") or "")[:500])
+
+        # O QUE VOCÊ JÁ DISSE, PARA NÃO DIZER DE NOVO
+        #
+        # Instrução genérica de "varie o texto" não funciona: o modelo
+        # responde ao último turno e não relê a própria conversa
+        # procurando repetição. A lista das aberturas e dos fechos já
+        # usados vai escrita, como o resto da varredura.
+        usados = _frases_ja_usadas(s["mensagens"])
+        if usados:
+            L.append("\nFRASES QUE O ESCRITÓRIO JÁ USOU NESTA CONVERSA. Não "
+                     "repita nenhuma delas, nem variação próxima. Diga a "
+                     "mesma coisa de outro jeito:")
+            for u in usados:
+                L.append(f"  · {u}")
     return "\n".join(L)
+
+
+def _frases_ja_usadas(mensagens: list[dict]) -> list[str]:
+    """Primeira e última frase de cada fala do escritório.
+
+    São as duas posições em que a repetição aparece e incomoda: a
+    saudação de abertura e o convite do fim. O meio muda sozinho,
+    porque responde ao que o cliente escreveu."""
+    vistos: list[str] = []
+    for m in mensagens:
+        if str(m.get("autor", "")).upper() == "CLIENTE":
+            continue
+        texto = (m.get("texto") or "").strip()
+        if not texto:
+            continue
+        frases = [f.strip() for f in re.split(r"(?<=[.?!])\s+", texto) if f.strip()]
+        for f in ([frases[0]] if frases else []) + ([frases[-1]] if len(frases) > 1 else []):
+            f = f[:160]
+            if f and f not in vistos:
+                vistos.append(f)
+    return vistos[-10:]
 
 
 # ── O ALERTA PARA QUEM CUIDA DO CASO ───────────────────────────
