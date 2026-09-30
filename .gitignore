@@ -1,5 +1,12 @@
 .env
+.env.local
+.env.*.local
+.env.production
 __pycache__/
 node_modules/
 .next/
 *.pyc
+venv/
+.venv/
+subir_log.txt
+.DS_Store
