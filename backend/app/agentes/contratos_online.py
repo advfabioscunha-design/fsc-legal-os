@@ -340,7 +340,21 @@ Procure, nesta ordem de importância:
 5. Erro de português, numeração ou referência cruzada.
 
 Seja específico: diga a cláusula, o problema e a redação sugerida. Não
-elogie. Se estiver bom, diga que está bom."""
+elogie. Se estiver bom, diga que está bom.
+
+O QUE O CLIENTE PEDIU E A LEI NÃO ADMITE
+
+Este é o único caso em que a revisão não decide sozinha. Quando o
+cliente pediu algo que contraria a lei ou a jurisprudência, não
+silencie o pedido dele nem o mantenha em silêncio: marque
+`precisa_autorizacao` e escreva em `o_que_a_lei_diz`, em duas frases e
+sem jargão, o que a lei diz e o risco concreto de seguir como ele
+pediu. Quem decide entre manter com ciência registrada ou adequar é o
+cliente, e essa decisão fica registrada.
+
+O contrato tem de sair impecável e sem lacuna, e respeitar o que o
+cliente pediu. Quando as duas coisas não couberem juntas, é ele quem
+escolhe, sabendo do risco."""
 
 FERRAMENTA_REVISAO = {
     "name": "revisao",
@@ -358,6 +372,30 @@ FERRAMENTA_REVISAO = {
                                       "enum": ["ALTA", "MEDIA", "BAIXA"]},
                         "problema": {"type": "string"},
                         "sugestao": {"type": "string"},
+                        # O PONTO QUE O CLIENTE PRECISA AUTORIZAR
+                        #
+                        # Nem todo apontamento é decisão do cliente. Erro
+                        # de numeração o revisor manda corrigir e pronto.
+                        # O que o cliente pediu e a lei não admite é
+                        # outra coisa: ninguém pode escolher por ele
+                        # entre perder o que pediu e assinar algo que
+                        # pode cair. Marcado aqui, vira botão na tela.
+                        "precisa_autorizacao": {
+                            "type": "boolean",
+                            "description": (
+                                "Verdadeiro quando o ponto é algo que o "
+                                "cliente pediu e que contraria a lei ou a "
+                                "jurisprudência. Nesse caso ele decide: "
+                                "manter como pediu, com ciência registrada, "
+                                "ou adequar."),
+                        },
+                        "o_que_a_lei_diz": {
+                            "type": "string",
+                            "description": (
+                                "Em duas frases, para o cliente ler: o que a "
+                                "lei diz e o risco concreto de manter como "
+                                "ele pediu. Sem jargão."),
+                        },
                     },
                     "required": ["clausula", "gravidade", "problema", "sugestao"],
                 },
@@ -418,6 +456,50 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
     if p.get("com_timbre") is False:
         contexto += ["", "O cliente pediu o documento SEM o timbre do escritório."]
 
+    # A QUALIFICAÇÃO DAS PARTES VEM DA CAIXA DELAS
+    #
+    # Ela saiu dos campos livres quando a caixa das partes nasceu, e o
+    # redator continuou lendo só `dados`. Resultado: contrato com os
+    # dois polos marcados como [A PREENCHER] enquanto a informação
+    # estava salva no pedido, uma linha ao lado.
+    if p.get("partes"):
+        contexto += ["", "QUALIFICAÇÃO DAS PARTES, JÁ CONFERIDA:",
+                     json.dumps(p["partes"], ensure_ascii=False, indent=2)]
+
+    # O MODELO DO ESCRITÓRIO, QUANDO EXISTE UM
+    #
+    # Escrever do zero produzia contrato correto e diferente a cada
+    # vez: outra numeração, outra ordem, outra redação. Dois contratos
+    # do mesmo escritório não pareciam do mesmo escritório, e a revisão
+    # gastava o tempo dela conferindo forma em vez de substância.
+    #
+    # O modelo entra como base obrigatória, e o guia técnico entra
+    # junto porque é ele que explica o porquê de cada cláusula: sem o
+    # porquê, o redator adapta o texto e desmonta a proteção sem saber
+    # que ela estava ali.
+    from . import modelos_contrato
+    base = modelos_contrato.modelo_do_pedido(p["tipo"], p.get("dados") or {})
+    if base.get("tem"):
+        contexto += [
+            "", "=" * 60,
+            "MODELO OFICIAL DO ESCRITÓRIO PARA ESTE CASO "
+            f"({base['nome'].replace('_', ' ')}). Use como BASE: mantenha a "
+            "estrutura, a numeração e a redação das cláusulas, e troque "
+            "apenas o que o caso concreto exigir. Preencha os campos entre "
+            "chaves duplas com os dados acima. Campo sem dado vira "
+            "[A PREENCHER: o que falta], nunca texto inventado. Linha do "
+            "Quadro Resumo que ficaria vazia, remova inteira (o RG não é "
+            "mais coletado pelo escritório).",
+            "=" * 60,
+            base["texto"],
+            "", "=" * 60,
+            "GUIA TÉCNICO. É o porquê de cada cláusula do modelo. Não "
+            "copie o guia para o contrato: use-o para não desmontar, sem "
+            "querer, uma proteção que está ali de propósito.",
+            "=" * 60,
+            base["guia"],
+        ]
+
     r = _claude().messages.create(
         model=s.claude_model, max_tokens=8000, system=SYSTEM_REDATOR,
         messages=[{"role": "user", "content": "\n".join(contexto)}],
@@ -450,6 +532,19 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
     t = catalogo.detalhe(p["tipo"]) or {}
     s = get_settings()
 
+    from . import modelos_contrato
+    base = modelos_contrato.modelo_do_pedido(p["tipo"], p.get("dados") or {})
+
+    partes = ["=" * 60,
+              "O QUE É NULO POR LEI, E NÃO É QUESTÃO DE OPINIÃO. Encontrando "
+              "qualquer uma destas no contrato, ou no que o cliente pediu, "
+              "marque gravidade ALTA e preencha `precisa_autorizacao`:",
+              modelos_contrato.texto_das_proibidas(), "=" * 60]
+    if base.get("tem"):
+        partes += ["GUIA TÉCNICO DO ESCRITÓRIO, com os fundamentos de cada "
+                   "cláusula do modelo. Confira o contrato contra ele:",
+                   base["guia"], "=" * 60]
+
     r = _claude().messages.create(
         model=s.claude_model, max_tokens=4000, system=SYSTEM_REVISOR,
         tools=[FERRAMENTA_REVISAO],
@@ -459,6 +554,10 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
                    f"LEGISLAÇÃO: {t.get('base_legal')}\n\n"
                    f"DADOS FORNECIDOS:\n"
                    f"{json.dumps(p.get('dados') or {}, ensure_ascii=False)}\n\n"
+                   + "\n".join(partes) + "\n\n"
+                   f"O QUE O CLIENTE PEDIU, NAS PALAVRAS DELE:\n"
+                   f"{(p.get('observacoes') or '')[:3000]}\n"
+                   f"{(p.get('clausulas_extras') or '')[:3000]}\n\n"
                    f"CONTRATO:\n{p['minuta'][:40000]}"}],
     )
     dados = {}
