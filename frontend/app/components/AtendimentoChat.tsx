@@ -35,7 +35,7 @@ export default function AtendimentoChat({
   const [msgs, setMsgs] = useState<Msg[]>([SAUDACAO]);
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const fimRef = useRef<HTMLDivElement | null>(null);
+  const caixaRef = useRef<HTMLDivElement | null>(null);
 
   /* Conversa interligada: o cadastro e o caso ficam guardados neste
      navegador, então ao voltar ao site o atendimento CONTINUA de onde
@@ -80,8 +80,21 @@ export default function AtendimentoChat({
     guardar({ msgs: abertura });
   }
 
+  /* ROLAR A CAIXA, NUNCA A PÁGINA
+
+     `scrollIntoView` rola TODOS os ancestrais até o elemento aparecer,
+     e o documento é um deles. Como esta lista fica na parte de baixo
+     da tela, o efeito era a página inteira descer sozinha, inclusive
+     quando a pessoa estava digitando em outro campo mais acima. Num
+     painel `fixed` é pior ainda: o navegador rola o documento até o
+     fim tentando revelar algo que já estava visível.
+
+     Mexer no `scrollTop` do próprio contêiner faz o que se queria, e
+     só isso. */
   useEffect(() => {
-    if (aberto) fimRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!aberto) return;
+    const c = caixaRef.current;
+    if (c) c.scrollTop = c.scrollHeight;
   }, [msgs, enviando, aberto]);
 
   // guarda a conversa a cada nova mensagem
@@ -207,7 +220,8 @@ export default function AtendimentoChat({
             ) : (
               <>
                 {/* Mensagens */}
-                <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-ice px-4 py-4">
+                <div ref={caixaRef}
+                  className="flex flex-1 flex-col gap-3 overflow-y-auto bg-ice px-4 py-4">
                   {msgs.map((m, i) => (
                     <div key={i} className={`flex ${m.autor === "CLIENTE" ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[82%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
@@ -222,7 +236,6 @@ export default function AtendimentoChat({
                       <div className="rounded-2xl rounded-bl-md bg-white px-4 py-2.5 text-sm text-charcoal/50 shadow-sm">digitando…</div>
                     </div>
                   )}
-                  <div ref={fimRef} />
                 </div>
 
                 {/* Oferta de cadastro */}

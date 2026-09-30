@@ -19,7 +19,7 @@ export default function ContratoChat({ nome, email, onVoltar }: { nome: string; 
   const [pago, setPago] = useState(false);
   const [docTexto, setDocTexto] = useState<string | null>(null);
   const [docAberto, setDocAberto] = useState(false);
-  const fimRef = useRef<HTMLDivElement | null>(null);
+  const caixaRef = useRef<HTMLDivElement | null>(null);
 
   // inicia o serviço de contrato ao abrir
   useEffect(() => {
@@ -39,7 +39,21 @@ export default function ContratoChat({ nome, email, onVoltar }: { nome: string; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, enviando]);
+  /* ROLAR A CAIXA, NUNCA A PÁGINA
+
+     `scrollIntoView` rola TODOS os ancestrais até o elemento aparecer,
+     e o documento é um deles. Como esta lista fica na parte de baixo
+     da tela, o efeito era a página inteira descer sozinha, inclusive
+     quando a pessoa estava digitando em outro campo mais acima. Num
+     painel `fixed` é pior ainda: o navegador rola o documento até o
+     fim tentando revelar algo que já estava visível.
+
+     Mexer no `scrollTop` do próprio contêiner faz o que se queria, e
+     só isso. */
+  useEffect(() => {
+    const c = caixaRef.current;
+    if (c) c.scrollTop = c.scrollHeight;
+  }, [msgs, enviando]);
 
   function processarResposta(texto: string) {
     const t = (texto || "").trim() || FALLBACK;
@@ -104,7 +118,7 @@ export default function ContratoChat({ nome, email, onVoltar }: { nome: string; 
         <span className="ml-auto text-[11px] text-charcoal/45">Asaas em modo simulado</span>
       </div>
 
-      <div className="flex h-[50vh] flex-col gap-3 overflow-y-auto px-5 py-4">
+      <div ref={caixaRef} className="flex h-[50vh] flex-col gap-3 overflow-y-auto px-5 py-4">
         {carregando ? (
           <p className="text-charcoal/50">Iniciando atendimento...</p>
         ) : (
@@ -121,7 +135,6 @@ export default function ContratoChat({ nome, email, onVoltar }: { nome: string; 
             <div className="rounded-2xl rounded-bl-md bg-ice px-4 py-2.5 text-sm text-charcoal/50">digitando…</div>
           </div>
         )}
-        <div ref={fimRef} />
       </div>
 
       <form onSubmit={enviar} className="flex items-end gap-2 border-t border-black/5 p-4">

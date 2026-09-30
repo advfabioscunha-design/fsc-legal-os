@@ -136,7 +136,7 @@ export default function AreaCliente() {
   const arquivoRef = useRef<HTMLInputElement | null>(null);
   const cameraRef = useRef<HTMLInputElement | null>(null);
 
-  const fimRef = useRef<HTMLDivElement | null>(null);
+  const caixaRef = useRef<HTMLDivElement | null>(null);
   const [pedidos, setPedidos] = useState<any[]>([]);
   const tipoCliente = String((cadastro as any)?.tipo || "LITIGIOSO").toUpperCase();
   const veContratos = tipoCliente === "CONTRATOS" || tipoCliente === "AMBOS";
@@ -217,7 +217,22 @@ export default function AreaCliente() {
     })();
   }, [router, carregarCasos, carregarCaso, carregarPedidos]);
 
-  useEffect(() => { if (vista === "atendimento") fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, enviando, vista]);
+  /* ROLAR A CAIXA, NUNCA A PÁGINA
+
+     `scrollIntoView` rola TODOS os ancestrais até o elemento aparecer,
+     e o documento é um deles. Como esta lista fica na parte de baixo
+     da tela, o efeito era a página inteira descer sozinha, inclusive
+     quando a pessoa estava digitando em outro campo mais acima. Num
+     painel `fixed` é pior ainda: o navegador rola o documento até o
+     fim tentando revelar algo que já estava visível.
+
+     Mexer no `scrollTop` do próprio contêiner faz o que se queria, e
+     só isso. */
+  useEffect(() => {
+    if (vista !== "atendimento") return;
+    const c = caixaRef.current;
+    if (c) c.scrollTop = c.scrollHeight;
+  }, [msgs, enviando, vista]);
 
   async function sair() { await supabase.auth.signOut(); router.push("/entrar"); }
 
@@ -865,7 +880,7 @@ export default function AreaCliente() {
               </div>
             )}
 
-            <div className="flex h-[52vh] flex-col gap-3 overflow-y-auto px-5 py-4">
+            <div ref={caixaRef} className="flex h-[52vh] flex-col gap-3 overflow-y-auto px-5 py-4">
               {msgs.map((m, i) => {
                 const meu = m.autor === "CLIENTE";
                 const texto = (m.conteudo || "").replace("[SOLICITAÇÃO AO CLIENTE] ", "");
@@ -888,7 +903,6 @@ export default function AreaCliente() {
                   <div className="rounded-2xl rounded-bl-md bg-ice px-4 py-2.5 text-sm text-charcoal/50">digitando…</div>
                 </div>
               )}
-              <div ref={fimRef} />
             </div>
 
             {anexos.length > 0 && (

@@ -14,8 +14,13 @@ export default function AssistentePage() {
   const [msgs, setMsgs] = useState<Msg[]>([SAUDACAO]);
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const fim = useRef<HTMLDivElement | null>(null);
-  useEffect(() => { fim.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, enviando]);
+  const caixa = useRef<HTMLDivElement | null>(null);
+  /* Rola a caixa, e não a página: `scrollIntoView` arrasta todos os
+     ancestrais, e aqui isso mexia na tela inteira do painel. */
+  useEffect(() => {
+    const c = caixa.current;
+    if (c) c.scrollTop = c.scrollHeight;
+  }, [msgs, enviando]);
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
@@ -43,14 +48,14 @@ export default function AssistentePage() {
           <h2 className="text-lg font-bold text-white">Assistente CEO — Tira Dúvidas</h2>
           <p className="text-xs text-[#8899AA]">Apoio interno da equipe. Para mérito jurídico, valide sempre com seu líder.</p>
         </div>
-        <div className="flex-1 space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-[#0B1F3B] p-4">
+        <div ref={caixa}
+          className="flex-1 space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-[#0B1F3B] p-4">
           {msgs.map((m, i) => (
             <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm ${m.role === "user" ? "rounded-br-md bg-[#C9A24D] text-[#0A1628]" : "rounded-bl-md bg-[#0A1628] text-white"}`}>{m.content}</div>
             </div>
           ))}
           {enviando && <div className="text-sm text-[#8899AA]">digitando…</div>}
-          <div ref={fim} />
         </div>
         <form onSubmit={enviar} className="mt-3 flex items-end gap-2">
           <textarea value={input} onChange={(e) => setInput(e.target.value)}

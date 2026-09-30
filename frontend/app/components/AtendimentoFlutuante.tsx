@@ -29,6 +29,15 @@ const INTERNAS = new Set([
   // duas ficam de fora — na sala, dois círculos por cima do vídeo
   // durante uma conversa gravada só atrapalham.
   "atendimento",
+  // O BALCÃO JÁ TEM A CONVERSA DELE
+  //
+  // O pedido tem uma conversa própria, presa ao protocolo, com foto e
+  // anexo. O círculo flutuante abre uma segunda conversa, que é de
+  // captação e não sabe nada daquele pedido: a pessoa escreve ali
+  // achando que fala com quem cuida do documento dela, e ninguém do
+  // outro lado faz a ligação. Duas portas para salas diferentes com a
+  // mesma cara é pior do que uma porta só.
+  "balcao",
 ]);
 
 export default function AtendimentoFlutuante() {
