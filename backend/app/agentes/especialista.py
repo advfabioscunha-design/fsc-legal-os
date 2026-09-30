@@ -248,9 +248,30 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
         "conteudo": mensagem_cliente
     }).execute()
 
-    # caso escalado → humano responde; o agente não interfere
+    # CASO SOB CONDUÇÃO HUMANA: NINGUÉM FICA SEM RESPOSTA
+    #
+    # Aqui o agente devolvia `resposta: None` e calava. A intenção era
+    # certa, não atropelar a condução do advogado, mas o efeito do lado
+    # do cliente era o pior possível: ele escrevia e a tela não mexia.
+    # Escalar o caso não é motivo para deixar alguém falando sozinho.
+    #
+    # O atendimento responde, então, sem tocar no estado e sem nenhuma
+    # ferramenta que mude o caso: ele diz onde está, se o prazo está de
+    # pé, e registra prioridade se houver urgência. Decisão continua
+    # sendo do advogado; o que muda é que a pessoa sabe que foi lida.
     if caso["estado"] in ("ESCALADO_HUMANO", "AGENDADO"):
-        return {"resposta": None, "estado": caso["estado"],
+        texto = None
+        try:
+            from . import atendente
+            texto = humanizar(
+                atendente.responder("CASO", caso_id, mensagem_cliente)["texto"])
+            db.table("mensagens").insert({
+                "caso_id": caso_id, "canal": canal, "autor": "AGENTE",
+                "conteudo": texto,
+            }).execute()
+        except Exception as e:
+            registrar_evento(caso_id, "ERRO_ATENDIMENTO", {"erro": str(e)})
+        return {"resposta": texto, "estado": caso["estado"],
                 "aviso": "Caso sob condução humana."}
 
     # dados já conhecidos do cliente — para NÃO repetir perguntas e usar o nome
