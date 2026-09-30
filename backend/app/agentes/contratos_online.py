@@ -343,6 +343,11 @@ Procure, nesta ordem de importância:
 Seja específico: diga a cláusula, o problema e a redação sugerida. Não
 elogie. Se estiver bom, diga que está bom.
 
+NO MÁXIMO DOZE APONTAMENTOS, e comece pelos mais graves. Revisão que
+lista trinta pontos não é mais cuidadosa, é mais difícil de aplicar, e
+o que importa acaba no meio da lista. Erro de vírgula só entra se não
+houver nada de substância a dizer.
+
 O QUE O CLIENTE PEDIU E A LEI NÃO ADMITE
 
 Este é o único caso em que a revisão não decide sozinha. Quando o
@@ -546,8 +551,19 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
                    "cláusula do modelo. Confira o contrato contra ele:",
                    base["guia"], "=" * 60]
 
+    # ESPAÇO PARA A REVISÃO CABER INTEIRA
+    #
+    # Eram 4000 fichas, e a revisão de um contrato de locação não cabe
+    # nisso: cada apontamento leva cláusula, problema e a redação
+    # sugerida, e agora leva também a explicação para o cliente quando
+    # o ponto depende da autorização dele. Estourando o limite, a
+    # resposta vem cortada no meio da ferramenta, o que chega aqui
+    # como estrutura incompleta, não como erro.
+    #
+    # Era esta a origem da revisão vazia que empurrava o pedido para o
+    # ajuste sem ter revisado nada.
     r = _claude().messages.create(
-        model=s.claude_model, max_tokens=4000, system=SYSTEM_REVISOR,
+        model=s.claude_model, max_tokens=8000, system=SYSTEM_REVISOR,
         tools=[FERRAMENTA_REVISAO],
         tool_choice={"type": "tool", "name": "revisao"},
         messages=[{"role": "user", "content":
@@ -565,6 +581,17 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
     for bloco in r.content:
         if bloco.type == "tool_use" and bloco.name == "revisao":
             dados = bloco.input or {}
+
+    # Resposta cortada no limite não é resposta. Guardar o pedaço que
+    # chegou seria pior do que não guardar nada: o pedido seguiria em
+    # frente com meia revisão, e ninguém saberia qual metade faltou.
+    if getattr(r, "stop_reason", "") == "max_tokens":
+        registrar_evento(None, "CONTRATO_REVISAO_CORTADA",
+                         {"pedido": pedido_id})
+        raise ValueError("A revisão ficou longa demais e veio cortada. "
+                         "Tente de novo; se repetir, o contrato precisa "
+                         "ser revisado em partes.")
+
     apontamentos = dados.get("apontamentos") or []
 
     # REVISÃO VAZIA NÃO É REVISÃO FEITA
@@ -1791,7 +1818,7 @@ def esteira_automatica() -> dict:
     db = get_db()
     pendentes = db.table("pedidos_contrato") \
         .select("id,numero,fase,fase_em,avanca_em,minuta,revisao,ajustado_em,"
-                "redigido_em,revisado_em,pago_em,pendencias,urgente") \
+                "redigido_em,revisado_em,pago_em,pendencias,urgente,revisao") \
         .in_("fase", list(_PROXIMA)) \
         .is_("excluido_em", "null") \
         .limit(100).execute().data or []
@@ -1811,6 +1838,18 @@ def esteira_automatica() -> dict:
                 revisar(p["id"], auto=True)
                 feitos["revisados"] += 1
                 continue
+            # O PEDIDO QUE CHEGOU AO AJUSTE SEM REVISÃO
+            #
+            # Não deveria acontecer, e aconteceu: revisão cortada no
+            # limite de fichas virava registro vazio e o pedido
+            # avançava assim mesmo. A esteira agora repara isso na
+            # passagem seguinte, em vez de deixar o pedido parado à
+            # espera de alguém notar.
+            if fase == "AJUSTE" and not p.get("revisao"):
+                revisar(p["id"], auto=True)
+                feitos["revisados"] += 1
+                continue
+
             if fase == "AJUSTE" and _horas_desde(p.get("ajustado_em")) > \
                     _horas_desde(p.get("fase_em")):
                 # ajustado antes de entrar nesta fase quer dizer que o
