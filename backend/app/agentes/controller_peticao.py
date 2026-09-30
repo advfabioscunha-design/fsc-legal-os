@@ -40,7 +40,7 @@ INICIAIS = {"INICIAL", "PETICAO_INICIAL", "INICIAL_CUMULATIVA"}
 KIT_MINIMO = {
     "PROCURACAO": "Procuração assinada",
     "CONTRATO": "Contrato de honorários assinado",
-    "IDENTIDADE": "Documento de identidade (RG ou CNH)",
+    "IDENTIDADE": "Documento de identidade com foto (CNH ou carteira de identidade)",
     "ENDERECO": "Comprovante de endereço",
 }
 
@@ -48,6 +48,9 @@ KIT_MINIMO = {
 PISTAS = {
     "PROCURACAO": ("procura",),
     "CONTRATO": ("contrato", "honorar"),
+    # "rg" fica na lista de propósito, mesmo o sistema não pedindo mais
+    # o número: é palavra que reconhece arquivo enviado pelo cliente, e
+    # ele continua batizando a foto do documento de "rg.jpg".
     "IDENTIDADE": ("rg", "cnh", "identidade", "habilita", "documento pessoal"),
     "ENDERECO": ("endereco", "endereço", "comprovante de resid", "residencia",
                  "residência", "conta de luz", "energia", "agua", "água"),
@@ -128,7 +131,7 @@ KIT MÍNIMO EXIGIDO
    e a inicial é inepta. A falta é sempre IMPEDITIVA.
 2. Contrato de honorários assinado — protege o escritório. A falta é
    IMPEDITIVA.
-3. Documento de identidade do cliente (RG ou CNH).
+3. Documento de identidade do cliente, com foto.
 4. Comprovante de endereço — fixa a competência territorial.
 
 COMO DECIDIR

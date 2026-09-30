@@ -17,6 +17,11 @@ class Settings(BaseModel):
     # escritório, escrita em main.py.
     origens_permitidas: str = os.getenv("ORIGENS_PERMITIDAS", "")
 
+    # Conferência do CPF na Receita. Sem as duas, o sistema confere só
+    # os dígitos e diz isso ao cliente, em vez de fingir que consultou.
+    receita_provedor: str = os.getenv("RECEITA_PROVEDOR", "")   # infosimples | serpro
+    receita_token: str = os.getenv("RECEITA_TOKEN", "")
+
     # Supabase
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_service_key: str = os.getenv("SUPABASE_SERVICE_KEY", "")

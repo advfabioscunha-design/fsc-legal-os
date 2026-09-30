@@ -57,6 +57,10 @@ export default function PedidoDoCliente() {
   const [alteracao, setAlteracao] = useState("");
   const [comoEnviar, setComoEnviar] = useState<"" | "DOCUMENTOS" | "FORMULARIO">("");
   const [comTimbre, setComTimbre] = useState(true);
+  // As partes conferidas. Enquanto faltar alguém, o botão de
+  // concluir a coleta fica travado: descobrir a falta na redação
+  // custa um dia de prazo.
+  const [partesOk, setPartesOk] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
   const arquivoRef = useRef<HTMLInputElement>(null);
@@ -267,6 +271,13 @@ export default function PedidoDoCliente() {
         )}
 
         {/* COLETA, dois caminhos, o cliente escolhe */}
+        {/* As partes vêm antes do resto da coleta. É a informação que,
+            faltando, impede o contrato de ser executado depois, e é a
+            única que o escritório não tem como adivinhar. */}
+        {faseAtual === "COLETA" && (
+          <CaixaDasPartes pedidoId={String(id)} aoCompletar={setPartesOk} />
+        )}
+
         {faseAtual === "COLETA" && tipo && (
           <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
             <h2 className="text-sm font-bold text-[#C9A24D]">Informações do contrato</h2>
@@ -416,10 +427,16 @@ export default function PedidoDoCliente() {
                   className="rounded-lg border border-white/20 px-5 py-2.5 text-sm font-semibold text-white/80 hover:border-white/40 disabled:opacity-50">
                   {ocupado ? "Salvando…" : "Salvar e continuar depois"}
                 </button>
-                <button onClick={concluirColeta} disabled={ocupado}
-                  className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
+                <button onClick={concluirColeta} disabled={ocupado || !partesOk}
+                  title={partesOk ? "" : "Complete os dados das partes acima"}
+                  className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-40">
                   Terminei, pode escrever
                 </button>
+                {!partesOk && (
+                  <span className="text-xs text-[#E5A44C]">
+                    faltam dados das partes, acima
+                  </span>
+                )}
                 {comoEnviar === "FORMULARIO" && (
                   <span className="text-xs text-white/45">
                     {obrigatoriosFaltando > 0
@@ -558,5 +575,191 @@ function Dado({ rotulo, valor, copiavel }:
         </button>
       )}
     </div>
+  );
+}
+
+
+/* ── AS PARTES DO CONTRATO ─────────────────────────────────────
+ *
+ * Todo contrato tem pelo menos duas partes, e antes só uma era
+ * perguntada de verdade: os dados da outra ficavam soltos nos campos
+ * livres, cada tipo de contrato com um nome diferente, e a falta só
+ * aparecia na hora de redigir.
+ *
+ * A caixa faz três coisas que a tela antiga não fazia:
+ *
+ * Preenche sozinha o que já se sabe. A parte do cliente nasce com o
+ * cadastro dele. Pedir de novo o que a pessoa já informou é a forma
+ * mais rápida de fazê-la desistir no meio.
+ *
+ * Confere o CPF enquanto ela digita, e não depois de salvar. O aviso
+ * chega no momento em que ela ainda está olhando o campo.
+ *
+ * Diz o que falta, com nome e sobrenome. "Faltam informações" não
+ * ajuda ninguém; "falta o CPF do fiador e o endereço do locatário"
+ * resolve em um minuto.
+ */
+function CaixaDasPartes({ pedidoId, aoCompletar }: {
+  pedidoId: string; aoCompletar: (completo: boolean) => void;
+}) {
+  const [estado, setEstado] = useState<any>(null);
+  const [partes, setPartes] = useState<any[]>([]);
+  const [salvando, setSalvando] = useState(false);
+  const [aviso, setAviso] = useState("");
+  const [cpfs, setCpfs] = useState<Record<number, any>>({});
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/partes`);
+      const j = await r.json();
+      setEstado(j); setPartes(j.partes || []);
+      aoCompletar(Boolean(j.completo));
+    } catch { /* a tela continua utilizável sem isto */ }
+  }, [pedidoId, aoCompletar]);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  function mudar(i: number, campo: string, valor: string) {
+    setPartes((ps) => ps.map((p, j) => (j === i ? { ...p, [campo]: valor } : p)));
+  }
+
+  /* A conferência sai do campo do CPF, quando a pessoa termina de
+     digitar. Fazer a cada tecla seria uma consulta por caractere. */
+  async function conferirCpf(i: number) {
+    const p = partes[i];
+    const cpf = (p?.cpf_cnpj || "").replace(/\D/g, "");
+    if (cpf.length !== 11 && cpf.length !== 14) { setCpfs((c) => ({ ...c, [i]: null })); return; }
+    setCpfs((c) => ({ ...c, [i]: { carregando: true } }));
+    try {
+      const r = await fetch(`${API}/api/v1/cpf/conferir`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cpf, nome: p?.nome, nascimento: p?.nascimento }),
+      });
+      const j = await r.json();
+      setCpfs((c) => ({ ...c, [i]: j }));
+    } catch { setCpfs((c) => ({ ...c, [i]: null })); }
+  }
+
+  async function salvar() {
+    setSalvando(true); setAviso("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/partes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partes }),
+      });
+      const j = await r.json();
+      setEstado(j); setPartes(j.partes || partes);
+      aoCompletar(Boolean(j.completo));
+      setAviso(j.completo
+        ? "Tudo certo com as partes. Pode seguir."
+        : j.recado || "Ainda falta informação.");
+    } catch { setAviso("Não consegui salvar agora."); }
+    finally { setSalvando(false); }
+  }
+
+  if (!estado) return null;
+
+  const campos: [string, string, string][] = [
+    ["nome", "Nome completo", "como está no documento"],
+    ["cpf_cnpj", "CPF ou CNPJ", "só números"],
+    ["endereco", "Endereço completo", "rua, número, bairro, cidade e estado"],
+    ["estado_civil", "Estado civil", "muda a assinatura exigida"],
+    ["profissao", "Profissão", ""],
+    ["email", "E-mail", "é para onde vai o contrato assinado"],
+    ["telefone", "Telefone", ""],
+  ];
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
+      <h2 className="text-sm font-bold text-[#C9A24D]">Quem assina o contrato</h2>
+      <p className="mt-1 text-xs leading-relaxed text-white/55">
+        Um contrato precisa identificar as duas partes com precisão. É isso
+        que permite cobrar, executar ou provar o combinado se um dia
+        precisar. O que o escritório já sabe está preenchido.
+      </p>
+
+      <div className="mt-4 space-y-4">
+        {partes.map((p, i) => {
+          const conf = cpfs[i];
+          return (
+            <div key={p.papel || i} className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-bold capitalize text-white">
+                  {String(p.papel || "parte").replaceAll("_", " ")}
+                </p>
+                {p.do_cliente && (
+                  <span className="rounded-full bg-[#2D7DD2]/20 px-2.5 py-0.5 text-[10px] font-bold text-[#2D7DD2]">
+                    você, do seu cadastro
+                  </span>
+                )}
+                {(p.falta || []).length > 0 && (
+                  <span className="ml-auto text-[11px] text-[#E5A44C]">
+                    falta {(p.falta || []).join(", ")}
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {campos.map(([campo, rotulo, ajuda]) => (
+                  <label key={campo} className={campo === "endereco" ? "sm:col-span-2" : ""}>
+                    <span className="text-xs text-white/70">{rotulo}</span>
+                    {ajuda && <span className="block text-[10px] text-white/35">{ajuda}</span>}
+                    <input
+                      value={p[campo] || ""}
+                      onChange={(e) => mudar(i, campo, e.target.value)}
+                      onBlur={campo === "cpf_cnpj" ? () => conferirCpf(i) : undefined}
+                      className={`mt-1 w-full ${cx}`} />
+                  </label>
+                ))}
+              </div>
+
+              {/* O QUE A RECEITA DISSE
+                  Três respostas possíveis, e cada uma diz uma coisa
+                  diferente. Dizer "conferido na Receita" quando só os
+                  dígitos foram conferidos seria mentir para quem vai
+                  assinar o documento. */}
+              {conf?.carregando && (
+                <p className="mt-2 text-[11px] text-white/45">conferindo o CPF…</p>
+              )}
+              {conf && !conf.carregando && conf.ok === false && (
+                <p className="mt-2 rounded-lg border border-[#C0392B]/40 bg-[#C0392B]/10 px-3 py-2 text-[11px] leading-relaxed text-white/85">
+                  {conf.erro}
+                  {conf.nome_receita && (
+                    <span className="mt-1 block text-white/55">
+                      Na Receita este CPF está em nome de {conf.nome_receita}.
+                    </span>
+                  )}
+                </p>
+              )}
+              {conf && !conf.carregando && conf.ok && conf.conferido && (
+                <p className="mt-2 text-[11px] text-[#1DB954]">
+                  CPF conferido na Receita, situação regular.
+                </p>
+              )}
+              {conf && !conf.carregando && conf.ok && !conf.conferido && (
+                <p className="mt-2 text-[11px] text-white/45">{conf.aviso}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {aviso && (
+        <p className={`mt-4 rounded-lg px-3 py-2 text-xs leading-relaxed ${
+          estado.completo
+            ? "border border-[#1DB954]/40 bg-[#1DB954]/10 text-white/85"
+            : "border border-[#E5A44C]/40 bg-[#E5A44C]/10 text-white/85"}`}>
+          {aviso}
+        </p>
+      )}
+
+      <button onClick={salvar} disabled={salvando}
+        className="mt-4 rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-50">
+        {salvando ? "Salvando…" : "Salvar informações das partes"}
+      </button>
+      <p className="mt-2 text-[11px] text-white/35">
+        Pode salvar incompleto e voltar depois: o que você digitou fica
+        guardado.
+      </p>
+    </section>
   );
 }

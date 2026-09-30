@@ -37,7 +37,7 @@ export default function Privacidade() {
         <section>
           <h2 className="text-lg font-bold text-navy">2. Que dados tratamos</h2>
           <p className="mt-2">
-            Dados de identificação e qualificação (nome, CPF, RG, estado civil, profissão,
+            Dados de identificação e qualificação (nome, CPF, estado civil, profissão,
             endereço), dados de contato (e-mail e telefone), os documentos que você envia,
             o histórico das conversas no painel e por e-mail e, quando você autoriza, o
             <b> áudio dos atendimentos por vídeo</b> e a respectiva transcrição. A imagem dos

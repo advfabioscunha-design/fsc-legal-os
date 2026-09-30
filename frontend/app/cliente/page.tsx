@@ -44,7 +44,7 @@ type Assinatura = {
 type Cadastro = {
   id: string; nome: string; email: string; cpf_cnpj: string | null; whatsapp: string | null;
   nacionalidade?: string | null; estado_civil?: string | null; profissao?: string | null;
-  rg?: string | null; endereco_rua?: string | null; endereco_numero?: string | null;
+  endereco_rua?: string | null; endereco_numero?: string | null;
   endereco_complemento?: string | null; endereco_bairro?: string | null;
   endereco_cidade?: string | null; endereco_uf?: string | null; endereco_cep?: string | null;
 };
@@ -942,7 +942,8 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
   const [form, setForm] = useState<Record<string, string>>({
     nome: cadastro?.nome || "", cpf_cnpj: cadastro?.cpf_cnpj || "", whatsapp: cadastro?.whatsapp || "",
     email: cadastro?.email || email,
-    rg: cadastro?.rg || "", nacionalidade: cadastro?.nacionalidade || "brasileiro(a)",
+    nacionalidade: cadastro?.nacionalidade || "brasileiro(a)",
+    nascimento: (cadastro as any)?.nascimento || "",
     estado_civil: cadastro?.estado_civil || "", profissao: cadastro?.profissao || "",
     endereco_cep: cadastro?.endereco_cep || "", endereco_rua: cadastro?.endereco_rua || "",
     endereco_numero: cadastro?.endereco_numero || "", endereco_complemento: cadastro?.endereco_complemento || "",
@@ -966,6 +967,23 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
   const [salvando, setSalvando] = useState(false);
   const [aviso, setAviso] = useState("");
   const [cepStatus, setCepStatus] = useState("");
+  const [cpfConf, setCpfConf] = useState<any>(null);
+
+  /* Conferência do CPF na Receita, ao sair do campo. Ao salvar seria
+     tarde: a pessoa já teria preenchido a tela inteira antes de
+     descobrir que errou um dígito lá em cima. */
+  async function conferirCpf() {
+    const cpf = (form.cpf_cnpj || "").replace(/\D/g, "");
+    if (cpf.length !== 11 && cpf.length !== 14) { setCpfConf(null); return; }
+    setCpfConf({ carregando: true });
+    try {
+      const r = await fetch(`${API}/api/v1/cpf/conferir`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cpf, nome: form.nome, nascimento: form.nascimento }),
+      });
+      setCpfConf(await r.json());
+    } catch { setCpfConf(null); }
+  }
   // o último CEP consultado impede que a busca rode de novo ao sair do campo
   // e sobrescreva o endereço que a pessoa ajustou à mão
   const ultimoCep = useRef((cadastro?.endereco_cep || "").replace(/\D/g, ""));
@@ -1047,15 +1065,48 @@ function MeuCadastro({ cadastro, email, caso, token, onVoltar, onSalvo }: {
           </span>
         </label>
         <label className="text-xs font-medium text-charcoal/60">CPF / CNPJ
-          <input value={form.cpf_cnpj} onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} inputMode="numeric"
-            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
+          <input value={form.cpf_cnpj}
+            onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })}
+            onBlur={conferirCpf} inputMode="numeric"
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-electric" />
+          {/* O CPF é conferido quando a pessoa sai do campo, e não ao
+              salvar. O aviso precisa chegar enquanto ela ainda está
+              olhando para o número que digitou. */}
+          {cpfConf?.carregando && (
+            <span className="mt-1 block text-[11px] font-normal text-charcoal/45">conferindo…</span>
+          )}
+          {cpfConf && !cpfConf.carregando && cpfConf.ok === false && (
+            <span className="mt-1 block text-[11px] font-normal leading-relaxed text-crimson">
+              {cpfConf.erro}
+              {cpfConf.nome_receita && (
+                <span className="mt-0.5 block text-charcoal/55">
+                  Na Receita este CPF está em nome de {cpfConf.nome_receita}.
+                </span>
+              )}
+            </span>
+          )}
+          {cpfConf && !cpfConf.carregando && cpfConf.ok && cpfConf.conferido && (
+            <span className="mt-1 block text-[11px] font-normal text-emerald">
+              Conferido na Receita, situação regular.
+            </span>
+          )}
+          {cpfConf && !cpfConf.carregando && cpfConf.ok && !cpfConf.conferido && (
+            <span className="mt-1 block text-[11px] font-normal text-charcoal/45">
+              {cpfConf.aviso}
+            </span>
+          )}
+        </label>
+        <label className="text-xs font-medium text-charcoal/60">Data de nascimento
+          <span className="block text-[10px] font-normal text-charcoal/40">
+            é o que a Receita pede para confirmar o seu CPF
+          </span>
+          <input type="date" value={form.nascimento || ""}
+            onChange={(e) => setForm({ ...form, nascimento: e.target.value })}
+            onBlur={conferirCpf}
+            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-charcoal outline-none focus:border-electric" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">WhatsApp
           <input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} inputMode="tel"
-            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
-        </label>
-        <label className="text-xs font-medium text-charcoal/60">RG
-          <input value={form.rg} onChange={(e) => setForm({ ...form, rg: e.target.value })}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-gold" />
         </label>
         <label className="text-xs font-medium text-charcoal/60">Estado civil

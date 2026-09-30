@@ -399,9 +399,9 @@ class EditarCliente(BaseModel):
     cpf_cnpj: str | None = None
     whatsapp: str | None = None
     nacionalidade: str | None = None
+    nascimento: str | None = None     # exigido pela consulta à Receita
     estado_civil: str | None = None
     profissao: str | None = None
-    rg: str | None = None
     endereco_rua: str | None = None
     endereco_numero: str | None = None
     endereco_complemento: str | None = None
@@ -3117,7 +3117,8 @@ def cliente_cadastro(authorization: str | None = Header(default=None)):
         # A qualificação completa. Faltava na resposta, e por isso a tela
         # abria com os campos vazios mesmo para quem já tinha preenchido:
         # a pessoa digitava tudo de novo a cada visita.
-        "rg", "nacionalidade", "estado_civil", "profissao",
+        "nacionalidade", "nascimento", "estado_civil", "profissao",
+        "cpf_conferido_em",
         "endereco_cep", "endereco_rua", "endereco_numero",
         "endereco_complemento", "endereco_bairro", "endereco_cidade",
         "endereco_uf",
@@ -3136,9 +3137,9 @@ class CadastroCliente(BaseModel):
     cpf_cnpj: str | None = None
     whatsapp: str | None = None
     nacionalidade: str | None = None
+    nascimento: str | None = None     # exigido pela consulta à Receita
     estado_civil: str | None = None
     profissao: str | None = None
-    rg: str | None = None
     endereco_rua: str | None = None
     endereco_numero: str | None = None
     endereco_complemento: str | None = None
@@ -3159,6 +3160,30 @@ class CadastroCliente(BaseModel):
     titular_confirmado: bool | None = None
 
 
+def _dt_agora() -> str:
+    from datetime import datetime as _d, timezone as _t
+    return _d.now(_t.utc).isoformat()
+
+
+class ConferirCPF(BaseModel):
+    cpf: str
+    nascimento: str | None = None
+    nome: str | None = None
+
+
+@app.post("/api/v1/cpf/conferir")
+def cpf_conferir(body: ConferirCPF):
+    """Confere o CPF enquanto a pessoa ainda está com a tela aberta.
+
+    Existe separado do salvamento porque o momento de avisar é enquanto
+    ela está olhando o campo, e não depois de preencher a tela inteira
+    e apertar salvar. Serve ao cadastro do cliente e aos dados das
+    partes do contrato, que é onde entra CPF de gente que nem cliente
+    é."""
+    from .integracoes import receita
+    return receita.conferir(body.cpf, body.nascimento, body.nome)
+
+
 CAMPOS_BANCARIOS = ("banco_nome", "banco_codigo", "agencia", "conta",
                     "conta_tipo", "pix_tipo", "pix_chave")
 
@@ -3177,6 +3202,20 @@ def cliente_atualizar_cadastro(body: CadastroCliente,
     bruto = body.model_dump()
     campos = {k: v for k, v in bruto.items() if v}
 
+    # CPF passa pela Receita antes de entrar no cadastro. O documento
+    # que o escritório emite carrega esse número, e número errado só
+    # aparece no cartório, no dia da assinatura, com todo mundo parado.
+    if campos.get("cpf_cnpj"):
+        from .integracoes import receita
+        conf = receita.conferir(
+            campos["cpf_cnpj"],
+            nascimento=campos.get("nascimento") or cli.get("nascimento"),
+            nome=campos.get("nome") or cli.get("nome"))
+        if not conf.get("ok"):
+            raise HTTPException(400, conf.get("erro") or "CPF inválido.")
+        campos["cpf_conferido_em"] = (
+            _dt_agora() if conf.get("conferido") else None)
+
     # `titular_confirmado` é o único campo que precisa poder virar falso:
     # o cliente que trocar a conta e não marcar de novo está dizendo que
     # a nova não é dele, e a prestação de contas tem de parar por aí.
@@ -3187,10 +3226,6 @@ def cliente_atualizar_cadastro(body: CadastroCliente,
         from datetime import datetime as _dtb, timezone as _tzb
         campos["dados_bancarios_em"] = _dtb.now(_tzb.utc).isoformat()
 
-    if campos.get("cpf_cnpj"):
-        from .core.cpf import cpf_valido
-        if not cpf_valido(campos["cpf_cnpj"]):
-            raise HTTPException(400, "CPF inválido — confira os números.")
     if campos.get("whatsapp"):
         campos["whatsapp"] = "".join(c for c in campos["whatsapp"] if c.isdigit())
     if campos.get("email"):
@@ -4789,6 +4824,31 @@ def balcao_pagamento(pedido_id: str, body: BaixaDePagamento):
         return contratos_online.registrar_pagamento(pedido_id, body.txid, body.quem)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+class PartesDoPedido(BaseModel):
+    partes: list[dict] = []
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/partes")
+def balcao_ver_partes(pedido_id: str):
+    """Quem são as partes, o que já está preenchido e o que falta."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.partes_do_pedido(pedido_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/partes")
+def balcao_salvar_partes(pedido_id: str, body: PartesDoPedido):
+    """Salva mesmo incompleto e devolve o que ainda falta, por parte."""
+    from .agentes import contratos_online
+    try:
+        estado = contratos_online.salvar_partes(pedido_id, body.partes)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {**estado, "recado": contratos_online.recado_do_que_falta(estado)}
 
 
 class FimDaColeta(BaseModel):

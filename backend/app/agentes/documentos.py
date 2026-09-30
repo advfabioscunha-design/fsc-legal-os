@@ -105,8 +105,10 @@ def montar_qualificacao(cli: dict) -> str:
         (cli.get("profissao") or "").strip(),
     ]
     txt = ", ".join(p for p in partes if p)
-    if cli.get("rg"):
-        txt += f", portador(a) do RG nº {cli['rg']}"
+    # O RG saiu da qualificação. Ele é estadual, repete entre estados e
+    # a pessoa pode ter vários; quem identifica de forma única é o CPF,
+    # e é o que cartório e banco conferem. Qualificação com RG e CPF
+    # ainda é praxe em muita peça, mas a praxe não a torna necessária.
     txt += f", inscrito(a) no CPF sob o nº {_cpf_formatado(cli.get('cpf_cnpj'))}"
 
     # não repete o tipo de logradouro quando ele já vem no endereço

@@ -33,7 +33,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
   // cadastro do cliente (o e-mail é a chave do acesso dele à plataforma)
   const CLI_VAZIO = {
     nome: "", email: "", cpf_cnpj: "", whatsapp: "", nacionalidade: "", estado_civil: "",
-    profissao: "", rg: "", endereco_rua: "", endereco_numero: "", endereco_complemento: "",
+    profissao: "", endereco_rua: "", endereco_numero: "", endereco_complemento: "",
     endereco_bairro: "", endereco_cidade: "", endereco_uf: "", endereco_cep: "",
   };
   const [cli, setCli] = useState<Record<string, string>>(CLI_VAZIO);
@@ -726,10 +726,6 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                   <input value={cli.cpf_cnpj} onChange={(e) => setCli({ ...cli, cpf_cnpj: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
                 </label>
-                <label className="text-xs text-white/60">RG
-                  <input value={cli.rg} onChange={(e) => setCli({ ...cli, rg: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
-                </label>
                 <label className="text-xs text-white/60">Nacionalidade
                   <input value={cli.nacionalidade} onChange={(e) => setCli({ ...cli, nacionalidade: e.target.value })}
                     placeholder="brasileira" className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
@@ -895,7 +891,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                 </ul>
               )}
 
-              <textarea value={solicitacao} onChange={(e) => setSolicitacao(e.target.value)} rows={2} placeholder="Ex.: Enviar RG e comprovante de residência..."
+              <textarea value={solicitacao} onChange={(e) => setSolicitacao(e.target.value)} rows={2} placeholder="Ex.: Enviar documento com foto e comprovante de residência..."
                 className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
               <button onClick={acionarCliente} className="mt-2 rounded-lg bg-[#2D7DD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#256bb3]">Enviar ao cliente</button>
             </section>

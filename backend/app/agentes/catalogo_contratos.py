@@ -25,11 +25,16 @@ PRECO_ORIENTACAO = 250.00       # atendimento jurídico prévio, opcional
 
 def _pessoa(papel: str) -> list[dict]:
     """Qualificação completa — CC art. 104 e praxe registral. Faltando
-    isso, o contrato existe mas dá trabalho para executar."""
+    isso, o contrato existe mas dá trabalho para executar.
+
+    O RG saiu. Ele não identifica ninguém de forma única: é estadual,
+    o mesmo número se repete entre estados, e a pessoa pode ter vários.
+    Quem identifica é o CPF, e é ele que os cartórios e os bancos
+    conferem. Pedir um dado que não vai ser usado é fazer a pessoa
+    procurar documento na gaveta à toa."""
     return [
         {"campo": f"{papel}_nome", "rotulo": f"Nome completo do {papel}", "obrigatorio": True},
         {"campo": f"{papel}_cpf_cnpj", "rotulo": f"CPF ou CNPJ do {papel}", "obrigatorio": True},
-        {"campo": f"{papel}_rg", "rotulo": f"RG/órgão emissor do {papel}", "obrigatorio": False},
         {"campo": f"{papel}_nacionalidade", "rotulo": "Nacionalidade", "obrigatorio": False},
         {"campo": f"{papel}_estado_civil", "rotulo": "Estado civil", "obrigatorio": True,
          "porque": "regime de bens pode exigir a assinatura do cônjuge"},
@@ -42,7 +47,7 @@ def _pessoa(papel: str) -> list[dict]:
 
 
 DOCS_PESSOA = [
-    "Documento de identidade com foto (RG ou CNH)",
+    "Documento de identidade com foto (CNH ou carteira de identidade)",
     "CPF, se não constar no documento de identidade",
     "Comprovante de endereço recente",
     "Certidão de casamento, se casado",

@@ -54,6 +54,9 @@ PUBLICO = [
     r"^/api/v1/leads$",
     r"^/api/v1/casos/[^/]+/mensagens$",
     r"^/api/v1/cep/[^/]+$",
+    # Conferência de CPF: usada no balcão, antes de a pessoa ter conta,
+    # e nos dados da outra parte do contrato, que nunca terá conta.
+    r"^/api/v1/cpf/conferir$",
 
     # Elaboração de contrato pelo site, antes de existir conta.
     r"^/api/v1/contrato/iniciar$",
@@ -67,7 +70,7 @@ PUBLICO = [
     r"^/api/v1/contratos/pedidos/[^/]+$",
     r"^/api/v1/contratos/pedidos/[^/]+/(negociar|negociar/abrir|conversa|"
     r"termo-contratacao|dados|escolhas|documentos|coleta-concluida|"
-    r"alteracao|aprovar|mensagem|pdf|vincular|proposta|desarquivar)$",
+    r"alteracao|aprovar|mensagem|pdf|vincular|proposta|desarquivar|partes)$",
 
     # Convite da equipe: quem recebe ainda não tem conta, e é o token
     # sorteado que faz as vezes de credencial.

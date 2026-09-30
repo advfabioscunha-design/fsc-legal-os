@@ -659,6 +659,13 @@ def concluir_coleta(pedido_id: str, com_timbre: bool | None = None) -> dict:
     if not r[0].get("pago_em"):
         raise ValueError("A coleta começa depois do pagamento confirmado.")
 
+    # A conferência acontece aqui, e não na redação, porque aqui o
+    # cliente ainda está na tela. Descobrir que falta o CPF do fiador
+    # duas horas depois significa e-mail, espera e prazo perdido.
+    estado = partes_do_pedido(pedido_id)
+    if not estado["completo"]:
+        raise ValueError(recado_do_que_falta(estado))
+
     campos = {"fase": "REDACAO", "atualizado_em": _agora()}
     if com_timbre is not None:
         campos["com_timbre"] = bool(com_timbre)
@@ -1122,3 +1129,146 @@ def desarquivamentos(status: str = "PENDENTE") -> list[dict]:
         .select("*,pedidos_contrato(numero,tipo,servico_livre,clientes(nome,email))") \
         .eq("status", status).order("criado_em", desc=True) \
         .limit(100).execute().data or []
+
+
+# ══════════════════════════════════════════════════════════════════
+# AS PARTES DO CONTRATO
+#
+# Todo contrato tem pelo menos duas partes, e o cliente é uma delas. Os
+# dados da outra ficavam soltos dentro de `dados`, um JSON sem forma em
+# que cada tipo usava nomes diferentes de campo. Conferir o que faltava
+# era impossível, e a falta só aparecia na redação, com o redator
+# inventando ou o escritório ligando para perguntar.
+#
+# Aqui a lista ganha forma, e com forma vem a conferência: antes de
+# mandar para a redação, o atendimento diz exatamente o que falta e de
+# quem. É a diferença entre "faltam informações" e "falta o CPF do
+# fiador e o endereço do locatário".
+# ══════════════════════════════════════════════════════════════════
+
+# O mínimo para qualificar alguém num contrato. Não é a lista completa
+# do Código Civil: é o que, faltando, dá trabalho para executar depois.
+OBRIGATORIOS_PARTE = [
+    ("nome", "nome completo"),
+    ("cpf_cnpj", "CPF ou CNPJ"),
+    ("endereco", "endereço completo"),
+]
+DESEJAVEIS_PARTE = [
+    ("estado_civil", "estado civil"),
+    ("email", "e-mail"),
+]
+
+
+def _papeis_do_tipo(tipo: str) -> list[str]:
+    """Quem são as partes daquele tipo de contrato.
+
+    Sai do próprio catálogo, lendo os campos de qualificação que ele já
+    declara. Assim, tipo novo no catálogo já nasce com as partes certas
+    aqui, sem ninguém precisar lembrar de atualizar uma segunda lista,
+    que é o tipo de duplicação que envelhece mal."""
+    t = catalogo.detalhe(tipo) or {}
+    papeis: list[str] = []
+    for c in t.get("campos") or []:
+        campo = c.get("campo") or ""
+        if campo.endswith("_nome"):
+            papel = campo[:-5]
+            if papel not in papeis:
+                papeis.append(papel)
+    return papeis or ["contratante", "contratada"]
+
+
+def partes_do_pedido(pedido_id: str) -> dict:
+    """O que já está preenchido, e o que falta, parte por parte."""
+    db = get_db()
+    r = db.table("pedidos_contrato") \
+        .select("id,tipo,partes,dados,cliente_id,clientes(*)") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    p = r[0]
+
+    papeis = _papeis_do_tipo(p["tipo"])
+    guardadas = {x.get("papel"): x for x in (p.get("partes") or [])}
+
+    # A primeira parte nasce preenchida com o cadastro do cliente. Ele
+    # já informou tudo isso uma vez, e pedir de novo é a forma mais
+    # rápida de fazer alguém desistir no meio.
+    cli = p.get("clientes") or {}
+    if papeis and papeis[0] not in guardadas and cli.get("nome"):
+        guardadas[papeis[0]] = {
+            "papel": papeis[0], "do_cliente": True,
+            "nome": cli.get("nome"), "cpf_cnpj": cli.get("cpf_cnpj"),
+            "estado_civil": cli.get("estado_civil"),
+            "profissao": cli.get("profissao"),
+            "nacionalidade": cli.get("nacionalidade"),
+            "email": cli.get("email"), "telefone": cli.get("whatsapp"),
+            "endereco": _endereco_do_cliente(cli),
+        }
+
+    partes, faltas = [], []
+    for papel in papeis:
+        parte = dict(guardadas.get(papel) or {"papel": papel})
+        parte["papel"] = papel
+        falta = [rot for campo, rot in OBRIGATORIOS_PARTE
+                 if not str(parte.get(campo) or "").strip()]
+        parte["falta"] = falta
+        partes.append(parte)
+        if falta:
+            faltas.append({"papel": papel, "falta": falta})
+
+    return {"partes": partes, "faltas": faltas,
+            "completo": not faltas,
+            "obrigatorios": [{"campo": c, "rotulo": r} for c, r in OBRIGATORIOS_PARTE],
+            "desejaveis": [{"campo": c, "rotulo": r} for c, r in DESEJAVEIS_PARTE]}
+
+
+def _endereco_do_cliente(cli: dict) -> str:
+    pedacos = [cli.get("endereco_rua"), cli.get("endereco_numero"),
+               cli.get("endereco_complemento"), cli.get("endereco_bairro"),
+               cli.get("endereco_cidade"), cli.get("endereco_uf"),
+               cli.get("endereco_cep")]
+    return ", ".join(str(x).strip() for x in pedacos if str(x or "").strip())
+
+
+def salvar_partes(pedido_id: str, partes: list[dict]) -> dict:
+    """Guarda o que o cliente informou e devolve o que ainda falta.
+
+    Salva mesmo incompleto, de propósito: quem está no ônibus preenche
+    metade e volta depois. O que não acontece é o pedido seguir para a
+    redação incompleto, e disso cuida `partes_completas`."""
+    db = get_db()
+    limpas = []
+    for x in partes or []:
+        limpas.append({k: (str(v).strip() if isinstance(v, str) else v)
+                       for k, v in x.items() if k != "falta"})
+
+    db.table("pedidos_contrato").update({
+        "partes": limpas, "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+
+    estado = partes_do_pedido(pedido_id)
+    db.table("pedidos_contrato").update({
+        "partes_completas": estado["completo"],
+    }).eq("id", pedido_id).execute()
+
+    registrar_evento(None, "BALCAO_PARTES_SALVAS",
+                     {"pedido_id": pedido_id, "completo": estado["completo"],
+                      "faltas": estado["faltas"]})
+    return estado
+
+
+def recado_do_que_falta(estado: dict) -> str:
+    """A frase que o atendimento diz quando algo falta.
+
+    Escrita aqui, e não deixada para o modelo, porque é uma lista: o
+    modelo resume, esquece um item, e o cliente volta duas vezes."""
+    if estado.get("completo"):
+        return ""
+    partes = []
+    for f in estado["faltas"]:
+        itens = ", ".join(f["falta"])
+        partes.append(f"do {f['papel'].replace('_', ' ')}: {itens}")
+    return ("Antes de mandar para a redação, falta "
+            + "; ".join(partes)
+            + ". Sem isso o contrato até sai, mas fica difícil de executar "
+              "se um dia precisar ir para a Justiça.")
