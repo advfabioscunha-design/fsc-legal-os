@@ -65,6 +65,7 @@ export default function PedidoDoCliente() {
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
   const arquivoRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   const carregar = useCallback(async () => {
     const p = await fetch(`${API}/api/v1/contratos/pedidos/${id}`).then((r) => r.json());
@@ -148,7 +149,11 @@ export default function PedidoDoCliente() {
         + (j.falhas?.length ? ` ${j.falhas.join("; ")}` : ""));
       carregar();
     } catch { setAviso("Falha ao enviar. Tente de novo."); }
-    finally { setOcupado(false); if (arquivoRef.current) arquivoRef.current.value = ""; }
+    finally {
+      setOcupado(false);
+      if (arquivoRef.current) arquivoRef.current.value = "";
+      if (cameraRef.current) cameraRef.current.value = "";
+    }
   }
 
   async function aprovar() {
@@ -325,6 +330,24 @@ export default function PedidoDoCliente() {
                   accept="image/*,application/pdf"
                   onChange={(e) => enviarArquivos(e.target.files)}
                   className="block w-full text-xs text-white/60 file:mr-3 file:rounded-lg file:border-0 file:bg-[#C9A84C] file:px-4 file:py-2 file:text-sm file:font-bold file:text-[#0A1628]" />
+
+                {/* A CÂMERA TEM BOTÃO PRÓPRIO
+                    O seletor acima já aceita foto, mas no celular ele
+                    abre a galeria, e quem está com o papel na mão
+                    precisa abrir a câmera. O `capture` faz isso. */}
+                <input ref={cameraRef} type="file" multiple
+                  accept="image/*" capture="environment" className="hidden"
+                  onChange={(e) => enviarArquivos(e.target.files)} />
+                <button type="button" onClick={() => cameraRef.current?.click()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-xs text-white/75 transition hover:border-white/45">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"
+                    stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <path d="M3 8.5A1.5 1.5 0 014.5 7h2L8 5h8l1.5 2h2A1.5 1.5 0 0121 8.5v9A1.5 1.5 0 0119.5 19h-15A1.5 1.5 0 013 17.5v-9z" />
+                    <circle cx="12" cy="13" r="3.2" />
+                  </svg>
+                  Tirar foto agora
+                </button>
+
                 <p className="text-[10px] text-white/35">
                   Até 25 MB por arquivo. Foto tirada na hora serve.
                 </p>
@@ -603,8 +626,8 @@ export default function PedidoDoCliente() {
             {faseAtual === "REVISAO_IA" && <p>O documento está em revisão técnica.</p>}
             {faseAtual === "AJUSTE" && <p>Aplicando os ajustes apontados na revisão.</p>}
             {faseAtual === "REVISAO_ADV" && (
-              <p>Na mesa do advogado para revisão final. Nada é enviado a você
-                 antes dessa conferência.</p>
+              <p>O escritório está com o seu documento para a conferência
+                 final. Nada é enviado a você antes dela.</p>
             )}
             {faseAtual === "ASSINATURA" && (
               <p>{pedido.assinatura_digital === false
@@ -635,8 +658,195 @@ export default function PedidoDoCliente() {
             )}
           </section>
         )}
+
+        {/* A CONVERSA FICA DENTRO DO PEDIDO
+
+            E não numa caixa de mensagens geral. Quem tem três pedidos
+            abertos não consegue dizer, numa caixa única, a qual deles
+            se refere a foto que acabou de mandar, e o escritório
+            perde tempo perguntando. Aqui a pergunta e o anexo já
+            nascem amarrados ao protocolo. */}
+        <Conversa pedidoId={String(id)} aoMudar={carregar} />
       </div>
     </main>
+  );
+}
+
+
+/* ── CONVERSA DO PEDIDO, COM FOTO E ANEXO ──────────────────────
+ *
+ * Três botões e nenhum menu: escrever, tirar foto, anexar arquivo.
+ *
+ * A foto tem entrada própria, separada do anexo, por causa do
+ * `capture`: no celular ele abre a câmera direto, sem passar pela
+ * galeria. Quem está com o documento na mão fotografa e manda, que é
+ * o caminho real de quase todo mundo. No computador o mesmo botão
+ * abre o seletor de arquivos, e nada se perde.
+ *
+ * O arquivo entra pela mesma porta dos documentos da coleta, então
+ * aparece na pasta do pedido do lado do escritório, e a linha na
+ * conversa registra o que foi mandado. Anexo sem recado vira arquivo
+ * órfão que ninguém sabe por que chegou.
+ */
+function Conversa({ pedidoId, aoMudar }: {
+  pedidoId: string; aoMudar?: () => void;
+}) {
+  const [falas, setFalas] = useState<any[]>([]);
+  const [texto, setTexto] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState("");
+  const camera = useRef<HTMLInputElement>(null);
+  const anexo = useRef<HTMLInputElement>(null);
+  const fim = useRef<HTMLDivElement>(null);
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/conversa`);
+      const d = await r.json();
+      setFalas(Array.isArray(d) ? d : []);
+    } catch { /* silêncio: a conversa não pode derrubar a tela */ }
+  }, [pedidoId]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+  // Recarrega a cada meio minuto. O escritório responde por aqui e o
+  // cliente não deve precisar atualizar a página para ver a resposta.
+  useEffect(() => {
+    const t = setInterval(carregar, 30000);
+    return () => clearInterval(t);
+  }, [carregar]);
+  useEffect(() => { fim.current?.scrollIntoView({ behavior: "smooth" }); }, [falas]);
+
+  async function mandarTexto(msg?: string) {
+    const conteudo = (msg ?? texto).trim();
+    if (!conteudo) return;
+    setOcupado(true); setAviso("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/mensagem`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autor: "CLIENTE", texto: conteudo }),
+      });
+      if (!r.ok) { setAviso("Não consegui enviar. Tente de novo."); return; }
+      if (msg === undefined) setTexto("");
+      await carregar();
+      aoMudar?.();
+    } catch { setAviso("Sem conexão com o servidor."); }
+    finally { setOcupado(false); }
+  }
+
+  async function mandarArquivos(lista: FileList | null, origem: "FOTO" | "ARQUIVO") {
+    if (!lista || lista.length === 0) return;
+    setOcupado(true); setAviso("");
+    try {
+      const fd = new FormData();
+      Array.from(lista).forEach((f) => fd.append("arquivos", f));
+      const r = await fetch(
+        `${API}/api/v1/contratos/pedidos/${pedidoId}/documentos?rotulo=${encodeURIComponent("Enviado pela conversa")}`,
+        { method: "POST", body: fd });
+      const j = await r.json().catch(() => ({} as any));
+      if (!r.ok) { setAviso(j?.detail || "Não consegui receber o arquivo."); return; }
+
+      const nomes = Array.from(lista).map((f) => f.name).join(", ");
+      // O recado vai junto, e é ele que destrava o relógio quando o
+      // pedido está parado esperando informação.
+      await mandarTexto(origem === "FOTO"
+        ? `Enviei ${lista.length === 1 ? "uma foto" : `${lista.length} fotos`}: ${nomes}`
+        : `Enviei ${lista.length === 1 ? "um arquivo" : `${lista.length} arquivos`}: ${nomes}`);
+      if (j.falhas?.length) setAviso(j.falhas.join("; "));
+      else setAviso(`${j.salvos} arquivo(s) recebido(s).`);
+      aoMudar?.();
+    } catch { setAviso("Falha ao enviar. Tente de novo."); }
+    finally {
+      setOcupado(false);
+      if (camera.current) camera.current.value = "";
+      if (anexo.current) anexo.current.value = "";
+    }
+  }
+
+  const quando = (s?: string) => {
+    if (!s) return "";
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? "" : d.toLocaleString("pt-BR",
+      { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
+      <h2 className="text-sm font-bold text-[#C9A24D]">Conversa deste pedido</h2>
+      <p className="mt-1 text-xs leading-relaxed text-white/50">
+        Tudo o que for tratado aqui fica guardado junto do protocolo. Pode
+        escrever, fotografar um documento ou anexar um arquivo.
+      </p>
+
+      <div className="mt-4 max-h-[46vh] space-y-2 overflow-y-auto rounded-xl bg-[#0A1628] p-3">
+        {falas.length === 0 && (
+          <p className="py-6 text-center text-[11px] text-white/35">
+            Nenhuma mensagem ainda. Escreva abaixo se precisar de algo.
+          </p>
+        )}
+        {falas.map((f: any) => {
+          const meu = String(f.autor).toUpperCase() === "CLIENTE";
+          return (
+            <div key={f.id}
+              className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${meu
+                ? "ml-auto bg-[#C9A84C]/15 text-white/90"
+                : "bg-white/5 text-white/85"}`}>
+              <p className="whitespace-pre-line">{f.texto}</p>
+              <p className="mt-1 text-[10px] text-white/35">
+                {meu ? "você" : "escritório"} · {quando(f.criado_em)}
+              </p>
+            </div>
+          );
+        })}
+        <div ref={fim} />
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <textarea value={texto} onChange={(e) => setTexto(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mandarTexto(); }
+          }}
+          rows={1} placeholder="escreva aqui"
+          className={`flex-1 resize-none ${cx}`} />
+        <button onClick={() => mandarTexto()} disabled={ocupado || !texto.trim()}
+          className="rounded-lg bg-[#C9A84C] px-4 text-sm font-bold text-[#0A1628] disabled:opacity-40">
+          Enviar
+        </button>
+      </div>
+
+      {/* As entradas de arquivo ficam escondidas: o que a pessoa vê é
+          um botão com nome de gente, não o seletor cru do navegador. */}
+      <input ref={camera} type="file" accept="image/*" capture="environment"
+        multiple className="hidden"
+        onChange={(e) => mandarArquivos(e.target.files, "FOTO")} />
+      <input ref={anexo} type="file" accept="image/*,application/pdf"
+        multiple className="hidden"
+        onChange={(e) => mandarArquivos(e.target.files, "ARQUIVO")} />
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button onClick={() => camera.current?.click()} disabled={ocupado}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-xs text-white/75 transition hover:border-white/45 disabled:opacity-40">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"
+            stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="M3 8.5A1.5 1.5 0 014.5 7h2L8 5h8l1.5 2h2A1.5 1.5 0 0121 8.5v9A1.5 1.5 0 0119.5 19h-15A1.5 1.5 0 013 17.5v-9z" />
+            <circle cx="12" cy="13" r="3.2" />
+          </svg>
+          Tirar foto
+        </button>
+        <button onClick={() => anexo.current?.click()} disabled={ocupado}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-xs text-white/75 transition hover:border-white/45 disabled:opacity-40">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"
+            stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="M20 11.5l-7.8 7.8a4.5 4.5 0 01-6.4-6.4l8.1-8.1a3 3 0 014.2 4.2l-8.1 8.1a1.5 1.5 0 01-2.1-2.1l7.4-7.4" />
+          </svg>
+          Anexar documento
+        </button>
+        <span className="self-center text-[10px] text-white/35">
+          PDF ou imagem, até 25 MB por arquivo.
+        </span>
+      </div>
+
+      {aviso && <p className="mt-2 text-[11px] text-[#E5A44C]">{aviso}</p>}
+    </section>
   );
 }
 

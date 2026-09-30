@@ -97,7 +97,7 @@ export default function ContratoLanding() {
 
             <div className="mt-10">
               <Link
-                href="/balcao?novo=1"
+                href="/entrar?novo=1&next=/cliente"
                 className="inline-flex w-full items-center justify-center rounded-lg bg-gold px-9 py-4 text-subtitle font-bold text-navy shadow-card transition hover:brightness-95 sm:w-auto"
               >
                 Pedir meu contrato
@@ -106,13 +106,21 @@ export default function ContratoLanding() {
                 Pronto em até 24 horas. Se precisar para hoje, há entrega em
                 até 6 horas.
               </p>
-              {/* Dizer que começa por um cadastro evita a surpresa de
-                  quem clica esperando um formulário de duas linhas. E
-                  explica o porquê, que é o que faz a pessoa aceitar. */}
+              {/* UMA PORTA SÓ
+
+                  Este botão levava direto ao catálogo, e quem pede a
+                  análise de um caso passava antes pelo cadastro. Eram
+                  duas entradas diferentes para a mesma casa, e a
+                  segunda deixava o pedido do lado de fora da conta.
+
+                  Agora as duas levam ao mesmo cadastro. Feito o acesso,
+                  a pessoa cai na área dela e escolhe ali o serviço, no
+                  mesmo lugar onde depois acompanha o andamento e
+                  conversa com o escritório. */}
               <p className="mt-2 text-small text-slate/80">
-                O primeiro passo é criar o seu acesso com senha. É o que guarda
-                a sua conversa e o seu pedido: se você sair no meio, volta de
-                onde parou.
+                O primeiro passo é criar o seu acesso com senha. Feito isso,
+                você escolhe o documento dentro da sua área, e é lá que fica a
+                conversa e o andamento do pedido, sempre no mesmo lugar.
               </p>
             </div>
           </div>
@@ -230,7 +238,7 @@ export default function ContratoLanding() {
           </h2>
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
             <Link
-              href="/balcao?novo=1"
+              href="/entrar?novo=1&next=/cliente"
               className="inline-flex items-center justify-center rounded-lg bg-gold px-9 py-4 text-subtitle font-bold text-navy shadow-card transition hover:brightness-95"
             >
               Pedir meu contrato

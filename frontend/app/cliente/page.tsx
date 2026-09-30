@@ -551,8 +551,8 @@ export default function AreaCliente() {
               // não gerava pedido nenhum.
               onClick={() => { window.location.href = "/balcao"; }}
               icone={ICONES.caneta}
-              titulo="Pedir um contrato"
-              texto="Contrato ou notificação sob medida para o seu caso, com revisão e ajustes antes da entrega."
+              titulo="Solicitar contrato"
+              texto="Escolha aqui o documento que precisa. O pedido nasce com protocolo e fica nesta área, com o andamento e a conversa no mesmo lugar."
             />
 
             <Cartao

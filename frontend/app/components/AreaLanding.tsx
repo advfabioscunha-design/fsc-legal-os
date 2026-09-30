@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import Header from "./Header";
-import AtendimentoChat from "./AtendimentoChat";
 import { MalhaHero } from "./ui/Ilustracoes";
 
 /* PÁGINA DE ÁREA DE ATUAÇÃO
@@ -89,11 +88,12 @@ export default function AreaLanding({
             <p className="mt-6 max-w-xl text-subtitle text-white/70">{chamada}</p>
 
             <div className="mt-10">
-              <AtendimentoChat
-                variant="inline"
-                label="Analisar meu caso"
+              <Link
+                href="/entrar?next=/cliente&novo=1"
                 className="inline-flex w-full items-center justify-center rounded-lg bg-electric px-9 py-4 text-subtitle font-bold text-white shadow-card transition-all hover:bg-indigo hover:shadow-glow sm:w-auto"
-              />
+              >
+                Analisar meu caso
+              </Link>
               <p className="mt-3 text-small text-slate">
                 A primeira conversa é gratuita e sem compromisso.
               </p>
@@ -199,11 +199,12 @@ export default function AreaLanding({
           </p>
 
           <div className="mt-8">
-            <AtendimentoChat
-              variant="inline"
-              label="Analisar meu caso"
+            <Link
+              href="/entrar?next=/cliente&novo=1"
               className="inline-flex w-full items-center justify-center rounded-lg bg-electric px-9 py-4 text-subtitle font-bold text-white shadow-card transition-all hover:bg-indigo hover:shadow-glow sm:w-auto"
-            />
+            >
+              Analisar meu caso
+            </Link>
           </div>
 
           <p className="mt-6 text-small text-slate">

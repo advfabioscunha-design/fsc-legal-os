@@ -405,11 +405,15 @@ export default function Home() {
           </p>
 
           <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
-            <AtendimentoChat
-              variant="inline"
-              label="Analisar meu caso"
+            {/* Mesmo destino do botão do topo. Dois botões com o mesmo
+                nome levando a lugares diferentes é o tipo de detalhe
+                que faz a pessoa achar que errou o clique. */}
+            <Link
+              href="/entrar?next=/cliente&novo=1"
               className="inline-flex items-center justify-center rounded-lg bg-electric px-8 py-4 text-subtitle font-semibold text-white shadow-glow transition hover:bg-indigo"
-            />
+            >
+              Analisar meu caso
+            </Link>
             <AtendimentoWhats
               variant="inline"
               label="Chamar no WhatsApp"

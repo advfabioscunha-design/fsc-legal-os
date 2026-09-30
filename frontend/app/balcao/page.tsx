@@ -438,7 +438,10 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
   const [pensando, setPensando] = useState(false);
   const [usouSaida, setUsouSaida] = useState(false);
   const [propostaEnviada, setPropostaEnviada] = useState(false);
+  const [enviandoArquivo, setEnviandoArquivo] = useState(false);
   const fim = useRef<HTMLDivElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+  const anexo = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     (async () => {
@@ -473,6 +476,38 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
       setFalas((f) => [...f, { de: "agente", texto: "Tive um problema de conexão. Pode repetir?" }]);
     } finally { setPensando(false); }
   }, [pedidoId, aoFechar]);
+
+  /* O arquivo sobe pela mesma porta dos documentos do pedido, e a
+     conversa recebe uma linha dizendo o que chegou. Anexo mudo é
+     arquivo que ninguém sabe por que está ali. */
+  const anexarNaConversa = useCallback(
+    async (lista: FileList | null, origem: "FOTO" | "ARQUIVO") => {
+      if (!lista || lista.length === 0) return;
+      setEnviandoArquivo(true);
+      try {
+        const fd = new FormData();
+        Array.from(lista).forEach((f) => fd.append("arquivos", f));
+        const r = await fetch(
+          `${API}/api/v1/contratos/pedidos/${pedidoId}/documentos?rotulo=${encodeURIComponent("Enviado na conversa")}`,
+          { method: "POST", body: fd });
+        if (!r.ok) {
+          setFalas((f) => [...f, { de: "agente",
+            texto: "Não consegui receber o arquivo. Pode tentar de novo?" }]);
+          return;
+        }
+        const nomes = Array.from(lista).map((f) => f.name).join(", ");
+        await enviar(origem === "FOTO"
+          ? `Mandei ${lista.length === 1 ? "uma foto" : `${lista.length} fotos`}: ${nomes}`
+          : `Mandei ${lista.length === 1 ? "um arquivo" : `${lista.length} arquivos`}: ${nomes}`);
+      } catch {
+        setFalas((f) => [...f, { de: "agente",
+          texto: "Tive um problema para receber o arquivo. Pode tentar de novo?" }]);
+      } finally {
+        setEnviandoArquivo(false);
+        if (camera.current) camera.current.value = "";
+        if (anexo.current) anexo.current.value = "";
+      }
+    }, [pedidoId, enviar]);
 
   // Intenção de saída: o mouse indo para fora da janela pela borda de
   // cima é o gesto de quem vai fechar a aba. Uma vez só por sessão ,
@@ -544,6 +579,44 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
           className="rounded-lg border border-white/20 px-4 text-sm text-white/70 hover:border-white/40 disabled:opacity-40">
           Enviar
         </button>
+      </div>
+
+      {/* FOTO E ANEXO JÁ AQUI
+
+          Muita gente chega com o contrato antigo, a matrícula ou o
+          boleto na mão e quer mostrar antes de decidir. Mandar agora
+          poupa a pergunta depois, e o arquivo já nasce amarrado ao
+          pedido, que existe desde que a conversa começou. */}
+      <input ref={camera} type="file" accept="image/*" capture="environment"
+        multiple className="hidden"
+        onChange={(e) => anexarNaConversa(e.target.files, "FOTO")} />
+      <input ref={anexo} type="file" accept="image/*,application/pdf"
+        multiple className="hidden"
+        onChange={(e) => anexarNaConversa(e.target.files, "ARQUIVO")} />
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" onClick={() => camera.current?.click()}
+          disabled={enviandoArquivo}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 text-[11px] text-white/70 transition hover:border-white/45 disabled:opacity-40">
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none"
+            stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="M3 8.5A1.5 1.5 0 014.5 7h2L8 5h8l1.5 2h2A1.5 1.5 0 0121 8.5v9A1.5 1.5 0 0119.5 19h-15A1.5 1.5 0 013 17.5v-9z" />
+            <circle cx="12" cy="13" r="3.2" />
+          </svg>
+          Tirar foto
+        </button>
+        <button type="button" onClick={() => anexo.current?.click()}
+          disabled={enviandoArquivo}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 text-[11px] text-white/70 transition hover:border-white/45 disabled:opacity-40">
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none"
+            stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="M20 11.5l-7.8 7.8a4.5 4.5 0 01-6.4-6.4l8.1-8.1a3 3 0 014.2 4.2l-8.1 8.1a1.5 1.5 0 01-2.1-2.1l7.4-7.4" />
+          </svg>
+          Anexar documento
+        </button>
+        {enviandoArquivo && (
+          <span className="self-center text-[10px] text-white/40">enviando…</span>
+        )}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
