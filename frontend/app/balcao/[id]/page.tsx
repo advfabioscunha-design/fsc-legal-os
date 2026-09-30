@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import VisualizadorProtegido from "../../components/VisualizadorProtegido";
+import { esperarAVez } from "../../components/ritmoDaConversa";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -714,7 +715,16 @@ function Conversa({ pedidoId, aoMudar }: {
   const [falas, setFalas] = useState<any[]>([]);
   const [texto, setTexto] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  const [pensando, setPensando] = useState(false);
   const [aviso, setAviso] = useState("");
+  // O instante da última tecla, para a resposta não interromper quem
+  // ainda está escrevendo. Ref, e não estado: muda a cada tecla e não
+  // precisa redesenhar nada.
+  const ultimaTecla = useRef(0);
+  // Enquanto uma resposta está sendo segurada, a recarga automática
+  // fica parada: senão ela traria do servidor justamente o texto que
+  // estamos esperando para mostrar na hora certa.
+  const segurando = useRef(false);
   const camera = useRef<HTMLInputElement>(null);
   const anexo = useRef<HTMLInputElement>(null);
   const caixa = useRef<HTMLDivElement>(null);
@@ -732,7 +742,7 @@ function Conversa({ pedidoId, aoMudar }: {
   // Recarrega a cada meio minuto. O escritório responde por aqui e o
   // cliente não deve precisar atualizar a página para ver a resposta.
   useEffect(() => {
-    const t = setInterval(carregar, 30000);
+    const t = setInterval(() => { if (!segurando.current) carregar(); }, 30000);
     return () => clearInterval(t);
   }, [carregar]);
 
@@ -759,17 +769,35 @@ function Conversa({ pedidoId, aoMudar }: {
     const conteudo = (msg ?? texto).trim();
     if (!conteudo) return;
     setOcupado(true); setAviso("");
+    if (msg === undefined) setTexto("");
+
+    // A fala do cliente aparece na hora, com marca própria, para ele
+    // ver que saiu. A do escritório é que espera a vez.
+    const minha = { id: `local-${Date.now()}`, autor: "CLIENTE",
+                    texto: conteudo, criado_em: new Date().toISOString() };
+    setFalas((f) => [...f, minha]);
+
+    segurando.current = true;
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/mensagem`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ autor: "CLIENTE", texto: conteudo }),
       });
       if (!r.ok) { setAviso("Não consegui enviar. Tente de novo."); return; }
-      if (msg === undefined) setTexto("");
+      const d = await r.json().catch(() => ({} as any));
+
+      setOcupado(false);
+      if (d?.resposta) {
+        // O "digitando" e a espera. O texto já está guardado no
+        // servidor; o que se segura aqui é só quando ele aparece.
+        setPensando(true);
+        await esperarAVez(String(d.resposta).length, ultimaTecla);
+        setPensando(false);
+      }
       await carregar();
       aoMudar?.();
     } catch { setAviso("Sem conexão com o servidor."); }
-    finally { setOcupado(false); }
+    finally { setOcupado(false); setPensando(false); segurando.current = false; }
   }
 
   async function mandarArquivos(lista: FileList | null, origem: "FOTO" | "ARQUIVO") {
@@ -837,10 +865,14 @@ function Conversa({ pedidoId, aoMudar }: {
             </div>
           );
         })}
+        {pensando && (
+          <p className="text-[11px] text-white/35">digitando…</p>
+        )}
       </div>
 
       <div className="mt-3 flex gap-2">
-        <textarea value={texto} onChange={(e) => setTexto(e.target.value)}
+        <textarea value={texto}
+          onChange={(e) => { setTexto(e.target.value); ultimaTecla.current = Date.now(); }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mandarTexto(); }
           }}
@@ -1192,12 +1224,31 @@ function Urgencia({ pedido, aoMudar }: { pedido: any; aoMudar: () => void }) {
     setOcupado(true); setAviso("");
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedido.id}/urgencia`);
-      const j = await r.json();
-      if (j?.ja_e_urgente || j?.tarde_demais) { setAviso(j.mensagem); return; }
+      /* FALHA CALADA É PIOR DO QUE FALHA DITA
+
+         Antes isto lia o corpo da resposta sem olhar o código HTTP.
+         Com o servidor respondendo 404, o JSON de erro virava
+         "orçamento" e a tela trocava de estado mostrando um valor
+         vazio: do lado de quem clicou, o botão simplesmente não fazia
+         nada. Agora cada desfecho tem uma frase. */
+      if (!r.ok) {
+        setAviso(r.status === 404
+          ? "Este pedido não foi encontrado. Atualize a página e tente de novo."
+          : "Não consegui calcular agora. Tente de novo em instantes, ou peça pela conversa aqui embaixo.");
+        return;
+      }
+      const j = await r.json().catch(() => null);
+      if (!j) { setAviso("Não consegui calcular agora. Tente de novo."); return; }
+      if (j.ja_e_urgente || j.tarde_demais) { setAviso(j.mensagem); return; }
+      if (!j.valor) {
+        setAviso("Não consegui calcular agora. Peça pela conversa aqui embaixo que o escritório responde.");
+        return;
+      }
       setOrcamento(j);
       aoMudar();
-    } catch { setAviso("Não consegui calcular agora."); }
-    finally { setOcupado(false); }
+    } catch {
+      setAviso("Sem conexão com o servidor. Tente de novo em instantes.");
+    } finally { setOcupado(false); }
   }
 
   async function avisarQuePagou() {
@@ -1207,10 +1258,14 @@ function Urgencia({ pedido, aoMudar }: { pedido: any; aoMudar: () => void }) {
         `${API}/api/v1/contratos/pedidos/${pedido.id}/urgencia/paguei`,
         { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ txid: txid.trim() }) });
-      const j = await r.json();
+      if (!r.ok) {
+        setAviso("Não consegui registrar agora. Avise pela conversa aqui embaixo, que o escritório confere igual.");
+        return;
+      }
+      const j = await r.json().catch(() => ({} as any));
       setAviso(j?.mensagem || "Aviso registrado.");
       aoMudar();
-    } catch { setAviso("Não consegui registrar o aviso."); }
+    } catch { setAviso("Sem conexão. Tente de novo em instantes."); }
     finally { setOcupado(false); }
   }
 

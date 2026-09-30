@@ -1440,6 +1440,19 @@ def _horas_desde(iso: str | None) -> float:
 # Prazo declarado por quem não conferiu o extrato é prazo que o
 # escritório assume sem receber.
 
+def _pedido(pedido_id: str) -> dict:
+    """O pedido inteiro, ou erro com nome.
+
+    Este módulo buscava o pedido copiando a mesma consulta em cada
+    função. Funciona até alguém escrever a décima e esquecer, que foi o
+    que aconteceu aqui."""
+    r = get_db().table("pedidos_contrato").select("*").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not r:
+        raise ValueError("Pedido não encontrado.")
+    return r[0]
+
+
 def orcar_urgencia(pedido_id: str) -> dict:
     """Quanto custa acelerar este pedido, e como pagar."""
     from . import catalogo_contratos as catalogo

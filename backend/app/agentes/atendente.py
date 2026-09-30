@@ -124,18 +124,20 @@ LIMITES_DA_FASE = {
         "nao": "decidir pelo cliente qual caminho ele deve escolher",
     },
     "REDACAO": {
-        "pode": "que o documento está sendo escrito agora, e que ele segue "
-                "para revisão e depois para a conferência final",
+        "pode": "que o documento está em elaboração, que é o que a tela dele "
+                "mostra, e que depois segue para revisão e conferência final",
         "nao": "dizer que está pronto, que já foi revisado, que já pode ler "
                "ou que já foi enviado. Nada disso aconteceu ainda",
     },
     "REVISAO_IA": {
-        "pode": "que o texto já existe e está sendo revisado",
-        "nao": "dizer que está pronto ou mandar o cliente conferir agora",
+        "pode": "que o documento está na etapa de revisão",
+        "nao": "dizer que está pronto, descrever o texto, contar que a "
+               "minuta já existe ou mandar o cliente conferir agora",
     },
     "AJUSTE": {
-        "pode": "que os pontos apontados na revisão estão sendo corrigidos",
-        "nao": "dizer que está pronto ou detalhar o que a revisão apontou",
+        "pode": "que o documento está na etapa de ajustes",
+        "nao": "dizer que está pronto, nem contar o que foi apontado ou "
+               "corrigido: isso é trabalho interno",
     },
     "REVISAO_ADV": {
         "pode": "que o escritório está com o documento para a conferência "
@@ -206,6 +208,22 @@ pessoa perceber que não tem gente do outro lado.
 Português do Brasil. No máximo dois parágrafos, salvo quando houver
 lista do que falta. Trate o cliente pelo primeiro nome quando ele
 constar da situação.
+
+VOCÊ SÓ SABE O QUE A TELA DO CLIENTE MOSTRA
+
+O cliente acompanha o pedido por uma barra de fases. É ela a verdade
+que vocês dois compartilham, e é só sobre ela que você fala.
+
+O que acontece entre uma fase e outra é trabalho interno do
+escritório, e não se conta. Nunca diga que a minuta já existe, que o
+texto já foi escrito, que já passou pela revisão, que está na fila de
+alguém, nem cite etapa, ferramenta, esteira ou quem fez o quê. Se a
+fase é elaboração, para o cliente o documento está em elaboração, e
+ponto: mesmo que por dentro já exista texto pronto.
+
+Bastidor contado vira promessa. O cliente ouve "já está escrito",
+entende "então me manda hoje", e o que era informação sobrou como
+frustração.
 
 PROIBIDO, SEM EXCEÇÃO
 
@@ -340,14 +358,23 @@ def situacao_do_pedido(pedido_id: str) -> dict:
     # A última ação é a mais recente entre os carimbos que existem.
     # Olhar só `atualizado_em` diria "agora" sempre, porque qualquer
     # gravação o mexe, inclusive a que registrou a pergunta.
+    # A ÚLTIMA AÇÃO, NA LÍNGUA DA TELA DO CLIENTE
+    #
+    # Estes rótulos eram os de dentro: "documento redigido", "revisado",
+    # "ajustes aplicados", "conferência final concluída". O atendimento
+    # lia isso e repetia ao cliente que o contrato já estava escrito,
+    # enquanto a tela dele dizia "em elaboração". Duas versões do mesmo
+    # pedido, e a pior delas dita por escrito.
+    #
+    # O que fica aqui é só o que o cliente já viu acontecer: o
+    # pagamento, o envio das informações, a liberação para leitura, a
+    # aprovação e a entrega. O trabalho interno entre uma coisa e outra
+    # não é marco de andamento do cliente, é bastidor.
     marcos = {
         "pagamento confirmado": p.get("pago_em"),
-        "informações recebidas": p.get("fase_em") if p.get("fase") != "COLETA" else None,
-        "documento redigido": p.get("redigido_em"),
-        "documento revisado": p.get("revisado_em"),
-        "ajustes aplicados": p.get("ajustado_em"),
-        "conferência final concluída": p.get("visto_advogado_em"),
-        "documento disponibilizado a você": p.get("disponibilizado_em"),
+        "suas informações recebidas": (p.get("fase_em")
+                                       if p.get("fase") != "COLETA" else None),
+        "documento liberado para a sua leitura": p.get("disponibilizado_em"),
         "aprovado por você": p.get("aprovado_cliente_em"),
         "entregue": p.get("entregue_em"),
     }
