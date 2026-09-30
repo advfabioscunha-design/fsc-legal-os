@@ -4813,6 +4813,7 @@ def balcao_meus_pedidos(authorization: str | None = Header(default=None)):
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/documentos")
 async def balcao_enviar_documentos(
     pedido_id: str,
+    tarefas: BackgroundTasks,
     arquivos: list[UploadFile] = File(...),
     rotulo: str | None = None,
     authorization: str | None = Header(default=None),
@@ -4859,6 +4860,16 @@ async def balcao_enviar_documentos(
             "modo_coleta": "DOCUMENTOS",
             "atualizado_em": datetime.utcnow().isoformat(),
         }).eq("id", pedido_id).execute()
+
+        # O ARQUIVO É LIDO NA CHEGADA
+        #
+        # Em segundo plano, porque ler uma foto leva alguns segundos e
+        # o cliente não pode ficar olhando barra de progresso por
+        # causa disso. A resposta do upload sai na hora; a leitura
+        # acontece logo atrás e escreve na conversa o que entendeu.
+        from .agentes import atendente
+        tarefas.add_task(atendente.ler_e_encaminhar, pedido_id, salvos)
+
     return {"salvos": len(salvos), "documentos": salvos, "falhas": falhas}
 
 
@@ -5075,7 +5086,7 @@ def balcao_mensagem(pedido_id: str, body: MensagemDoBalcao):
         # estiver parado esperando informação, o que o cliente escreveu
         # aqui já destrava, sem ninguém precisar ler.
         return contratos_online.resposta_do_cliente(
-            pedido_id, body.texto, canal="PLATAFORMA")
+            pedido_id, body.texto, canal="PLATAFORMA", responder=True)
     try:
         return contratos_online.recado(
             pedido_id, body.texto, canais=body.canais, autor=autor,

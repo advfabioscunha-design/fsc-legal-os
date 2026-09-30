@@ -1898,7 +1898,8 @@ def complementar_com_a_resposta(pedido_id: str, texto: str) -> dict:
 
 
 def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
-                        anexos: list[str] | None = None) -> dict:
+                        anexos: list[str] | None = None,
+                        responder: bool = True) -> dict:
     """Porta única para o que o cliente responde, venha de onde vier.
 
     Chat, e-mail e WhatsApp entram por aqui. Ter uma porta só é o que
@@ -1927,6 +1928,33 @@ def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
         # informação que faltava, mesmo sem uma linha escrita.
         if anexos and saida.get("preenchidos", 0) == 0:
             saida["pendencias"] = revisar_pendencias(pedido_id)
+
+    # NINGUÉM FICA SEM RESPOSTA
+    #
+    # Antes, a mensagem do cliente era só matéria prima: ela preenchia
+    # o que faltava e morria ali. Do lado dele, escrever "como está meu
+    # contrato" era falar com a parede. Agora o atendimento varre o
+    # estado do pedido, responde o que foi perguntado e, se houver
+    # urgência, abre um alerta de prioridade para quem cuida do caso.
+    #
+    # A resposta é gerada depois do preenchimento de propósito: assim
+    # ela já conta o que mudou com a mensagem que acabou de chegar.
+    if responder and texto.strip():
+        try:
+            from . import atendente
+            r = atendente.responder("PEDIDO", pedido_id, texto)
+            # Volta pelo mesmo canal por onde veio. Responder um chat
+            # também por e-mail e WhatsApp é encher a caixa de quem
+            # está com a tela aberta na frente.
+            canais = ["PLATAFORMA"]
+            if canal.upper() in ("EMAIL", "WHATSAPP"):
+                canais.append(canal.upper())
+            recado(pedido_id, r["texto"], canais=canais, autor="AGENTE",
+                   assunto="Sobre o seu pedido")
+            saida["resposta"] = r["texto"]
+            saida["urgencia_registrada"] = bool(r.get("avisos"))
+        except Exception as e:
+            print(f"[balcao] atendimento não respondeu agora: {e}")
     return saida
 
 

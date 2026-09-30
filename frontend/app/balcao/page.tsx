@@ -105,7 +105,7 @@ export default function Balcao() {
   async function criarConta() {
     setOcupado(true); setErro(""); setAviso("");
     if (nome.trim().length < 5) { setErro("Informe seu nome completo."); setOcupado(false); return; }
-    if (senha.length < 8) { setErro("A senha precisa ter pelo menos 8 caracteres."); setOcupado(false); return; }
+    if (senha.length < 4) { setErro("A senha precisa ter pelo menos 4 caracteres."); setOcupado(false); return; }
     const { error } = await supabase.auth.signUp({
       email, password: senha, options: { data: { nome } },
     });
@@ -738,7 +738,7 @@ function Entrada({
         {(modo === "entrar" || modo === "criar") && (
           <input value={senha} onChange={(e) => setSenha(e.target.value)}
             type="password"
-            placeholder={modo === "criar" ? "Senha, pelo menos 8 caracteres" : "Senha"}
+            placeholder={modo === "criar" ? "Senha, pelo menos 4 caracteres" : "Senha"}
             onKeyDown={(e) => e.key === "Enter" && (modo === "entrar" ? entrar() : criarConta())}
             className={campo} />
         )}

@@ -194,6 +194,29 @@ TOOLS = [
             "required": ["nome", "cpf", "email"]
         }
     },
+    # URGÊNCIA QUE FICA SÓ NA CONVERSA É URGÊNCIA QUE NINGUÉM VIU.
+    # Diferente de `escalar`, que muda o estado do caso e tira o
+    # atendimento de cena: aqui o caso segue como está, e o que se
+    # cria é uma tarefa de prioridade alta para hoje, no plano de
+    # quem cuida dele.
+    {
+        "name": "avisar_o_escritorio",
+        "description": (
+            "Registra um alerta de prioridade alta para o advogado que cuida "
+            "deste caso, sem mudar o estado do caso. Use quando o cliente "
+            "demonstrar urgência real, prejuízo iminente, compromisso próprio "
+            "em risco, ou quando reclamar de demora."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "motivo": {"type": "string",
+                           "description": "O que o cliente precisa, em uma frase."},
+                "gravidade": {"type": "string", "enum": ["ALTA", "MEDIA"]},
+            },
+            "required": ["motivo"]
+        }
+    },
 ]
 
 
@@ -249,6 +272,33 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
         f"mensagem. Antes de perguntar algo, confira o histórico: se o cliente " \
         f"já respondeu, NÃO repita a pergunta."
 
+    # NINGUÉM RESPONDE SEM OLHAR
+    #
+    # O especialista sabia conduzir a jornada, mas não sabia responder
+    # "como está o meu processo": ele não enxergava movimentação, prazo
+    # em aberto nem data da última ação, e por isso respondia com
+    # simpatia e nenhuma informação. A varredura entra aqui, como fato,
+    # e é dela que sai a resposta sobre andamento.
+    try:
+        from . import atendente
+        retrato = atendente._texto_da_situacao(atendente.situacao_do_caso(caso_id))
+        system += (
+            "\n\nSITUAÇÃO REAL DO CASO, LEVANTADA AGORA NO SISTEMA\n"
+            "=================================================\n"
+            + retrato
+            + "\n\nQuando o cliente perguntar sobre andamento, responda a "
+              "partir deste retrato: diga em que ponto está e a data da "
+              "última ação. Se houver prazo em aberto e ele ainda não "
+              "venceu, diga que o escritório está dentro do prazo e até "
+              "quando. Não invente movimentação que não esteja aqui: se "
+              "não souber, diga que vai confirmar e retornar. Se o cliente "
+              "demonstrar urgência, use a ferramenta avisar_o_escritorio e "
+              "conte a ele que o caso foi encaminhado como prioridade ao "
+              "advogado responsável."
+        )
+    except Exception as e:
+        print(f"[especialista] varredura do caso não disponível: {e}")
+
     historico = _historico(caso_id)
     historico.append({"role": "user", "content": mensagem_cliente})
 
@@ -289,6 +339,13 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
 
 def _executar_ferramenta(caso_id: str, caso: dict, nome: str, dados: dict) -> dict:
     db = get_db()
+
+    if nome == "avisar_o_escritorio":
+        from . import atendente
+        return {"ferramenta": "avisar_o_escritorio",
+                **atendente.avisar_o_escritorio(
+                    "CASO", caso_id, dados.get("motivo", ""),
+                    dados.get("gravidade", "ALTA"))}
 
     if nome == "escalar":
         r = escalar_para_humano(caso_id, dados["motivo"], dados.get("detalhe", ""))

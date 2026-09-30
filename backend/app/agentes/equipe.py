@@ -356,8 +356,8 @@ def aceitar(token: str, senha: str, ip: str | None = None) -> dict:
     escolhe senha provisória e não guarda a definitiva: senha que o
     escritório conhece é senha que o escritório responde por."""
     dados = ver_convite(token)          # revalida prazo, status e existência
-    if len(senha or "") < 8:
-        raise ValueError("A senha precisa de pelo menos 8 caracteres.")
+    if len(senha or "") < 4:
+        raise ValueError("A senha precisa de pelo menos 4 caracteres.")
 
     db = get_db()
     c = db.table("convites_equipe").select("*").eq("token", token) \
