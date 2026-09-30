@@ -71,6 +71,12 @@ export default function Balcao() {
   useEffect(() => {
     fetch(`${API}/api/v1/contratos/tipos`).then((r) => r.json())
       .then((d) => setTipos(Array.isArray(d) ? d : [])).catch(() => setTipos([]));
+    // Quem chega pelo "Pedir meu contrato" ainda não tem conta. Abrir
+    // em "Entrar" faria essa pessoa procurar o link de cadastro antes
+    // de conseguir começar.
+    if (new URLSearchParams(window.location.search).get("novo") === "1") {
+      setModo("criar");
+    }
     supabase.auth.getSession().then(({ data }) => setSessao(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSessao(s));
     return () => sub.subscription.unsubscribe();
@@ -262,9 +268,17 @@ export default function Balcao() {
         ) : (
           /* PASSO 1, escolher o serviço */
           <section>
-            <div className="mb-4 flex items-center justify-between text-xs text-white/50">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-white/50">
               <span>Escolha o documento que você precisa</span>
-              <button onClick={() => supabase.auth.signOut()} className="underline hover:text-white">sair</button>
+              <span className="flex items-center gap-4">
+                {/* A conta do balcão é a mesma da área do cliente. Sem
+                    este caminho, quem entrou por aqui não descobriria
+                    que tem uma área inteira do outro lado. */}
+                <a href="/cliente" className="underline hover:text-white">
+                  meus pedidos e processos
+                </a>
+                <button onClick={() => supabase.auth.signOut()} className="underline hover:text-white">sair</button>
+              </span>
             </div>
 
             {/* A BUSCA, E O QUE FAZER QUANDO ELA NÃO ACHA NADA
@@ -600,6 +614,28 @@ function Entrada({
             + "pediu."
           : "Vamos recuperar o seu acesso."}
       </p>
+
+      {/* O QUE A CONTA DÁ, ALÉM DE GUARDAR O PEDIDO
+
+          Quem chega aqui está pedindo um documento e não sabe que a
+          mesma conta abre a área inteira do cliente. Dizer isso na
+          hora do cadastro transforma um formulário chato em algo que
+          a pessoa entende por que está preenchendo. */}
+      {modo === "criar" && (
+        <ul className="mt-4 space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
+          {[
+            "Seu pedido fica guardado: sair no meio e voltar é continuar, não recomeçar",
+            "Conversa com o escritório registrada, disponível a qualquer hora",
+            "Quantos documentos quiser, cada um com o seu número de protocolo",
+            "E, se um dia tiver um processo conosco, ele aparece na mesma área",
+          ].map((t) => (
+            <li key={t} className="flex gap-2.5 text-xs leading-relaxed text-white/70">
+              <span aria-hidden="true" className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[#2D7DD2]" />
+              {t}
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="mt-5 grid gap-3">
         {modo === "criar" && (

@@ -545,7 +545,11 @@ export default function AreaCliente() {
             />
 
             <Cartao
-              onClick={() => setVista("contrato")}
+              // Vai para o balcão, que é onde o pedido de verdade
+              // acontece: catálogo, negociação, pagamento e coleta. A
+              // conversa antiga desta tela era um caminho paralelo que
+              // não gerava pedido nenhum.
+              onClick={() => { window.location.href = "/balcao"; }}
               icone={ICONES.caneta}
               titulo="Pedir um contrato"
               texto="Contrato ou notificação sob medida para o seu caso, com revisão e ajustes antes da entrega."

@@ -97,7 +97,7 @@ export default function ContratoLanding() {
 
             <div className="mt-10">
               <Link
-                href="/balcao"
+                href="/balcao?novo=1"
                 className="inline-flex w-full items-center justify-center rounded-lg bg-gold px-9 py-4 text-subtitle font-bold text-navy shadow-card transition hover:brightness-95 sm:w-auto"
               >
                 Pedir meu contrato
@@ -105,6 +105,14 @@ export default function ContratoLanding() {
               <p className="mt-3 text-small text-slate">
                 Pronto em até 24 horas. Se precisar para hoje, há entrega em
                 até 6 horas.
+              </p>
+              {/* Dizer que começa por um cadastro evita a surpresa de
+                  quem clica esperando um formulário de duas linhas. E
+                  explica o porquê, que é o que faz a pessoa aceitar. */}
+              <p className="mt-2 text-small text-slate/80">
+                O primeiro passo é criar o seu acesso com senha. É o que guarda
+                a sua conversa e o seu pedido: se você sair no meio, volta de
+                onde parou.
               </p>
             </div>
           </div>
@@ -222,7 +230,7 @@ export default function ContratoLanding() {
           </h2>
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
             <Link
-              href="/balcao"
+              href="/balcao?novo=1"
               className="inline-flex items-center justify-center rounded-lg bg-gold px-9 py-4 text-subtitle font-bold text-navy shadow-card transition hover:brightness-95"
             >
               Pedir meu contrato
