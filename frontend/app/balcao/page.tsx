@@ -439,7 +439,7 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
   const [usouSaida, setUsouSaida] = useState(false);
   const [propostaEnviada, setPropostaEnviada] = useState(false);
   const [enviandoArquivo, setEnviandoArquivo] = useState(false);
-  const fim = useRef<HTMLDivElement>(null);
+  const caixa = useRef<HTMLDivElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   const anexo = useRef<HTMLInputElement>(null);
 
@@ -458,7 +458,13 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
     })();
   }, [pedidoId]);
 
-  useEffect(() => { fim.current?.scrollIntoView({ behavior: "smooth" }); }, [falas]);
+  /* Quem rola é a caixa da conversa, pelo próprio scrollTop.
+     `scrollIntoView` rola todos os ancestrais, e com isso arrasta a
+     página inteira, o que atrapalha quem está lendo outra parte. */
+  useEffect(() => {
+    const c = caixa.current;
+    if (c) c.scrollTop = c.scrollHeight;
+  }, [falas]);
 
   const enviar = useCallback(async (msg: string, vaiSair = false) => {
     if (!msg.trim() && !vaiSair) return;
@@ -569,7 +575,8 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
         )}
       </div>
 
-      <div className="max-h-[42vh] space-y-2 overflow-y-auto rounded-xl bg-[#0A1628] p-3">
+      <div ref={caixa}
+        className="max-h-[42vh] space-y-2 overflow-y-auto rounded-xl bg-[#0A1628] p-3">
         {falas.map((f, i) => (
           <div key={i}
             className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${f.de === "agente"
@@ -579,7 +586,6 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
           </div>
         ))}
         {pensando && <p className="text-[11px] text-white/35">digitando…</p>}
-        <div ref={fim} />
       </div>
 
       {propostaEnviada && (

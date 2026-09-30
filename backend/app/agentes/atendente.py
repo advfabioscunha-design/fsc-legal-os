@@ -518,22 +518,44 @@ def responder(escopo: str, alvo_id: str, pergunta: str) -> dict:
     )
 
     texto, avisos = "", []
+    mensagens: list[dict] = [{"role": "user", "content": contexto}]
     try:
-        r = _claude().messages.create(
-            model=s.claude_model,
-            max_tokens=700,
-            system=SYSTEM,
-            tools=FERRAMENTAS,
-            messages=[{"role": "user", "content": contexto}],
-        )
-        for bloco in r.content:
-            if bloco.type == "text":
-                texto += bloco.text
-            elif bloco.type == "tool_use" and bloco.name == "avisar_o_escritorio":
-                d = bloco.input or {}
-                avisos.append(avisar_o_escritorio(
-                    escopo, alvo_id, d.get("motivo", "sem motivo declarado"),
-                    d.get("gravidade", "ALTA"), pergunta))
+        cliente = _claude()
+        # DUAS VOLTAS, E A SEGUNDA É A QUE IMPORTA
+        #
+        # Numa volta só, quando o modelo usa a ferramenta de urgência
+        # ele devolve o pedido de ferramenta e mais nada: a resposta
+        # ficava vazia e caía no texto de reserva, que é justamente o
+        # "recebi e retorno depois" que não diz nada. Devolvendo o
+        # resultado da ferramenta, ele volta e escreve a resposta de
+        # verdade, já sabendo que o alerta foi registrado.
+        for _ in range(3):
+            r = cliente.messages.create(
+                model=s.claude_model,
+                max_tokens=700,
+                system=SYSTEM,
+                tools=FERRAMENTAS,
+                messages=mensagens,
+            )
+            usos = [b for b in r.content if getattr(b, "type", "") == "tool_use"]
+            texto = "".join(b.text for b in r.content
+                            if getattr(b, "type", "") == "text").strip() or texto
+            if not usos:
+                break
+            mensagens.append({"role": "assistant", "content": r.content})
+            resultados = []
+            for u in usos:
+                if u.name == "avisar_o_escritorio":
+                    d = u.input or {}
+                    saida = avisar_o_escritorio(
+                        escopo, alvo_id, d.get("motivo", "sem motivo declarado"),
+                        d.get("gravidade", "ALTA"), pergunta)
+                    avisos.append(saida)
+                else:
+                    saida = {"erro": "ferramenta desconhecida"}
+                resultados.append({"type": "tool_result", "tool_use_id": u.id,
+                                   "content": json.dumps(saida, ensure_ascii=False)})
+            mensagens.append({"role": "user", "content": resultados})
     except Exception as e:
         print(f"[atendimento] não consegui responder agora: {e}")
         # Silêncio é pior do que uma frase honesta. O cliente precisa

@@ -408,8 +408,37 @@ def detalhe(tipo: str) -> dict | None:
     """
     v = CATALOGO.get(tipo)
     if not v:
-        return dict(OUTRO, id="OUTRO") if tipo == "OUTRO" else None
-    return {"id": tipo, **{k: x for k, x in v.items() if k != "preco"}}
+        base = dict(OUTRO, id="OUTRO") if tipo == "OUTRO" else None
+        if base is not None:
+            base["campos_objeto"] = _campos_do_objeto(base.get("campos") or [])
+        return base
+    saida = {"id": tipo, **{k: x for k, x in v.items() if k != "preco"}}
+    saida["campos_objeto"] = _campos_do_objeto(saida.get("campos") or [])
+    return saida
+
+
+def _campos_do_objeto(campos: list[dict]) -> list[dict]:
+    """Os campos do negócio, sem a qualificação das partes.
+
+    A tela do pedido pedia o locador e o locatário duas vezes: uma na
+    caixa das partes, que nasceu depois, e outra aqui, porque a lista
+    de campos do tipo sempre trouxe a qualificação junto. O cliente
+    digitava o mesmo CPF em dois lugares da mesma página e, com razão,
+    achava que tinha errado alguma coisa.
+
+    A separação é feita aqui, e não na tela, porque quem sabe quais
+    campos pertencem a uma parte é o catálogo: são os que começam com
+    o nome de um papel, e o papel se reconhece pelo campo `<papel>_nome`
+    que a qualificação sempre declara. Tipo novo nasce separado sozinho.
+
+    `campos` continua inteiro no retorno: quem monta o documento
+    precisa da lista completa, e é só a tela de coleta que usa esta."""
+    papeis = {c["campo"][:-5] for c in campos
+              if (c.get("campo") or "").endswith("_nome")}
+    if not papeis:
+        return list(campos)
+    return [c for c in campos
+            if not any((c.get("campo") or "").startswith(p + "_") for p in papeis)]
 
 
 # ── O serviço que não está na lista ─────────────────────────────

@@ -191,7 +191,15 @@ export default function PedidoDoCliente() {
     return <main className="flex min-h-screen items-center justify-center bg-[#0A1628] text-white/60">Carregando…</main>;
   }
 
-  const obrigatoriosFaltando = (tipo?.campos || [])
+  /* A QUALIFICAÇÃO DAS PARTES NÃO ENTRA AQUI
+
+     `campos` traz a lista inteira do tipo, com locador e locatário
+     junto. Como a caixa das partes passou a perguntar isso logo
+     acima, usar a lista inteira fazia a mesma pessoa ser pedida duas
+     vezes na mesma página. `campos_objeto` é a lista sem as partes,
+     separada pelo catálogo, que é quem sabe o que pertence a quem. */
+  const camposDoObjeto = (tipo?.campos_objeto || tipo?.campos || []) as any[];
+  const obrigatoriosFaltando = camposDoObjeto
     .filter((c: any) => c.obrigatorio && !(valores[c.campo] || "").trim()).length;
 
   return (
@@ -379,7 +387,7 @@ export default function PedidoDoCliente() {
             {/* Caminho 2: digitar */}
             {comoEnviar === "FORMULARIO" && (
               <div className="mt-4 space-y-3">
-                {(tipo.campos || []).map((c: any) => (
+                {camposDoObjeto.map((c: any) => (
                   <label key={c.campo} className="block">
                     <span className="text-xs text-white/70">
                       {c.rotulo}{c.obrigatorio && <span className="text-[#C0392B]"> *</span>}
@@ -697,7 +705,8 @@ function Conversa({ pedidoId, aoMudar }: {
   const [aviso, setAviso] = useState("");
   const camera = useRef<HTMLInputElement>(null);
   const anexo = useRef<HTMLInputElement>(null);
-  const fim = useRef<HTMLDivElement>(null);
+  const caixa = useRef<HTMLDivElement>(null);
+  const quantas = useRef(0);
 
   const carregar = useCallback(async () => {
     try {
@@ -714,7 +723,25 @@ function Conversa({ pedidoId, aoMudar }: {
     const t = setInterval(carregar, 30000);
     return () => clearInterval(t);
   }, [carregar]);
-  useEffect(() => { fim.current?.scrollIntoView({ behavior: "smooth" }); }, [falas]);
+
+  /* O ROLAR QUE ARRASTAVA A PÁGINA INTEIRA
+
+     Isto era um `scrollIntoView` numa marca no fim da lista, e ele
+     rola todos os ancestrais até o elemento aparecer: como a conversa
+     fica no pé da página, a página inteira descia. Pior, a recarga de
+     meio em meio minuto criava um array novo mesmo sem mensagem nova,
+     então a tela pulava sozinha enquanto a pessoa digitava o endereço
+     do imóvel lá em cima.
+
+     Agora quem rola é a caixa da conversa, pelo próprio scrollTop,
+     que não toca na página. E só quando o número de mensagens de fato
+     aumentou. */
+  useEffect(() => {
+    if (falas.length <= quantas.current) { quantas.current = falas.length; return; }
+    quantas.current = falas.length;
+    const c = caixa.current;
+    if (c) c.scrollTop = c.scrollHeight;
+  }, [falas]);
 
   async function mandarTexto(msg?: string) {
     const conteudo = (msg ?? texto).trim();
@@ -777,7 +804,8 @@ function Conversa({ pedidoId, aoMudar }: {
         escrever, fotografar um documento ou anexar um arquivo.
       </p>
 
-      <div className="mt-4 max-h-[46vh] space-y-2 overflow-y-auto rounded-xl bg-[#0A1628] p-3">
+      <div ref={caixa}
+        className="mt-4 max-h-[46vh] space-y-2 overflow-y-auto rounded-xl bg-[#0A1628] p-3">
         {falas.length === 0 && (
           <p className="py-6 text-center text-[11px] text-white/35">
             Nenhuma mensagem ainda. Escreva abaixo se precisar de algo.
@@ -797,7 +825,6 @@ function Conversa({ pedidoId, aoMudar }: {
             </div>
           );
         })}
-        <div ref={fim} />
       </div>
 
       <div className="mt-3 flex gap-2">
