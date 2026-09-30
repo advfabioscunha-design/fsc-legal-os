@@ -1316,7 +1316,7 @@ function TrocarSenha() {
   const [ocupado, setOcupado] = useState(false);
 
   async function trocar() {
-    if (nova.length < 4) { setErro("A senha precisa de pelo menos 4 caracteres."); return; }
+    if (nova.length < 6) { setErro("A senha precisa de pelo menos 6 caracteres."); return; }
     if (nova !== repetir) { setErro("As duas senhas não são iguais."); return; }
     setOcupado(true); setErro(""); setAviso("");
     try {
@@ -1344,7 +1344,7 @@ function TrocarSenha() {
         <div className="mt-3 max-w-md">
           <label className="block text-xs font-medium text-charcoal/60">Senha nova
             <input type="password" value={nova} onChange={(e) => setNova(e.target.value)}
-              placeholder="pelo menos 4 caracteres"
+              placeholder="pelo menos 6 caracteres"
               className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-electric" />
           </label>
           <label className="mt-3 block text-xs font-medium text-charcoal/60">Repita a senha nova

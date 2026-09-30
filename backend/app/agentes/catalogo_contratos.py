@@ -513,6 +513,10 @@ def precificar(tipo: str, com_orientacao: bool = False,
         "desconto_pct": pct, "desconto": desconto,
         "urgencia": urgencia, "sem_assinatura": sem_assinatura,
         "total": total,
+        # O que seria sem o desconto. Existe para a tela poder mostrar
+        # o número anterior riscado ao lado do novo: ver o valor descer
+        # comunica mais do que a frase "com 20% de desconto".
+        "total_sem_desconto": round(total + desconto, 2),
         "horas": HORAS_URGENTE if urgente else HORAS_PADRAO,
         "itens": itens,
     }

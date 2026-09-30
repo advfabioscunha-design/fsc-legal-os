@@ -105,7 +105,7 @@ export default function Balcao() {
   async function criarConta() {
     setOcupado(true); setErro(""); setAviso("");
     if (nome.trim().length < 5) { setErro("Informe seu nome completo."); setOcupado(false); return; }
-    if (senha.length < 4) { setErro("A senha precisa ter pelo menos 4 caracteres."); setOcupado(false); return; }
+    if (senha.length < 6) { setErro("A senha precisa ter pelo menos 6 caracteres."); setOcupado(false); return; }
     const { error } = await supabase.auth.signUp({
       email, password: senha, options: { data: { nome } },
     });
@@ -451,6 +451,8 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
           { method: "POST" });
         const d = await r.json();
         if (d?.texto) setFalas([{ de: "agente", texto: d.texto }]);
+        // A abertura não traz valor de propósito. O painel de preço só
+        // acende quando o primeiro número sai, lá adiante.
         if (d?.conta) setConta(d.conta);
       } finally { setPensando(false); }
     })();
@@ -534,11 +536,33 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
           <h2 className="text-sm font-bold text-[#C9A24D]">{escolhido?.nome}</h2>
           <p className="text-[11px] text-white/45">{escolhido?.base_legal}</p>
         </div>
+        {/* O PAINEL DE VALOR ACENDE DEPOIS
+
+            Ele nascia junto com a conversa e mostrava o preço antes de
+            a pessoa ter lido uma linha sobre o que está comprando.
+            Número sozinho no alto da tela empurra a comparação com
+            modelo de internet, que é a única régua que o cliente tem
+            quando ninguém lhe deu outra.
+
+            Agora ele só aparece quando o primeiro valor é apresentado
+            na conversa, e a cada desconto o valor anterior fica ao
+            lado, riscado. Ver o número descer vale mais do que ler
+            "com 20% de desconto". */}
         {conta && (
           <div className="text-right">
-            <p className="text-lg font-bold text-white">{reais(conta.total)}</p>
+            <div className="flex items-baseline justify-end gap-2">
+              {conta.desconto_pct > 0 && conta.total_sem_desconto
+                && Number(conta.total_sem_desconto) > Number(conta.total) && (
+                <span className="text-xs text-white/35 line-through">
+                  {reais(Number(conta.total_sem_desconto))}
+                </span>
+              )}
+              <p className="text-lg font-bold text-white">{reais(conta.total)}</p>
+            </div>
             {conta.desconto_pct > 0 && (
-              <p className="text-[10px] text-[#1DB954]">com {conta.desconto_pct}% de desconto</p>
+              <p className="text-[10px] text-[#1DB954]">
+                {conta.desconto_pct}% de desconto aplicado
+              </p>
             )}
             <p className="text-[10px] text-white/40">entrega em até {conta.horas}h</p>
           </div>
@@ -738,7 +762,7 @@ function Entrada({
         {(modo === "entrar" || modo === "criar") && (
           <input value={senha} onChange={(e) => setSenha(e.target.value)}
             type="password"
-            placeholder={modo === "criar" ? "Senha, pelo menos 4 caracteres" : "Senha"}
+            placeholder={modo === "criar" ? "Senha, pelo menos 6 caracteres" : "Senha"}
             onKeyDown={(e) => e.key === "Enter" && (modo === "entrar" ? entrar() : criarConta())}
             className={campo} />
         )}

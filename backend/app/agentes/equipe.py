@@ -356,8 +356,15 @@ def aceitar(token: str, senha: str, ip: str | None = None) -> dict:
     escolhe senha provisória e não guarda a definitiva: senha que o
     escritório conhece é senha que o escritório responde por."""
     dados = ver_convite(token)          # revalida prazo, status e existência
-    if len(senha or "") < 4:
-        raise ValueError("A senha precisa de pelo menos 4 caracteres.")
+    # SEIS, E NÃO OITO NEM QUATRO
+    #
+    # Oito afastava gente sem ganho real para um painel que não guarda
+    # dinheiro. Quatro seria melhor ainda para a vida de quem usa, mas
+    # o Supabase Auth recusa qualquer valor abaixo de seis, e validar
+    # aqui um limite que o provedor rejeita depois só produz erro
+    # confuso na tela. Seis é o piso possível.
+    if len(senha or "") < 6:
+        raise ValueError("A senha precisa de pelo menos 6 caracteres.")
 
     db = get_db()
     c = db.table("convites_equipe").select("*").eq("token", token) \

@@ -44,7 +44,7 @@ export default function Convite() {
   useEffect(() => { carregar(); }, [carregar]);
 
   async function concluir() {
-    if (senha.length < 4) { setErro("A senha precisa de pelo menos 4 caracteres."); return; }
+    if (senha.length < 6) { setErro("A senha precisa de pelo menos 6 caracteres."); return; }
     if (senha !== repetir) { setErro("As duas senhas não são iguais."); return; }
     setOcupado(true); setErro("");
     try {
@@ -170,7 +170,7 @@ export default function Convite() {
             <label className="block">
               <span className="text-caption text-slate">Senha</span>
               <input value={senha} onChange={(e) => setSenha(e.target.value)}
-                type="password" placeholder="pelo menos 4 caracteres"
+                type="password" placeholder="pelo menos 6 caracteres"
                 className="mt-1 w-full rounded-lg border border-white/10 bg-navy px-3 py-2.5 text-small text-white placeholder:text-slate/60 outline-none transition focus:border-electric" />
             </label>
             <label className="block">

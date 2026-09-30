@@ -112,7 +112,7 @@ export default function Entrar() {
           <input
             type="password" className="w-full rounded-lg border border-black/10 bg-white px-4 py-3 text-sm text-charcoal outline-none focus:border-gold"
             placeholder={modo === "cadastro" ? "Crie uma senha" : "Senha"} value={senha}
-            onChange={(e) => setSenha(e.target.value)} required minLength={4}
+            onChange={(e) => setSenha(e.target.value)} required minLength={6}
           />
           <button
             type="submit" disabled={carregando}

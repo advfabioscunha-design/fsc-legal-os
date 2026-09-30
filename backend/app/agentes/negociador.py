@@ -85,10 +85,20 @@ se ela precisar, com acréscimo). Não é modelo preenchido: o texto é redigido
 partir do que ela contar, revisado, e conferido por advogado antes de chegar \
 às mãos dela.
 
+POR QUE SAI MAIS BARATO
+Porque a pessoa participa. Ela mesma informa as condições do negócio pela \
+plataforma, e isso poupa as horas de reunião que um escritório comum cobra. O \
+que barateia é a participação dela, nunca o cuidado com o documento. Diga isso \
+quando falar de preço: é a explicação honesta de um valor abaixo do mercado, e \
+evita que o barato pareça descuido.
+
 COMO CONDUZIR
-1. Comece pelo valor, nunca pelo preço. Diga o que ela leva e por que isso \
-importa no caso dela.
-2. Só então diga o preço, com naturalidade, sem pedir desculpa por ele.
+1. Comece pelo valor, nunca pelo preço. NÃO DIGA NÚMERO NA ABERTURA. Primeiro \
+ela precisa entender que não vai receber modelo pronto, e sim documento \
+redigido por profissional que responde pelo que assina.
+2. O preço só entra quando ela pedir, ou quando já tiver dito que entendeu o \
+serviço. Aí sim, diga com naturalidade, sem pedir desculpa por ele, e explique \
+em uma frase por que é abaixo do mercado.
 3. Se ela hesitar, PERGUNTE o que achou do valor e o que a está segurando. \
 Não despeje outro argumento e não ofereça desconto antes de ouvir.
 4. Ouvida a objeção, responda o que ela de fato disse. Se for comparação com \
@@ -135,7 +145,11 @@ ela sempre pode voltar a falar.
 O contrário também vale. Se ela já tiver aceitado e depois quiser propor outro \
 valor, o pedido volta a ficar em aberto.
 
-Respostas curtas: duas a quatro frases. Uma pergunta por vez."""
+TAMANHO DA RESPOSTA
+Curta. No máximo três frases, e frases curtas. Uma pergunta por vez, sempre no \
+fim. Texto comprido em tela de atendimento não é lido, é pulado, e quem pula a \
+explicação decide só pelo preço. Se precisar explicar algo longo, diga a parte \
+que importa agora e ofereça detalhar."""
 
 
 FERRAMENTAS = [
@@ -464,27 +478,34 @@ def _executar_fechar(pedido: dict, args: dict) -> dict:
 
 # ── A conversa ──────────────────────────────────────────────────
 def abrir(pedido_id: str) -> dict:
-    """A primeira fala: o que o cliente leva, e depois quanto custa."""
+    """A primeira fala: o que o cliente leva. Preço, ainda não.
+
+    O preço saía aqui, na abertura, e junto com ele aparecia o valor no
+    alto da tela antes de a pessoa ter ouvido uma linha sobre o que
+    está comprando. Número antes de motivo é como o cliente compara
+    contrato de advogado com modelo de internet: pelo preço, que é a
+    única coisa que ele tem na mão.
+
+    Agora a abertura diz três coisas e cala: não é modelo pronto, quem
+    escreve responde pelo que assina, e o valor é menor do que o
+    praticado justamente porque o cliente participa da elaboração em
+    vez de pagar por horas de reunião. O número vem depois, quando ele
+    pedir, e é aí que o painel de valor acende."""
     pedido = _pedido(pedido_id)
     t = catalogo.detalhe(pedido["tipo"]) or {}
-    conta = catalogo.precificar(
-        pedido["tipo"], com_orientacao=bool(pedido.get("com_orientacao")))
 
     texto = (
         f"Você está pedindo um {t.get('nome', 'contrato')} feito sob medida.\n\n"
-        f"Quem escreve é advogado inscrito na OAB, que responde pelo que "
-        f"assina. O texto é redigido a partir do seu caso, não é modelo "
-        f"preenchido, segue a legislação aplicável a esse tipo de contrato, "
-        f"passa por revisão e é conferido por advogado antes de chegar até "
-        f"você. Fica pronto em até 24 horas.\n\n"
-        f"O investimento é de R$ {conta['total']:.2f}."
+        f"Não é modelo pronto. O texto é redigido por advogado inscrito na "
+        f"OAB, a partir do seu caso, seguindo a lei que rege esse tipo de "
+        f"contrato. Fica pronto em até 24 horas.\n\n"
+        f"Como você mesmo informa as condições aqui pela plataforma, o "
+        f"serviço sai abaixo do praticado no mercado: o que barateia é a sua "
+        f"participação, não o cuidado com o documento.\n\n"
+        f"Quer que eu já passe o valor?"
     )
-    _guardar_mensagem(pedido_id, "AGENTE", texto,
-                      {"proposta": conta["total"], "desconto": 0})
-    _anotar(pedido_id, {"tipo": "PROPOSTA", "desconto": 0,
-                        "total": conta["total"], "porque": "abertura"})
-    return {"texto": texto, "conta": conta, "tipo": t.get("nome"),
-            "alerta": t.get("alerta")}
+    _guardar_mensagem(pedido_id, "AGENTE", texto, {"abertura": True})
+    return {"texto": texto, "tipo": t.get("nome"), "alerta": t.get("alerta")}
 
 
 def conversar(pedido_id: str, mensagem: str,
