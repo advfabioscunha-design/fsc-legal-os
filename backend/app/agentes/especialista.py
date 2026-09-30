@@ -16,6 +16,7 @@ import json
 import anthropic
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core.texto import REGRA_DE_ESCRITA, humanizar
 from .orquestrador import mudar_estado, escalar_para_humano
 
 _client = None
@@ -294,7 +295,7 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
               "não souber, diga que vai confirmar e retornar. Se o cliente "
               "demonstrar urgência, use a ferramenta avisar_o_escritorio e "
               "conte a ele que o caso foi encaminhado como prioridade ao "
-              "advogado responsável."
+              "advogado responsável.\n\n" + REGRA_DE_ESCRITA
         )
     except Exception as e:
         print(f"[especialista] varredura do caso não disponível: {e}")
@@ -325,6 +326,11 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
         texto_resposta = (f"{primeiro_nome + ', ' if primeiro_nome else ''}"
                           "tive uma instabilidade rápida aqui. Pode repetir a "
                           "última mensagem? Já retomo seu atendimento.")
+
+    # A peneira antes de sair. Travessão no meio da frase e asterisco
+    # de negrito entregam a origem do texto em três palavras, e a
+    # caixa de conversa mostra os asteriscos como estão.
+    texto_resposta = humanizar(texto_resposta)
 
     if texto_resposta:
         db.table("mensagens").insert({

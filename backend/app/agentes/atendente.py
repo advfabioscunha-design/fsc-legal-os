@@ -56,6 +56,7 @@ import anthropic
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core.texto import REGRA_DE_ESCRITA, humanizar
 
 
 # ── Rótulos de fase, na língua do cliente ──────────────────────
@@ -122,12 +123,11 @@ Nunca prometa hora exata.
 
 LINGUAGEM
 
-Escreva como uma pessoa do escritório escreve: direto, educado, sem
-formalidade de cartório e sem entusiasmo de vendedor. Português do
-Brasil. Frases curtas. No máximo dois parágrafos, salvo quando houver
-lista do que falta.
+""" + REGRA_DE_ESCRITA + """
 
-Trate o cliente pelo primeiro nome quando ele constar da situação.
+Português do Brasil. No máximo dois parágrafos, salvo quando houver
+lista do que falta. Trate o cliente pelo primeiro nome quando ele
+constar da situação.
 
 PROIBIDO
 
@@ -501,7 +501,7 @@ def responder(escopo: str, alvo_id: str, pergunta: str) -> dict:
                           "seguida."),
                 "situacao": situacao, "avisos": [], "falhou": True}
 
-    texto = (texto or "").strip()
+    texto = humanizar(texto or "")
     if not texto:
         texto = ("Recebi a sua mensagem. Vou conferir o andamento e retorno "
                  "em seguida.")
@@ -650,7 +650,7 @@ def ler_e_encaminhar(pedido_id: str, documentos: list[dict]) -> dict:
                                        else "os documentos ")
                      + ", ".join(str(x) for x in lidos)
                      + ". Está guardado com o seu pedido.")
-        falta = (saida.get("pendencias") or {}).get("faltando") or []
+        falta = (saida.get("pendencias") or {}).get("obrigatorias") or []
         if falta:
             aviso += (" Ainda preciso de: "
                       + "; ".join(str(f.get("rotulo") or f) for f in falta) + ".")

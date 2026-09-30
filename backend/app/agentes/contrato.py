@@ -29,7 +29,7 @@ PRECOS = {"baixa": "R$ 69,90", "media": "R$ 99,90", "alta": "R$ 249,90"}
 SAUDACAO_CONTRATO = (
     "Olá! Seja muito bem-vindo(a) ao serviço de Elaboração de Contratos da FC Advocacia. "
     "Será um prazer cuidar do seu contrato com total segurança jurídica.\n\n"
-    "Antes de tudo, deixe eu te explicar como funciona o valor — ele depende da complexidade do contrato:\n"
+    "Antes de tudo, deixe eu te explicar como funciona o valor. Ele depende da complexidade do contrato:\n"
     "• Baixa complexidade: R$ 69,90 (contratos simples, ex.: recibos, declarações, acordos básicos)\n"
     "• Média complexidade: R$ 99,90 (cláusulas específicas e obrigações mais detalhadas)\n"
     "• Alta complexidade: R$ 249,90 (garantias, várias partes ou alto valor envolvido)\n\n"
@@ -52,7 +52,7 @@ menor que a sua análise. Confirme a faixa e o valor antes de prosseguir.
 
 ORDEM DO ATENDIMENTO:
 1) O cliente já assinou o contrato de serviço e fará o pagamento (Asaas) conforme a complexidade.
-2) Depois, colete — uma pergunta por vez — as informações necessárias para o contrato:
+2) Depois, colete, uma pergunta por vez, as informações necessárias para o contrato:
    partes (nomes/CPF/CNPJ), objeto, valores, forma de pagamento, prazos, garantias,
    penalidades e condições específicas. Não invente nada; pergunte o que faltar.
 3) Quando tiver TODAS as informações, ESPELHE o contrato completo: escreva o texto integral
@@ -97,7 +97,12 @@ def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
             texto = "Recebi sua mensagem e já estou cuidando do seu contrato. Pode me enviar mais um detalhe?"
     except Exception:
         texto = ("Recebi sua mensagem e já estou cuidando da elaboração do seu contrato. "
-                 "Me dê só mais um detalhe que eu sigo de onde paramos — não vou te deixar sem resposta.")
+                 "Me dê só mais um detalhe que eu sigo de onde paramos, não vou te deixar sem resposta.")
+    # A mesma peneira dos outros agentes: travessão e asterisco de
+    # negrito fora, que é o que denuncia a origem do texto.
+    from ..core.texto import humanizar
+    texto = humanizar(texto)
+
     db.table("mensagens").insert({
         "caso_id": caso_id, "canal": canal, "autor": "AGENTE", "conteudo": texto,
     }).execute()

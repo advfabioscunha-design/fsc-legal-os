@@ -52,6 +52,7 @@ import anthropic
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core.texto import REGRA_DE_ESCRITA, humanizar
 from . import catalogo_contratos as catalogo
 
 # O modelo vem da configuração, como no resto do sistema: trocar de
@@ -144,6 +145,8 @@ ela sempre pode voltar a falar.
 
 O contrário também vale. Se ela já tiver aceitado e depois quiser propor outro \
 valor, o pedido volta a ficar em aberto.
+
+""" + REGRA_DE_ESCRITA + """
 
 TAMANHO DA RESPOSTA
 Curta. No máximo três frases, e frases curtas. Uma pergunta por vez, sempre no \
@@ -633,6 +636,11 @@ def conversar(pedido_id: str, mensagem: str,
     if not resposta_final:
         resposta_final = ("Me diga o que você achou do valor, quero entender "
                           "o que está te segurando.")
+
+    # A peneira antes de sair. O modelo insiste em travessão e em
+    # asterisco de negrito, e a caixa de conversa mostra os dois como
+    # texto cru. Instruir no prompt reduz; peneirar aqui garante.
+    resposta_final = humanizar(resposta_final)
 
     _guardar_mensagem(pedido_id, "AGENTE", resposta_final,
                       {"total": (conta_final or {}).get("total"),
