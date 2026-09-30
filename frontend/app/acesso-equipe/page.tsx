@@ -128,7 +128,10 @@ export default function AcessoEquipe() {
             {ocupado ? "Entrando…" : "Entrar"}
           </button>
 
-          <Link href="/entrar?next=/inicio"
+          {/* Levava para a tela de entrada, onde a opção não existia:
+              quem esquecia a senha dava a volta e voltava ao mesmo
+              lugar. Agora abre direto no modo de recuperação. */}
+          <Link href="/entrar?recuperar=1&next=/inicio"
             className="mt-4 block text-center text-small text-slate underline underline-offset-4 transition hover:text-white">
             esqueci a senha
           </Link>

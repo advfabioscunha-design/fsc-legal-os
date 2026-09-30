@@ -4,9 +4,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
+
 export default function Entrar() {
   const router = useRouter();
-  const [modo, setModo] = useState<"login" | "cadastro">("login");
+  const [modo, setModo] = useState<"login" | "cadastro" | "recuperar">("login");
 
   /* Quem chega pelo "Analisar meu caso" ainda não tem conta, e abrir a
      tela em "Entrar" faz essa pessoa procurar o link de cadastro antes
@@ -14,6 +16,9 @@ export default function Entrar() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     if (p.get("novo") === "1") setModo("cadastro");
+    // Quem chega pelo "esqueci a senha" da porta da equipe já cai na
+    // tela certa, sem ter de procurar o link de novo aqui dentro.
+    if (p.get("recuperar") === "1") setModo("recuperar");
   }, []);
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
@@ -45,6 +50,48 @@ export default function Entrar() {
       return;
     }
     router.push(daEquipe ? "/inicio" : "/cliente");
+  }
+
+  /* RECUPERAR A SENHA, PEDINDO SÓ O E-MAIL
+   *
+   * A tela de entrada não tinha por onde. A porta da equipe até
+   * mostrava "esqueci a senha", mas o link trazia para cá, onde a
+   * opção não existia: quem esquecia a senha dava a volta e voltava
+   * ao mesmo lugar.
+   *
+   * O aviso é igual exista ou não a conta. Dizer "este e-mail não
+   * está cadastrado" entrega a quem está tentando descobrir quem é
+   * cliente do escritório exatamente a informação que ele quer.
+   */
+  async function recuperar(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    setCarregando(true);
+    try {
+      // O limite vive no servidor: sem ele, o "esqueci a senha" vira
+      // máquina de encher a caixa de entrada de outra pessoa.
+      try {
+        const lim = await fetch(`${API}/api/v1/acesso/limite`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        if (lim.status === 429) {
+          const d = await lim.json().catch(() => ({} as any));
+          setMsg(d.detail || "Muitas tentativas. Aguarde uma hora e tente de novo.");
+          return;
+        }
+      } catch { /* contador fora do ar não pode travar quem precisa */ }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/entrar`,
+      });
+      if (error) console.warn(error.message);
+      setMsg("Se houver conta com este e-mail, enviamos agora o link para criar "
+             + "uma senha nova. Abra o seu e-mail, defina a senha e volte aqui "
+             + "para entrar. O link vale por uma hora.");
+    } finally {
+      setCarregando(false);
+    }
   }
 
   async function enviar(e: React.FormEvent) {
@@ -86,16 +133,43 @@ export default function Entrar() {
           ← FC Advocacia e Recuperação Patrimonial
         </Link>
         <h1 className="mb-1 text-center font-display text-2xl font-bold text-navy">
-          {modo === "login" ? "Entrar" : "Criar seu acesso"}
+          {modo === "login" ? "Entrar"
+            : modo === "cadastro" ? "Criar seu acesso"
+            : "Recuperar a senha"}
         </h1>
         <p className="mb-6 text-center text-sm leading-relaxed text-charcoal/55">
           {modo === "login"
             ? "Entre para acompanhar o seu caso e retomar a conversa de onde parou."
-            : "Com a senha criada, tudo o que você conversar e solicitar fica "
+            : modo === "cadastro"
+            ? "Com a senha criada, tudo o que você conversar e solicitar fica "
               + "guardado na sua área. Se sair e voltar depois, continua do "
-              + "mesmo ponto."}
+              + "mesmo ponto."
+            : "Informe o e-mail cadastrado. Enviamos para ele o link para você "
+              + "criar uma senha nova."}
         </p>
 
+        {/* RECUPERAR PEDE UMA COISA SÓ
+
+            Pedir e-mail e mais alguma confirmação aqui não protege
+            ninguém: quem recebe o link é o dono da caixa de entrada,
+            e é isso que faz a recuperação segura. Campo a mais só
+            trava quem já está sem acesso. */}
+        {modo === "recuperar" ? (
+          <form onSubmit={recuperar} className="space-y-4">
+            <input
+              type="email" autoFocus
+              className="w-full rounded-lg border border-black/10 bg-white px-4 py-3 text-sm text-charcoal outline-none focus:border-gold"
+              placeholder="E-mail cadastrado" value={email}
+              onChange={(e) => setEmail(e.target.value)} required
+            />
+            <button
+              type="submit" disabled={carregando || !email}
+              className="w-full rounded-lg bg-gold py-3 text-sm font-semibold text-navy transition hover:bg-[#b89971] disabled:opacity-60"
+            >
+              {carregando ? "Enviando…" : "Enviar o link por e-mail"}
+            </button>
+          </form>
+        ) : (
         <form onSubmit={enviar} className="space-y-4">
           {modo === "cadastro" && (
             <input
@@ -121,16 +195,33 @@ export default function Entrar() {
             {carregando ? "Aguarde..." : modo === "login" ? "Entrar" : "Cadastrar"}
           </button>
         </form>
+        )}
 
-        {msg && <p className="mt-4 text-center text-sm text-gold">{msg}</p>}
+        {msg && (
+          <p className="mt-4 text-center text-sm leading-relaxed text-gold">{msg}</p>
+        )}
+
+        {modo === "login" && (
+          <button
+            onClick={() => { setMsg(null); setModo("recuperar"); }}
+            className="mt-4 w-full text-center text-sm text-charcoal/50 underline underline-offset-4 hover:text-charcoal"
+          >
+            Esqueci a minha senha
+          </button>
+        )}
 
         <button
-          onClick={() => { setMsg(null); setModo(modo === "login" ? "cadastro" : "login"); }}
-          className="mt-6 w-full text-center text-sm text-charcoal/50 hover:text-charcoal"
+          onClick={() => {
+            setMsg(null);
+            setModo(modo === "login" ? "cadastro" : "login");
+          }}
+          className="mt-4 w-full text-center text-sm text-charcoal/50 hover:text-charcoal"
         >
           {modo === "login"
             ? "Não tem conta? Cadastre-se"
-            : "Já tem conta? Entrar"}
+            : modo === "cadastro"
+            ? "Já tem conta? Entrar"
+            : "Voltar para a entrada"}
         </button>
       </div>
     </main>
