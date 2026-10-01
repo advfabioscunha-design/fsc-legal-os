@@ -414,6 +414,22 @@ def concluir(tarefa_id: str, quem: str = "", nota: str = "") -> dict:
         except Exception as e:
             print(f"[tarefas] intimação não fechada: {e}")
 
+    # E FECHA O ESPELHO NA AGENDA
+    #
+    # Faltava a volta: a agenda já fechava a tarefa, mas a tarefa não
+    # fechava a agenda. Quem resolvia pela página de tarefas via o
+    # compromisso continuar aberto no calendário, e as duas telas
+    # passavam a discordar sobre o mesmo ato.
+    try:
+        from . import agenda as _ag
+        for chave, valor in (("tarefa_id", tarefa_id),
+                             ("prazo_id", achado[0].get("prazo_id")),
+                             ("intimacao_id", achado[0].get("intimacao_id"))):
+            if valor:
+                _ag.fechar_espelho(**{chave: valor})
+    except Exception as e:
+        print(f"[tarefas] espelho da agenda não fechado: {e}")
+
     # `resultado` e não só `nota`: é esta chave que o histórico do caso
     # lê para mostrar O QUE foi feito, e não apenas que foi feito.
     registrar_evento(achado[0].get("caso_id"), "TAREFA_CONCLUIDA",

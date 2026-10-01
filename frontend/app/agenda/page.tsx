@@ -477,13 +477,43 @@ function Compromisso({ it, membros, acao }:
    * Zero é hoje, negativo é vencido, e os dois têm cor própria porque
    * ler "0 dias" e entender "ainda dá" é fácil demais. */
   const fatal = it.prazo_fatal ? String(it.prazo_fatal).slice(0, 10) : "";
+
+  /* O PRAZO QUE SE CONTA EM HORAS
+   *
+   * Prazo processual é dia: ou dá, ou não dá, e a hora não muda nada.
+   * Prazo de serviço é hora: entrega contratada às 14h vence às 14h, e
+   * mostrar só o dia dá ao escritório uma folga que ele não tem.
+   *
+   * Quando o compromisso traz `prazo_fatal_em`, é ele que manda, e a
+   * contagem passa a ser em horas enquanto faltar menos de um dia. */
+  const fatalHora = it.prazo_fatal_em ? new Date(it.prazo_fatal_em) : null;
+  const horasAteFatal = fatalHora
+    ? (fatalHora.getTime() - Date.now()) / 3600000 : null;
+
   const diasAteFatal = (() => {
     if (!fatal) return null;
     const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
     const d = new Date(`${fatal}T00:00:00`);
     return Math.round((d.getTime() - hoje.getTime()) / 86400000);
   })();
-  const avisoFatal = diasAteFatal === null ? null
+
+  const horaCurta = fatalHora
+    ? fatalHora.toLocaleString("pt-BR",
+        { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+    : "";
+
+  const avisoFatal =
+    horasAteFatal !== null
+      ? horasAteFatal < 0
+        ? { texto: `prazo venceu ${horaCurta}`, cor: "#C0392B" }
+        : horasAteFatal < 1
+        ? { texto: `vence em menos de 1 hora, ${horaCurta}`, cor: "#C0392B" }
+        : horasAteFatal < 6
+        ? { texto: `faltam ${Math.floor(horasAteFatal)}h, vence ${horaCurta}`, cor: "#C0392B" }
+        : horasAteFatal < 24
+        ? { texto: `faltam ${Math.floor(horasAteFatal)}h, vence ${horaCurta}`, cor: "#E5A44C" }
+        : { texto: `entrega até ${horaCurta}`, cor: "#8899AA" }
+    : diasAteFatal === null ? null
     : diasAteFatal < 0 ? { texto: `fatal venceu em ${brData(fatal)}`, cor: "#C0392B" }
     : diasAteFatal === 0 ? { texto: "último dia, o fatal é hoje", cor: "#C0392B" }
     : diasAteFatal === 1 ? { texto: `fatal amanhã, ${brData(fatal)}`, cor: "#E5A44C" }

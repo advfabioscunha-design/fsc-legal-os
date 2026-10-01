@@ -1149,6 +1149,14 @@ def liberar_para_cliente(pedido_id: str, quem: str = "",
     from datetime import date, timedelta
     ate = (date.today() + timedelta(days=DIAS_PARA_ALTERAR)).isoformat()
 
+    # Liberado ao cliente, o prazo do escritório acabou: o
+    # compromisso sai da agenda em vez de ficar vencendo sozinho.
+    try:
+        from . import agenda as _ag
+        _ag.fechar_espelho(pedido_id=pedido_id)
+    except Exception as e:
+        print(f"[balcao] espelho do prazo não fechado: {e}")
+
     db.table("pedidos_contrato").update({
         "fase": "APROVACAO", "aprovado_advogado_em": _agora(),
         "aprovado_advogado_por": quem or None,
@@ -1282,6 +1290,18 @@ def registrar_pagamento(pedido_id: str, txid: str = "",
                assunto=f"Pagamento confirmado, pedido {p.get('numero')}")
     except Exception as e:
         print(f"[balcao] cliente não avisado do pagamento: {e}")
+
+    # O PRAZO ENTRA NA AGENDA AGORA
+    #
+    # É daqui que o relógio corre, então é daqui que o compromisso
+    # existe. Antes o prazo de entrega vivia só no card do balcão, e
+    # quem olhava a agenda não via nada: o escritório tinha contrato
+    # para entregar às 14h e nenhuma das telas de trabalho dizia isso.
+    try:
+        from . import agenda as _ag
+        _ag.sincronizar_pedido(pedido_id)
+    except Exception as e:
+        print(f"[balcao] prazo não entrou na agenda: {e}")
 
     registrar_evento(None, "BALCAO_PAGO",
                      {"pedido_id": pedido_id, "quem": quem, "txid": txid})
@@ -2217,6 +2237,18 @@ def confirmar_urgencia(pedido_id: str, quem: str = "", txid: str = "") -> dict:
                autor="AGENTE", assunto="Urgência confirmada no seu documento")
     except Exception as e:
         print(f"[balcao] aviso da urgência não enviado: {e}")
+
+    # A AGENDA ANDA JUNTO, E ÀS VEZES PARA TRÁS
+    #
+    # Urgência confirmada encurta a entrega de 24 para 6 horas, e o
+    # vencimento pode cair para o dia anterior ao que estava marcado.
+    # O compromisso é recalculado da mesma conta, e não corrigido na
+    # mão: duas contas do mesmo prazo acabam divergindo.
+    try:
+        from . import agenda as _ag
+        _ag.sincronizar_pedido(pedido_id)
+    except Exception as e:
+        print(f"[balcao] agenda não acompanhou a urgência: {e}")
 
     registrar_evento(None, "BALCAO_URGENCIA_CONFIRMADA",
                      {"pedido_id": pedido_id, "quem": quem,

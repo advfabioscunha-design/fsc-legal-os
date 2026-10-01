@@ -32,7 +32,7 @@ Quatro coisas que estão no código e convém saber:
 from __future__ import annotations
 
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from ..core.db import get_db, registrar_evento
 from ..core.config import get_settings
@@ -166,6 +166,13 @@ def criar(dados: dict, quem: str = "", forcar: bool = False) -> dict:
         # compromisso precisa saber se ainda tem folga ou se hoje é o
         # último dia.
         "prazo_fatal": dados.get("prazo_fatal") or None,
+        # O prazo do balcão não cabe em data. Quem contratou às 14h de
+        # terça com entrega em 24 horas tem até as 14h de quarta, e
+        # dizer só "quarta" dá ao escritório um dia inteiro que ele não
+        # tem. Prazo processual continua em data, que é como a lei o
+        # conta; prazo de serviço vai em data e hora.
+        "prazo_fatal_em": dados.get("prazo_fatal_em") or None,
+        "pedido_id": dados.get("pedido_id") or None,
         "responsavel_id": dados.get("responsavel_id") or None,
         "status": "ABERTO",
         "criado_por": quem or "escritório",
@@ -766,6 +773,158 @@ def espelhar_intimacoes(dias: int = 60) -> dict:
         except Exception as e:
             print(f"[agenda] intimação não espelhada: {e}")
     return {"criados": criados, "considerados": len(pendentes)}
+
+
+
+# ── O PRAZO DO BALCÃO, QUE SE CONTA EM HORAS ───────────────────
+#
+# O contrato tem entrega em 24 horas, ou em 6 quando o cliente paga a
+# urgência, e isso não cabe no campo de data: quem contratou às 14h de
+# terça com 24 horas tem até as 14h de quarta, não até o fim de
+# quarta. A diferença é de um dia inteiro de trabalho que o escritório
+# acha que tem e não tem.
+#
+# E o prazo muda no meio do caminho. Urgência contratada depois do
+# pedido aberto encurta a entrega de 24 para 6 horas, o que às vezes
+# joga o vencimento para trás, até para o dia anterior ao que estava
+# marcado. Por isso o espelho não é criado uma vez e esquecido: ele é
+# sincronizado, e a conta sai sempre do mesmo lugar.
+
+def _vencimento_do_pedido(p: dict) -> datetime | None:
+    """Quando a entrega vence, de verdade.
+
+    Conta do pagamento, que é quando o trabalho começa. Sem pagamento
+    não há prazo correndo, e inventar um seria prometer o que não foi
+    contratado."""
+    pago = p.get("pago_em")
+    if not pago:
+        return None
+    try:
+        t = datetime.fromisoformat(str(pago).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t + timedelta(hours=int(p.get("prazo_entrega_horas") or 24))
+
+
+# Fora destas, o documento está com o cliente ou já acabou: não há
+# prazo de entrega correndo para o escritório.
+_FASES_EM_ANDAMENTO = (
+    "COLETA", "CIENCIA", "REDACAO", "REVISAO_IA", "AJUSTE",
+    "CIENCIA_ALTERACAO", "REVISAO_2", "REVISAO_ADV",
+)
+
+
+def sincronizar_pedido(pedido_id: str) -> dict:
+    """Cria, move ou fecha o espelho de um pedido do balcão.
+
+    Chamada quando o pagamento é confirmado e quando a urgência é
+    confirmada. Idempotente: rodar duas vezes não cria dois
+    compromissos, e rodar depois da entrega fecha o que sobrou."""
+    db = get_db()
+    r = db.table("pedidos_contrato").select(
+        "id,numero,tipo,servico_livre,fase,pago_em,prazo_entrega_horas,"
+        "urgente,cliente_id,excluido_em"
+    ).eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        return {"ok": False, "motivo": "pedido não encontrado"}
+    p = r[0]
+
+    existentes = db.table("agenda_itens").select("id,status") \
+        .eq("pedido_id", pedido_id).in_("status", list(STATUS_VIVO)) \
+        .limit(5).execute().data or []
+
+    vence = _vencimento_do_pedido(p)
+    acabou = (p.get("fase") not in _FASES_EM_ANDAMENTO
+              or p.get("excluido_em") or not vence)
+
+    if acabou:
+        for e in existentes:
+            db.table("agenda_itens").update({
+                "status": "REALIZADO", "concluido_em": _agora(),
+                "atualizado_em": _agora(),
+            }).eq("id", e["id"]).execute()
+        return {"ok": True, "fechados": len(existentes)}
+
+    # O fuso de quem lê. O vencimento é guardado em UTC, mas o dia que
+    # aparece na agenda tem de ser o dia de Porto Velho, senão uma
+    # entrega às 21h de terça aparece na quarta.
+    local = vence.astimezone(timezone(timedelta(hours=-4)))
+    campos = {
+        "data": local.date().isoformat(),
+        "hora_inicio": local.strftime("%H:%M"),
+        "dia_inteiro": False,
+        "prazo_fatal_em": vence.isoformat(),
+        "prazo_fatal": local.date().isoformat(),
+        "atualizado_em": _agora(),
+    }
+
+    if existentes:
+        db.table("agenda_itens").update(campos) \
+            .eq("id", existentes[0]["id"]).execute()
+        return {"ok": True, "atualizado": existentes[0]["id"],
+                "vence_em": vence.isoformat()}
+
+    nome = (p.get("servico_livre") if p.get("tipo") == "OUTRO"
+            else str(p.get("tipo") or "").replace("_", " ").lower())
+    horas = int(p.get("prazo_entrega_horas") or 24)
+    criar({
+        "tipo": "PRAZO",
+        "titulo": f"Entregar {nome} · {p.get('numero') or ''}".strip()[:200],
+        "descricao": (f"Prazo de {horas} horas contratado pelo cliente"
+                      + (", com urgência" if p.get("urgente") else "")
+                      + ". O relógio corre do pagamento."),
+        "cliente_id": p.get("cliente_id"),
+        "pedido_id": pedido_id,
+        **campos,
+    }, quem="balcão", forcar=True)
+    return {"ok": True, "criado": True, "vence_em": vence.isoformat()}
+
+
+def espelhar_pedidos() -> dict:
+    """Passa por todos os pedidos em andamento e acerta os espelhos.
+
+    Existe para o dia em que uma sincronização falhou, e para os
+    pedidos que já existiam antes de este espelho existir."""
+    db = get_db()
+    pedidos = db.table("pedidos_contrato").select("id") \
+        .in_("fase", list(_FASES_EM_ANDAMENTO)) \
+        .is_("excluido_em", "null").not_.is_("pago_em", "null") \
+        .limit(300).execute().data or []
+    feitos = 0
+    for p in pedidos:
+        try:
+            sincronizar_pedido(p["id"])
+            feitos += 1
+        except Exception as e:
+            print(f"[agenda] pedido não sincronizado: {e}")
+    return {"sincronizados": feitos}
+
+
+def fechar_espelho(**ligacao) -> int:
+    """Fecha o compromisso da agenda ligado a um prazo, tarefa ou intimação.
+
+    O contrário do que `concluir` já faz. Sem isto, resolver a tarefa
+    na página de tarefas deixava o compromisso aberto na agenda, e as
+    duas telas passavam a discordar sobre o mesmo ato."""
+    db = get_db()
+    campo, valor = next(iter(ligacao.items()))
+    if not valor:
+        return 0
+    try:
+        itens = db.table("agenda_itens").select("id") \
+            .eq(campo, valor).in_("status", list(STATUS_VIVO)) \
+            .limit(10).execute().data or []
+        for i in itens:
+            db.table("agenda_itens").update({
+                "status": "REALIZADO", "concluido_em": _agora(),
+                "atualizado_em": _agora(),
+            }).eq("id", i["id"]).execute()
+        return len(itens)
+    except Exception as e:
+        print(f"[agenda] espelho não fechado: {e}")
+        return 0
 
 
 # ── Feed para assinar no Google Calendar ────────────────────────

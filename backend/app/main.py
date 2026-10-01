@@ -119,6 +119,21 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[balcao] esteira não agendada: {e}")
+        # O PRAZO DO BALCÃO NA AGENDA, DE MEIA EM MEIA HORA
+        #
+        # A sincronização acontece no pagamento e na confirmação da
+        # urgência, que são os dois momentos em que o prazo nasce ou
+        # muda. Esta passada existe para o dia em que uma delas falhar,
+        # e para os pedidos que já existiam antes do espelho existir.
+        try:
+            from .agentes import agenda as _ag
+            sched.add_job(
+                _ag.espelhar_pedidos,
+                CronTrigger(minute="10,40"),
+                id="espelho_balcao", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[agenda] espelho do balcão não agendado: {e}")
         # Régua de pendências: de 6 em 6 horas, enquanto faltar o
         # indispensável. Roda de meia em meia hora e a própria função
         # decide de quem está na hora de cobrar.
@@ -218,6 +233,7 @@ def _agendar_radar():
                     # As intimações entram no mesmo passo: elas são o
                     # começo do trabalho, e ficavam fora do dia.
                     r["agenda_intimacoes"] = _ag.espelhar_intimacoes()
+                    r["agenda_pedidos"] = _ag.espelhar_pedidos()
                 except Exception as e:
                     r["agenda"] = {"erro": str(e)}
                 try:
