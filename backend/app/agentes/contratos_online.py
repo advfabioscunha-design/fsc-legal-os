@@ -3372,6 +3372,42 @@ def pedido_por_numero(numero: str) -> dict | None:
     return r[0] if r else None
 
 
+# As fases em que o pedido ainda é uma conversa viva. Fora destas, o
+# documento já foi entregue ou arquivado, e a mensagem que chega é sobre
+# outra coisa.
+FASES_EM_CONVERSA = ("QUALIFICACAO", "PROPOSTA", "PAGAMENTO", "COLETA",
+                     "CIENCIA", "REDACAO", "REVISAO_IA", "AJUSTE",
+                     "CIENCIA_ALTERACAO", "REVISAO_2", "REVISAO_ADV",
+                     "APROVACAO", "ASSINATURA")
+
+
+def pedido_em_conversa_do_cliente(cliente_id: str) -> dict | None:
+    """O pedido de contrato sobre o qual este cliente está falando.
+
+    É MAIS LARGO QUE O PEDIDO TRAVADO, E DE PROPÓSITO
+
+    A busca de antes só enxergava pedido PARADO esperando informação.
+    Quem estava negociando preço, ou esperando o pagamento, ou lendo a
+    minuta, escrevia no WhatsApp e a mensagem ia parar no especialista
+    do processo judicial, ou abria um caso novo. O cliente perguntava
+    "consigo desconto?" e recebia resposta de outro assunto.
+
+    Agora qualquer pedido em fase de conversa serve, e quem responde é o
+    mesmo agente do chat da plataforma: o atendimento e a negociação são
+    uma conversa só, vista de dois lugares.
+
+    Havendo mais de um, fica com o mexido por último. Adivinhar errado
+    entre dois é pior do que não adivinhar, mas o pedido tocado agora há
+    pouco é quase sempre o assunto de quem acabou de escrever."""
+    r = get_db().table("pedidos_contrato") \
+        .select("id,numero,fase,atualizado_em") \
+        .eq("cliente_id", cliente_id) \
+        .in_("fase", list(FASES_EM_CONVERSA)) \
+        .is_("excluido_em", "null") \
+        .order("atualizado_em", desc=True).limit(1).execute().data or []
+    return r[0] if r else None
+
+
 def pedido_travado_do_cliente(cliente_id: str) -> dict | None:
     """O pedido daquele cliente que está esperando informação.
 

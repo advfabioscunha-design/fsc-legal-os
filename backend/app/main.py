@@ -2790,30 +2790,46 @@ def disparar_aniversarios():
     return relacionamento.parabenizar_aniversariantes()
 
 
-# ── MÓDULO 1: Webhook do WhatsApp + Sessão (omnichannel) ─────────
+# ══════════════════════════════════════════════════════════════════
+# WHATSAPP — UMA PORTA SÓ
+#
+# Existiam DUAS portas de entrada, e isso era um defeito sério à espera
+# de acontecer: `/webhooks/whatsapp`, que roteia a mensagem para o
+# atendimento de verdade (balcão, especialista do caso, triagem de lead
+# novo), e `/api/whatsapp/webhook`, que era um esboço de chatbot com
+# prompt genérico, sem caso, sem pedido e sem plataforma.
+#
+# Qual delas o cliente encontrava dependia de qual endereço estivesse
+# escrito no painel da Meta. Apontar para a errada não dava erro
+# nenhum: o cliente era atendido, educadamente, por um robô que não
+# sabia nada do caso dele e abria um cadastro duplicado a cada conversa.
+#
+# Agora as duas apontam para o mesmo lugar. O endereço configurado na
+# Meta deixa de importar, que é como tem de ser.
+# ══════════════════════════════════════════════════════════════════
 @app.get("/api/whatsapp/webhook")
 def whatsapp_verificar(request: Request):
     """Verificação inicial exigida pelo Meta (devolve o hub.challenge)."""
     from fastapi.responses import PlainTextResponse
-    from .integracoes import whatsapp_omni
     p = request.query_params
-    challenge = whatsapp_omni.verificar_webhook(
-        p.get("hub.mode"), p.get("hub.verify_token"), p.get("hub.challenge")
-    )
-    if challenge is None:
-        raise HTTPException(403, "Token de verificação inválido")
-    return PlainTextResponse(str(challenge))
+    s = get_settings()
+    # Aceita o token configurado e o antigo, fixo no código: trocar o
+    # endereço na Meta e descobrir só depois que o token não bate deixa
+    # o número mudo, e número mudo é cliente sem resposta.
+    aceitos = {s.whatsapp_verify_token, "fsc-legal-os", "fc-legal-os"}
+    if p.get("hub.verify_token") in aceitos:
+        return PlainTextResponse(str(p.get("hub.challenge", "")))
+    raise HTTPException(403, "Token de verificação inválido")
 
 
 @app.post("/api/whatsapp/webhook")
 async def whatsapp_receber(request: Request):
-    """Recebe mensagens do cliente, gerencia o contexto e espelha a resposta."""
-    from .integracoes import whatsapp_omni
+    """Mesma porta de /webhooks/whatsapp. Ver o bloco acima."""
     try:
         payload = await request.json()
     except Exception:
         return {"ok": True, "ignorado": "payload inválido"}
-    return whatsapp_omni.processar_mensagem(payload)
+    return whatsapp.processar_webhook(payload)
 
 
 @app.post("/api/v1/casos/{caso_id}/iniciar")
@@ -5049,12 +5065,57 @@ async def webhook_whatsapp(req: Request):
     return whatsapp.processar_webhook(await req.json())
 
 
+# ── O cliente que veio do WhatsApp assume o próprio cadastro ─────
+#
+# Ele recebeu um link pelo WhatsApp, cria e-mail e senha, e precisa cair
+# no cadastro que JÁ EXISTE, com o caso dentro. Sem esta ponte o login
+# novo abria um cadastro ao lado, e o cliente entrava na plataforma para
+# ver o próprio processo e encontrava a tela vazia.
+@app.get("/api/v1/cliente/convite/{codigo}")
+def convite_do_cliente(codigo: str):
+    """Público: a página de acesso pergunta se o convite vale.
+
+    Devolve só o primeiro nome. Nome inteiro, CPF ou número de caso numa
+    página aberta é dado de cliente exposto a quem tiver o endereço."""
+    from .integracoes import acesso_pelo_whatsapp
+    return acesso_pelo_whatsapp.convite(codigo)
+
+
+class VincularCadastro(BaseModel):
+    codigo: str
+
+
+@app.post("/api/v1/cliente/vincular")
+def vincular_cadastro(body: VincularCadastro,
+                      authorization: str | None = Header(default=None)):
+    """Amarra o login recém-criado ao cadastro que veio do WhatsApp.
+
+    Exige o token do login: é ele que prova que a conta foi mesmo criada
+    por quem está pedindo. O código é queimado aqui, e não vale uma
+    segunda vez."""
+    from .integracoes import acesso_pelo_whatsapp
+    user = _usuario_do_token(authorization)
+    try:
+        return acesso_pelo_whatsapp.vincular(
+            body.codigo, user["id"], (user.get("email") or "").strip())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/webhooks/whatsapp")
 def verificar_whatsapp(request: Request):
-    """Verificação do webhook exigida pela Meta."""
+    """Verificação do webhook exigida pela Meta.
+
+    Devolve TEXTO, não número: o desafio da Meta é uma cadeia de
+    caracteres e nem sempre cabe em inteiro. Convertê-lo com `int`
+    derrubava a verificação com erro 500, e o painel da Meta só
+    informa que o endereço não respondeu."""
+    from fastapi.responses import PlainTextResponse
     p = request.query_params
-    if p.get("hub.verify_token") == "fsc-legal-os":
-        return int(p.get("hub.challenge", 0))
+    aceitos = {get_settings().whatsapp_verify_token,
+               "fsc-legal-os", "fc-legal-os"}
+    if p.get("hub.verify_token") in aceitos:
+        return PlainTextResponse(str(p.get("hub.challenge", "")))
     raise HTTPException(403)
 
 
