@@ -1572,6 +1572,47 @@ def recado(pedido_id: str, texto: str, canais: list[str] | None = None,
 
     s = get_settings()
     url = f"{s.app_url.rstrip('/')}/balcao/{pedido_id}"
+
+    # A CONVERSA PRIMEIRO, OS CANAIS DEPOIS
+    #
+    # A mensagem era gravada só DEPOIS de tentar o e-mail e o WhatsApp.
+    # Parece detalhe e custava vinte segundos: o SMTP leva alguns, e o
+    # WhatsApp de um número ainda não aprovado espera o tempo inteiro
+    # do timeout antes de falhar. Durante tudo isso a linha não existia
+    # no banco, então a tela do cliente, relendo de quatro em quatro
+    # segundos, não tinha o que mostrar. O advogado digitava "oi" e o
+    # cliente via "oi" vinte segundos depois.
+    #
+    # A plataforma é a conversa, e conversa não espera correio. A linha
+    # entra agora, aparece na próxima batida, e os carimbos de entrega
+    # voltam para ela quando os canais responderem — inclusive a falha,
+    # que continua registrada onde sempre esteve.
+    linha = db.table("pedidos_mensagens").insert({
+        "pedido_id": pedido_id,
+        "autor": autor if autor in ("ESCRITORIO", "AGENTE", "CLIENTE") else "ESCRITORIO",
+        "texto": texto[:4000], "canais": pedidos,
+    }).execute().data
+    msg_id = (linha[0] or {}).get("id") if linha else None
+
+    # ESCREVER É ASSUMIR, MAS SÓ NOS CANAIS QUE SÃO CONVERSA
+    #
+    # Quem do escritório fala com o cliente pelo chat ou pelo WhatsApp
+    # está numa conversa: o cliente está do outro lado, agora, e vai
+    # responder em seguida. Aí o agente precisa calar, ou os dois
+    # escrevem por cima um do outro.
+    #
+    # Fica aqui, antes dos envios externos, e não depois: nos segundos
+    # que o e-mail leva para sair, o cliente pode escrever de novo, e o
+    # agente responderia por cima de quem acabou de assumir.
+    #
+    # E-mail é outra coisa. Ele tem o ritmo dele, manda-se e espera-se o
+    # dia seguinte. Calar o agente por causa de um e-mail enviado de
+    # manhã deixaria o cliente que abre o chat à tarde sem ninguém para
+    # responder, por uma troca que nem era ao vivo.
+    if autor == "ESCRITORIO" and ("PLATAFORMA" in pedidos
+                                  or "WHATSAPP" in pedidos):
+        assumir_conversa(pedido_id, quem=assunto or "escritório")
+
     falhas: list[str] = []
     email_em = whats_em = None
 
@@ -1600,28 +1641,16 @@ def recado(pedido_id: str, texto: str, canais: list[str] | None = None,
         except Exception as e:
             falhas.append(f"whatsapp: {e}")
 
-    linha = db.table("pedidos_mensagens").insert({
-        "pedido_id": pedido_id,
-        "autor": autor if autor in ("ESCRITORIO", "AGENTE", "CLIENTE") else "ESCRITORIO",
-        "texto": texto[:4000], "canais": pedidos,
-        "email_em": email_em, "whatsapp_em": whats_em,
-        "falha": "; ".join(falhas)[:500] or None,
-    }).execute().data
-
-    # ESCREVER É ASSUMIR, MAS SÓ NOS CANAIS QUE SÃO CONVERSA
-    #
-    # Quem do escritório fala com o cliente pelo chat ou pelo WhatsApp
-    # está numa conversa: o cliente está do outro lado, agora, e vai
-    # responder em seguida. Aí o agente precisa calar, ou os dois
-    # escrevem por cima um do outro.
-    #
-    # E-mail é outra coisa. Ele tem o ritmo dele — manda-se e espera-se
-    # o dia seguinte. Calar o agente por causa de um e-mail enviado de
-    # manhã deixaria o cliente que abre o chat à tarde sem ninguém para
-    # responder, por uma troca que nem era ao vivo.
-    if autor == "ESCRITORIO" and ("PLATAFORMA" in pedidos
-                                  or "WHATSAPP" in pedidos):
-        assumir_conversa(pedido_id, quem=assunto or "escritório")
+    if msg_id and (email_em or whats_em or falhas):
+        try:
+            db.table("pedidos_mensagens").update({
+                "email_em": email_em, "whatsapp_em": whats_em,
+                "falha": "; ".join(falhas)[:500] or None,
+            }).eq("id", msg_id).execute()
+            linha[0].update({"email_em": email_em, "whatsapp_em": whats_em,
+                             "falha": "; ".join(falhas)[:500] or None})
+        except Exception as e:
+            print(f"[balcao] carimbo de entrega não gravado: {e}")
 
     registrar_evento(None, "BALCAO_RECADO",
                      {"pedido_id": pedido_id, "canais": pedidos,

@@ -267,17 +267,33 @@ function PainelDoPedido({ id, fechar, recarregar }:
     // já está pensando na frase seguinte, e ver o texto antigo parado
     // ali faz duvidar se saiu.
     setMsg("");
+    // Aparece na conversa na hora, com marca própria, antes de o
+    // servidor confirmar. O envio ainda passa pelo e-mail, que leva
+    // segundos: esperar por ele para desenhar a própria frase faz a
+    // tela parecer travada justamente quando se está conversando.
+    const provisoria = {
+      id: `local-${Date.now()}`, autor: "ESCRITORIO", texto,
+      criado_em: new Date().toISOString(), canais,
+    };
+    setConversa((c) => [...c, provisoria]);
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/mensagem`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ texto, autor: "ESCRITORIO", canais }),
       });
       const j = await r.json().catch(() => ({} as any));
-      if (!r.ok) { setMsg(texto); setErro(j?.detail || "Não consegui enviar."); return; }
+      if (!r.ok) {
+        setConversa((c) => c.filter((m: any) => m.id !== provisoria.id));
+        setMsg(texto); setErro(j?.detail || "Não consegui enviar.");
+        return;
+      }
       if (j?.falhas?.length) setErro(`Enviado, mas ${j.falhas.join("; ")}`);
       if (j?.atendimento) setAtendimento(j.atendimento);
       carregar();
-    } catch { setMsg(texto); setErro("Falha de conexão."); }
+    } catch {
+      setConversa((c) => c.filter((m: any) => m.id !== provisoria.id));
+      setMsg(texto); setErro("Falha de conexão.");
+    }
   }
 
   async function excluir() {
