@@ -136,7 +136,27 @@ def processar_webhook(payload: dict) -> dict:
             if pedido:
                 r = balcao.resposta_do_cliente(pedido["id"], texto,
                                                canal="WHATSAPP")
-                if r.get("preenchidos"):
+
+                # UMA RESPOSTA SÓ, E A MELHOR DELAS
+                #
+                # O balcão já respondeu e já mandou pelo WhatsApp: chat e
+                # WhatsApp são a mesma conversa, e tudo o que entra nela
+                # sai nos dois. Mandar aqui a frase genérica de recibo
+                # faria o cliente receber duas mensagens seguidas, a
+                # segunda dizendo bem menos que a primeira.
+                #
+                # A frase de recibo continua existindo para o caso em que
+                # o agente não conseguiu responder, e para quando o
+                # humano assumiu a conversa: aí o cliente precisa saber
+                # que a mensagem chegou, mesmo sem resposta ainda.
+                if r.get("resposta"):
+                    return {"ok": True, "pedido": pedido["id"],
+                            "audio": eh_audio, "respondeu": "agente"}
+
+                if r.get("com_humano"):
+                    resposta = ("Recebi a sua mensagem. O escritório está "
+                                "acompanhando e responde já.")
+                elif r.get("preenchidos"):
                     resposta = ("Recebido, obrigado. Já estou complementando o "
                                 "seu documento com essa informação.")
                 elif r.get("ainda_falta"):

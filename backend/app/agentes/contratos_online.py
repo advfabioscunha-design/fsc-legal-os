@@ -2914,6 +2914,50 @@ def complementar_com_a_resposta(pedido_id: str, texto: str) -> dict:
             "pendencias": estado}
 
 
+# ── OS DOIS CANAIS AO VIVO ANDAM JUNTOS ────────────────────────
+#
+# Chat e WhatsApp são a mesma conversa vista de dois lugares. O cliente
+# começa pelo chat no computador, sai para a rua e continua pelo
+# WhatsApp no telefone, e espera encontrar lá o que foi dito aqui. Se
+# cada canal guardar só a própria metade, ele lê a resposta pela metade
+# e pergunta de novo o que já foi respondido.
+#
+# Por isso a resposta sai nos dois, sempre, sem depender de por onde a
+# pergunta entrou. O custo é uma mensagem a mais; o que se evita é o
+# cliente achar que ninguém respondeu.
+#
+# E-MAIL NÃO ENTRA
+#
+# E-mail tem outro ritmo: manda-se e espera-se o dia seguinte. Copiar
+# cada linha de uma conversa de chat para o e-mail enche a caixa de
+# quem está com a tela aberta na frente, e o que era atendimento vira
+# spam do próprio escritório. Ele só entra quando a pergunta veio por
+# e-mail, que é quando a pessoa está esperando ali.
+
+CANAIS_AO_VIVO = ("PLATAFORMA", "WHATSAPP")
+
+
+def canais_ao_vivo(pedido_id: str, origem: str = "") -> list[str]:
+    """Por onde a resposta sai: os dois canais ao vivo, mais o e-mail
+    quando foi por e-mail que a pessoa escreveu.
+
+    O WhatsApp só entra se o cliente tiver número. Mandar para um
+    cadastro sem telefone registraria uma falha a cada mensagem, e o
+    histórico ficaria cheio de erro que não é erro."""
+    canais = ["PLATAFORMA"]
+    try:
+        r = get_db().table("pedidos_contrato").select("clientes(whatsapp)") \
+            .eq("id", pedido_id).limit(1).execute().data
+        tem_whats = bool(((r[0] if r else {}).get("clientes") or {}).get("whatsapp"))
+    except Exception:
+        tem_whats = False
+    if tem_whats:
+        canais.append("WHATSAPP")
+    if (origem or "").upper() == "EMAIL":
+        canais.append("EMAIL")
+    return canais
+
+
 # ── QUEM ESTÁ FALANDO COM O CLIENTE AGORA ──────────────────────
 #
 # Cinco minutos. Curto o bastante para o cliente não ficar esperando
@@ -3071,11 +3115,9 @@ def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
             # Volta pelo mesmo canal por onde veio. Responder um chat
             # também por e-mail e WhatsApp é encher a caixa de quem
             # está com a tela aberta na frente.
-            canais = ["PLATAFORMA"]
-            if canal.upper() in ("EMAIL", "WHATSAPP"):
-                canais.append(canal.upper())
-            recado(pedido_id, r["texto"], canais=canais, autor="AGENTE",
-                   assunto="Sobre o seu pedido")
+            recado(pedido_id, r["texto"],
+                   canais=canais_ao_vivo(pedido_id, origem=canal),
+                   autor="AGENTE", assunto="Sobre o seu pedido")
             saida["resposta"] = r["texto"]
             saida["urgencia_registrada"] = bool(r.get("avisos"))
         except Exception as e:

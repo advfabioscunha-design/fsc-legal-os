@@ -164,8 +164,21 @@ function PainelDoPedido({ id, fechar, recarregar }:
   const [aba, setAba] = useState<
     "pedido" | "minuta" | "conversa" | "consultar">("pedido");
   const [msg, setMsg] = useState("");
-  const [porEmail, setPorEmail] = useState(true);
-  const [porWhats, setPorWhats] = useState(false);
+  /* CHAT E WHATSAPP SÃO A MESMA CONVERSA
+   *
+   * O cliente começa no computador, sai para a rua e continua pelo
+   * telefone, e espera encontrar lá o que foi dito aqui. Por isso o
+   * WhatsApp nasce marcado: deixá-lo desligado por padrão fazia a
+   * conversa existir pela metade em cada lugar, e o cliente perguntar
+   * de novo o que já tinha sido respondido.
+   *
+   * O e-mail nasce desmarcado pelo motivo oposto. Ele tem outro ritmo,
+   * e copiar cada linha de um chat para a caixa de entrada de quem
+   * está com a tela aberta transforma atendimento em spam do próprio
+   * escritório. Ele é para o recado que precisa ficar registrado fora
+   * da conversa. */
+  const [porEmail, setPorEmail] = useState(false);
+  const [porWhats, setPorWhats] = useState(true);
   const [ocupado, setOcupado] = useState("");
   const [erro, setErro] = useState("");
 
@@ -735,20 +748,25 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 aprovado, esta caixa passa a funcionar sozinha. */}
             <div className="space-y-2 pt-3">
               <div className="flex flex-wrap items-center gap-4 text-[11px] text-white/55">
-                <span className="text-white/35">Enviar também por</span>
-                <label className="flex cursor-pointer items-center gap-1.5">
-                  <input type="checkbox" checked={porEmail}
-                    onChange={(e) => setPorEmail(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-[#C9A24D]" />
-                  e-mail
-                </label>
+                <span className="text-white/35">Vai pelo chat e também por</span>
                 <label className="flex cursor-pointer items-center gap-1.5">
                   <input type="checkbox" checked={porWhats}
                     onChange={(e) => setPorWhats(e.target.checked)}
                     className="h-3.5 w-3.5 accent-[#C9A24D]" />
                   WhatsApp
                 </label>
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" checked={porEmail}
+                    onChange={(e) => setPorEmail(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[#C9A24D]" />
+                  e-mail
+                </label>
               </div>
+              <p className="text-[10px] leading-relaxed text-white/30">
+                Chat e WhatsApp são a mesma conversa: o cliente começa no
+                computador, sai para a rua e continua no telefone. O e-mail
+                é para o recado que precisa ficar fora da conversa.
+              </p>
               <div className="flex gap-2">
                 <input value={msg} onChange={(e) => setMsg(e.target.value)}
                   placeholder="escrever para o cliente…" className={inp} />
