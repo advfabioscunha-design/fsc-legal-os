@@ -940,6 +940,7 @@ def responder_ao_cliente(caso_id: str, body: RespostaDoEscritorio):
     Autor HUMANO, e não AGENTE, porque a diferença importa depois:
     é ela que permite saber quem disse o quê quando alguém precisar
     reconstituir o atendimento."""
+    from .core.db import registrar_evento
     texto = (body.conteudo or "").strip()
     if not texto:
         raise HTTPException(400, "A mensagem está vazia.")
@@ -977,6 +978,7 @@ def iniciar_atendimento(caso_id: str):
     Idempotente de propósito: se já existe fala do escritório naquele
     fio, não escreve outra. Abrir a ficha duas vezes não pode gerar
     duas saudações."""
+    from .core.db import registrar_evento
     db = get_db()
     caso = db.table("casos").select("id,relato_inicial,estado") \
         .eq("id", caso_id).limit(1).execute().data
@@ -4558,6 +4560,8 @@ def limpar_caixa(caixa: str, body: LimpezaDaCaixa):
     alvo = _CAIXAS.get(caixa)
     if not alvo:
         raise HTTPException(404, "Caixa desconhecida.")
+    from .core.db import registrar_evento
+
     tabela, resolvidos = alvo
     ids = [i for i in (body.ids or []) if i][:200]
     if not ids:
