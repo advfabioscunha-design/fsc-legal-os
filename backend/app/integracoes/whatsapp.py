@@ -116,8 +116,37 @@ def processar_webhook(payload: dict) -> dict:
         return {"ok": True, "ignorado": "sem mensagem"}
 
     db = get_db()
-    cli = db.table("clientes").select("id,nome").eq("whatsapp", numero) \
-            .maybe_single().execute().data
+
+    # A AGENDA DO ESCRITÓRIO VEM ANTES DE TUDO
+    #
+    # Quando alguém daqui salvou este telefone junto com o caso, a
+    # conversa já começa sabendo de quem é e sobre o que é. É a melhor
+    # identificação que existe neste fluxo, porque quem a fez foi gente
+    # do escritório olhando o cadastro, e não alguém digitando um nome
+    # num WhatsApp.
+    #
+    # Na prática isso muda o primeiro minuto do atendimento: o cliente
+    # escreve "e aí, como ficou?" e recebe resposta sobre o caso dele,
+    # em vez de um pedido de CPF.
+    try:
+        from ..agentes import identificacao as _ident
+        salvo = _ident.na_agenda(numero)
+    except Exception as e:
+        print(f"[whatsapp] agenda de contatos não consultada: {e}")
+        salvo = None
+
+    cli = None
+    if salvo and salvo.get("cliente_id"):
+        try:
+            cli = db.table("clientes").select("id,nome") \
+                .eq("id", salvo["cliente_id"]).limit(1).execute().data
+            cli = cli[0] if cli else None
+        except Exception:
+            cli = None
+
+    if not cli:
+        cli = db.table("clientes").select("id,nome").eq("whatsapp", numero) \
+                .maybe_single().execute().data
 
     if cli:
         # O BALCÃO VEM ANTES DO CASO
@@ -184,9 +213,17 @@ def processar_webhook(payload: dict) -> dict:
         except Exception as e:
             print(f"[whatsapp] balcão não tratou, segue para o caso: {e}")
 
-        caso = db.table("casos").select("id").eq("cliente_id", cli["id"]) \
-                 .not_.in_("estado", ["CONCLUIDO", "CANCELADO", "INVIAVEL"]) \
-                 .order("criado_em", desc=True).limit(1).execute().data
+        # O caso que o escritório salvou para este telefone ganha do
+        # "mais recente": quem salvou sabia de qual deles o cliente
+        # costuma falar, e o mais recente pode ser outro assunto.
+        caso = None
+        if salvo and salvo.get("caso_id"):
+            caso = db.table("casos").select("id") \
+                .eq("id", salvo["caso_id"]).limit(1).execute().data
+        if not caso:
+            caso = db.table("casos").select("id").eq("cliente_id", cli["id"]) \
+                     .not_.in_("estado", ["CONCLUIDO", "CANCELADO", "INVIAVEL"]) \
+                     .order("criado_em", desc=True).limit(1).execute().data
         if caso:
             from ..agentes.especialista import atender
             r = atender(caso[0]["id"], texto, canal="WHATSAPP")

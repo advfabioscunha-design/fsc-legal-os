@@ -5065,6 +5065,72 @@ async def webhook_whatsapp(req: Request):
     return whatsapp.processar_webhook(await req.json())
 
 
+# ── A agenda de contatos do WhatsApp ─────────────────────────────
+#
+# O escritório salva o número junto com o caso. Quando esse número
+# escreve, o atendimento já sabe de quem é e sobre o que é, e não pede
+# CPF a quem o próprio escritório cadastrou.
+class ContatoSalvo(BaseModel):
+    numero: str
+    cliente_id: str | None = None
+    caso_id: str | None = None
+    nome: str = ""
+    observacao: str = ""
+
+
+@app.get("/api/v1/contatos-whatsapp")
+def contatos_whatsapp_listar(caso_id: str | None = None,
+                             cliente_id: str | None = None,
+                             authorization: str | None = Header(default=None)):
+    _perfil_do_token(authorization)
+    q = get_db().table("contatos_whatsapp").select("*")
+    if caso_id:
+        q = q.eq("caso_id", caso_id)
+    if cliente_id:
+        q = q.eq("cliente_id", cliente_id)
+    return {"contatos": q.order("criado_em", desc=True).limit(50)
+            .execute().data or []}
+
+
+@app.post("/api/v1/contatos-whatsapp")
+def contatos_whatsapp_salvar(body: ContatoSalvo,
+                             authorization: str | None = Header(default=None)):
+    """Salva (ou atualiza) o número na agenda do atendimento.
+
+    O número é guardado só com dígitos e com o 55 na frente, que é como
+    a Meta entrega. Guardar como a pessoa digitou faria a busca falhar
+    justamente quando o cliente escrevesse."""
+    quem = _perfil_do_token(authorization)
+    numero = "".join(c for c in (body.numero or "") if c.isdigit())
+    if len(numero) < 10:
+        raise HTTPException(400, "Número de WhatsApp incompleto.")
+    if not numero.startswith("55"):
+        numero = "55" + numero
+
+    linha = {"numero": numero, "cliente_id": body.cliente_id or None,
+             "caso_id": body.caso_id or None,
+             "nome": (body.nome or "").strip() or None,
+             "observacao": (body.observacao or "").strip() or None,
+             "criado_por": quem.get("email") or quem.get("papel") or "",
+             "atualizado_em": __import__("datetime").datetime.now(
+                 __import__("datetime").timezone.utc).isoformat()}
+    get_db().table("contatos_whatsapp").upsert(
+        linha, on_conflict="numero").execute()
+    registrar_evento(body.caso_id, "CONTATO_WHATSAPP_SALVO",
+                     {"numero": numero[-4:], "caso": body.caso_id})
+    return {"ok": True, "numero": numero}
+
+
+@app.delete("/api/v1/contatos-whatsapp/{numero}")
+def contatos_whatsapp_apagar(numero: str,
+                             authorization: str | None = Header(default=None)):
+    _perfil_do_token(authorization)
+    so_digitos = "".join(c for c in numero if c.isdigit())
+    get_db().table("contatos_whatsapp").delete() \
+        .eq("numero", so_digitos).execute()
+    return {"ok": True}
+
+
 # ── O cliente que veio do WhatsApp assume o próprio cadastro ─────
 #
 # Ele recebeu um link pelo WhatsApp, cria e-mail e senha, e precisa cair

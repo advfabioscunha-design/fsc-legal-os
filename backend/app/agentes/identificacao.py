@@ -203,6 +203,42 @@ def por_pista(nome_ou_relato: str) -> dict:
     return {"candidatos": len(encontrados), "pode_abrir": False}
 
 
+def na_agenda(numero: str) -> dict | None:
+    """O que o ESCRITÓRIO já salvou sobre este telefone.
+
+    Esta é a identificação mais forte que existe aqui, e por um motivo
+    que vale escrever: quem salvou foi gente do escritório, olhando o
+    cadastro. Não é alguém digitando um nome num WhatsApp.
+
+    Por isso ela dispensa a confirmação por CPF: pedir documento a quem
+    o próprio escritório cadastrou é tratar cliente antigo como
+    desconhecido, e é exatamente o atendimento que ninguém quer
+    receber."""
+    so_digitos = "".join(c for c in str(numero or "") if c.isdigit())
+    if len(so_digitos) < 10:
+        return None
+    # O número chega da Meta com o 55 na frente; o escritório às vezes
+    # salva sem. Tenta as duas formas antes de desistir.
+    tentativas = [so_digitos]
+    if so_digitos.startswith("55"):
+        tentativas.append(so_digitos[2:])
+    else:
+        tentativas.append("55" + so_digitos)
+
+    db = get_db()
+    for n in tentativas:
+        try:
+            r = db.table("contatos_whatsapp").select(
+                "numero,cliente_id,caso_id,nome,observacao") \
+                .eq("numero", n).limit(1).execute().data
+        except Exception as e:
+            print(f"[identificacao] agenda não lida: {e}")
+            return None
+        if r:
+            return r[0]
+    return None
+
+
 def identificar(texto: str) -> dict:
     """A porta única. Devolve o que o agente pode dizer, e só isso.
 

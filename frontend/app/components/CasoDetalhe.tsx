@@ -696,6 +696,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
           <p className="p-6 text-white/50">Não foi possível carregar o caso.</p>
         ) : (
           <div className="space-y-6 p-5">
+            {/* A AGENDA DO ATENDIMENTO
+                Salvar o WhatsApp aqui é o que faz o agente já saber de
+                quem é e de qual caso quando esse número escrever, em vez
+                de pedir CPF a quem o próprio escritório cadastrou. */}
+            <SalvarWhatsApp caso={caso} />
+
             {caso.aguardando_cliente && (
               <div className="rounded-lg border border-[#F39C12]/40 bg-[#F39C12]/10 p-3">
                 <p className="text-sm font-semibold text-[#F39C12]">⏸ Fora da produção — aguardando o cliente</p>
@@ -1910,6 +1916,114 @@ function ConversaDoCaso({ casoId }: { casoId: string }) {
       </label>
 
       {erro && <p className="mt-2 text-[11px] text-[#ff9a8f]">{erro}</p>}
+    </div>
+  );
+}
+
+
+/* ── A agenda de contatos do WhatsApp ──────────────────────────────
+ *
+ * O número salvo aqui vira a identificação mais forte do atendimento:
+ * quem salvou foi gente do escritório, olhando o cadastro, e não alguém
+ * digitando um nome num WhatsApp. Por isso o agente dispensa a
+ * confirmação por CPF para este número, e já começa a conversa sabendo
+ * de qual caso se trata.
+ */
+function SalvarWhatsApp({ caso }: { caso: any }) {
+  const [numero, setNumero] = useState("");
+  const [obs, setObs] = useState("");
+  const [salvos, setSalvos] = useState<any[]>([]);
+  const [aberto, setAberto] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const [recado, setRecado] = useState("");
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/contatos-whatsapp?caso_id=${caso.id}`);
+      const j = await r.json().catch(() => ({}));
+      setSalvos(comoLista(j?.contatos));
+    } catch { /* lista vazia é melhor que tela quebrada */ }
+  }, [caso.id]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  useEffect(() => {
+    // Sugere o telefone que já está no cadastro: na maioria das vezes é
+    // esse mesmo, e digitar de novo é só chance de errar um dígito.
+    if (!numero && caso?.clientes?.whatsapp) setNumero(String(caso.clientes.whatsapp));
+  }, [caso, numero]);
+
+  async function salvar() {
+    setRecado(""); setOcupado(true);
+    try {
+      const r = await fetch(`${API}/api/v1/contatos-whatsapp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numero, caso_id: caso.id, cliente_id: caso.cliente_id,
+          nome: caso?.clientes?.nome || "", observacao: obs,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      setRecado(r.ok ? "Salvo. Quando este número escrever, o atendimento já sabe de qual caso é."
+                     : (j?.detail || "Não consegui salvar."));
+      if (r.ok) { setObs(""); carregar(); }
+    } catch { setRecado("Falha de conexão."); }
+    setOcupado(false);
+  }
+
+  async function apagar(n: string) {
+    try {
+      await fetch(`${API}/api/v1/contatos-whatsapp/${n}`, { method: "DELETE" });
+      carregar();
+    } catch { /* silêncio: a lista recarrega na próxima abertura */ }
+  }
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+      <button onClick={() => setAberto(!aberto)}
+        className="flex w-full items-center justify-between text-left">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-white/55">
+          WhatsApp do atendimento
+          {salvos.length > 0 && (
+            <span className="ml-2 rounded bg-[#1DB954]/20 px-1.5 py-0.5 text-[10px] text-[#1DB954]">
+              {salvos.length} salvo{salvos.length > 1 ? "s" : ""}
+            </span>
+          )}
+        </span>
+        <span className="text-white/40">{aberto ? "−" : "+"}</span>
+      </button>
+
+      {aberto && (
+        <div className="mt-3 space-y-2">
+          <p className="text-[11px] leading-relaxed text-white/50">
+            Salve o número do cliente junto com este caso. Quando ele escrever
+            no WhatsApp, o atendimento já abre sabendo de quem é e sobre o que
+            é, sem precisar pedir CPF.
+          </p>
+
+          {salvos.map((c: any) => (
+            <div key={c.numero}
+              className="flex items-center justify-between rounded border border-white/10 px-2 py-1.5">
+              <span className="font-mono text-[11px] text-white/75">{comoTexto(c.numero)}</span>
+              <button onClick={() => apagar(comoTexto(c.numero))}
+                className="text-[10px] text-white/40 hover:text-[#E57373]">remover</button>
+            </div>
+          ))}
+
+          <input value={numero} onChange={(e) => setNumero(e.target.value)}
+            placeholder="55 48 98835 7992"
+            className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
+          <input value={obs} onChange={(e) => setObs(e.target.value)}
+            placeholder="observação (opcional): quem atende, telefone da esposa…"
+            className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-[12px] outline-none focus:border-[#C9A84C]" />
+          <button onClick={salvar} disabled={ocupado || !numero.trim()}
+            className="w-full rounded-lg bg-[#C9A84C] px-3 py-2 text-sm font-bold text-[#0A1628] disabled:opacity-40">
+            {ocupado ? "Salvando…" : "Salvar este número para este caso"}
+          </button>
+          {recado && <p className="text-[11px] text-white/55">{recado}</p>}
+        </div>
+      )}
     </div>
   );
 }

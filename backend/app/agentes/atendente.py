@@ -229,6 +229,28 @@ que o pedido parou.
 
 Em nenhum dos dois casos prometa data: o prazo é o que está na situação.
 
+QUANDO VOCÊ NÃO SABE A RESPOSTA
+
+Vai acontecer, e é previsível: o cliente pergunta a data de uma
+audiência, o valor que vai receber, se o juiz já decidiu, e nada disso
+está na situação. São três saídas possíveis, e só a terceira presta.
+
+Chutar é a pior. O cliente age pelo que você disser, e descobre errado
+no pior momento.
+
+Dizer "vou verificar e retorno" sem mais nada parece inofensivo e não é:
+ninguém foi avisado, a pergunta se perde no ar, e ele fica esperando um
+retorno que não foi pedido a pessoa nenhuma.
+
+A terceira é usar `levantar_informacao`, que registra a dúvida como
+tarefa do dia para quem cuida do caso. SÓ DEPOIS de usar a ferramenta
+você diz que vai levantar a informação e retornar. A frase vale porque a
+tarefa existe, e não o contrário.
+
+Diga o que você vai conferir, em uma linha, para ele saber que a
+pergunta foi entendida: "vou confirmar a data da audiência no processo e
+te retorno". Não prometa hora.
+
 QUANDO O CLIENTE ESTÁ COM PRESSA, HÁ DUAS SAÍDAS, E A ORDEM IMPORTA
 
 Se for um pedido de contrato ainda em andamento e ele quiser adiantar
@@ -344,6 +366,44 @@ FERRAMENTAS = [
             "valor exato que a ferramenta devolver, e nunca outro."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    # O QUE FAZER QUANDO NÃO SE SABE A RESPOSTA
+    #
+    # Sem esta ferramenta restavam dois caminhos, e os dois ruins:
+    # inventar, ou dizer "vou verificar e retorno" sem ninguém ser
+    # avisado. O segundo parece inofensivo e é pior: o cliente fica
+    # esperando um retorno que não foi pedido a pessoa nenhuma, e
+    # descobre dias depois que a pergunta se perdeu no ar.
+    #
+    # Agora a frase "vou levantar isso" só é dita porque uma tarefa
+    # nasceu junto com ela, com a pergunta inteira dentro.
+    {
+        "name": "levantar_informacao",
+        "description": (
+            "Registra, como tarefa do dia, uma pergunta do cliente que o "
+            "atendimento NÃO consegue responder com a situação em mãos. Use "
+            "sempre que a resposta depender de olhar o processo, conferir um "
+            "documento, confirmar um valor ou decidir algo que não está na "
+            "situação. Depois de usar, diga ao cliente que você vai levantar "
+            "a informação e retornar, e NUNCA chute a resposta."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pergunta": {
+                    "type": "string",
+                    "description": ("A dúvida do cliente, nas palavras dele, "
+                                    "inteira."),
+                },
+                "o_que_falta": {
+                    "type": "string",
+                    "description": ("O que precisa ser conferido para "
+                                    "responder. Ex.: 'confirmar a data da "
+                                    "audiência no processo'."),
+                },
+            },
+            "required": ["pergunta"],
+        },
     },
 ]
 
@@ -717,6 +777,47 @@ def avisar_o_escritorio(escopo: str, alvo_id: str, motivo: str,
     return {"avisado": True, "tarefa": (criada or [{}])[0].get("id")}
 
 
+def levantar_informacao(escopo: str, alvo_id: str, pergunta: str,
+                       o_que_falta: str = "") -> dict:
+    """A pergunta que o atendimento não soube responder vira tarefa.
+
+    Prioridade média, e não alta: não é urgência, é dúvida em aberto. Mas
+    é tarefa, com data de hoje, e por isso aparece no plano do dia de
+    quem trabalha em vez de morrer na conversa."""
+    db = get_db()
+    hoje = _agora().astimezone(timezone(timedelta(hours=-4))).date().isoformat()
+    linha = {
+        "titulo": f"Responder ao cliente: {(o_que_falta or pergunta)[:110]}",
+        "descricao": (f"O cliente perguntou pelo atendimento e o agente não "
+                      f"tinha a resposta.\n\n"
+                      f"PERGUNTA, NAS PALAVRAS DELE:\n{pergunta[:1500]}\n\n"
+                      f"O QUE PRECISA SER CONFERIDO:\n"
+                      f"{(o_que_falta or 'não especificado')[:500]}\n\n"
+                      f"O cliente foi avisado de que o escritório ia levantar "
+                      f"a informação e retornar. Ele está esperando."),
+        "origem": "CONTRATO" if escopo == "PEDIDO" else "TRIAGEM",
+        "data": hoje, "prioridade": "MEDIA",
+        "motivo": "Dúvida do cliente sem resposta no atendimento.",
+        "criado_por": "ATENDIMENTO",
+    }
+    if escopo == "PEDIDO":
+        linha["pedido_id"] = alvo_id
+    else:
+        linha["caso_id"] = alvo_id
+
+    criada = None
+    try:
+        criada = db.table("tarefas").insert(linha).execute().data
+    except Exception as e:
+        print(f"[atendimento] tarefa de dúvida não criada: {e}")
+
+    registrar_evento(alvo_id if escopo == "CASO" else None,
+                     "ATENDIMENTO_DUVIDA_EM_ABERTO",
+                     {"escopo": escopo, "alvo": alvo_id,
+                      "pergunta": pergunta[:300]})
+    return {"registrado": True, "tarefa": (criada or [{}])[0].get("id")}
+
+
 # ── A RESPOSTA ─────────────────────────────────────────────────
 
 def responder(escopo: str, alvo_id: str, pergunta: str) -> dict:
@@ -769,6 +870,13 @@ def responder(escopo: str, alvo_id: str, pergunta: str) -> dict:
                     saida = avisar_o_escritorio(
                         escopo, alvo_id, d.get("motivo", "sem motivo declarado"),
                         d.get("gravidade", "ALTA"), pergunta)
+                    avisos.append(saida)
+                elif u.name == "levantar_informacao":
+                    d = u.input or {}
+                    saida = levantar_informacao(
+                        escopo, alvo_id,
+                        d.get("pergunta") or pergunta,
+                        d.get("o_que_falta", ""))
                     avisos.append(saida)
                 elif u.name == "orcar_urgencia" and escopo == "PEDIDO":
                     from . import contratos_online
