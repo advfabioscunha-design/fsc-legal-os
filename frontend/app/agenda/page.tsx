@@ -30,6 +30,11 @@ const TIPOS = [
 ];
 const doTipo = (t: string) => TIPOS.find((x) => x.v === t) || TIPOS[6];
 
+/* Data curta, no formato de quem lê. `slice` em vez de `new Date` no
+   dia inteiro: o fuso transformaria 01/10 em 30/09 à noite. */
+const brData = (iso: string) =>
+  iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "";
+
 const inp = "w-full rounded-lg border border-white/15 bg-[#0B1F3B] px-3 py-2 text-sm text-white outline-none focus:border-[#C9A24D]";
 const btn = "rounded-lg px-3 py-2 text-xs font-bold transition";
 
@@ -461,6 +466,30 @@ function Compromisso({ it, membros, acao }:
   const t = doTipo(it.tipo);
   const convidados = it.agenda_convidados || [];
 
+  /* O DIA EM QUE NÃO DÁ MAIS
+   *
+   * A data do compromisso é quando se pretende fazer. O prazo fatal é
+   * quando deixa de ser possível. A tela mostrava só a primeira, e com
+   * isso quem via um prazo marcado para amanhã não sabia se tinha mais
+   * uma semana de folga ou se amanhã era o fim.
+   *
+   * A contagem é em dias de calendário, do dia de hoje até o fatal.
+   * Zero é hoje, negativo é vencido, e os dois têm cor própria porque
+   * ler "0 dias" e entender "ainda dá" é fácil demais. */
+  const fatal = it.prazo_fatal ? String(it.prazo_fatal).slice(0, 10) : "";
+  const diasAteFatal = (() => {
+    if (!fatal) return null;
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const d = new Date(`${fatal}T00:00:00`);
+    return Math.round((d.getTime() - hoje.getTime()) / 86400000);
+  })();
+  const avisoFatal = diasAteFatal === null ? null
+    : diasAteFatal < 0 ? { texto: `fatal venceu em ${brData(fatal)}`, cor: "#C0392B" }
+    : diasAteFatal === 0 ? { texto: "último dia, o fatal é hoje", cor: "#C0392B" }
+    : diasAteFatal === 1 ? { texto: `fatal amanhã, ${brData(fatal)}`, cor: "#E5A44C" }
+    : diasAteFatal <= 3 ? { texto: `fatal em ${diasAteFatal} dias, ${brData(fatal)}`, cor: "#E5A44C" }
+    : { texto: `fatal em ${diasAteFatal} dias, ${brData(fatal)}`, cor: "#8899AA" };
+
   return (
     <div className="rounded-xl border border-white/10 bg-[#0B1F3B] p-3"
       style={{ borderLeft: `3px solid ${t.cor}` }}>
@@ -478,6 +507,15 @@ function Compromisso({ it, membros, acao }:
               {it.membros_equipe?.nome ? ` · ${it.membros_equipe.nome}` : ""}
               {it.adiamentos > 0 ? ` · remarcado ${it.adiamentos}×` : ""}
             </p>
+            {avisoFatal && it.status !== "REALIZADO" && (
+              <p className="mt-1 inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[10px] font-bold"
+                style={{ color: avisoFatal.cor,
+                         background: `${avisoFatal.cor}1f` }}>
+                <span className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: avisoFatal.cor }} />
+                {avisoFatal.texto}
+              </p>
+            )}
           </div>
           <span className="text-white/30">{abrir ? "▴" : "▾"}</span>
         </div>
@@ -565,11 +603,19 @@ function Compromisso({ it, membros, acao }:
           {it.status !== "REALIZADO" && it.status !== "CANCELADO" && (
             <div className="space-y-1">
               <input value={resultado} onChange={(e) => setResultado(e.target.value)}
-                placeholder="o que aconteceu?" className={`${inp} py-1 text-[11px]`} />
+                placeholder="o que aconteceu? (vai para o histórico do cliente)"
+                className={`${inp} py-1 text-[11px]`} />
               <div className="flex gap-1">
+                {/* Marcar realizado fecha a cadeia inteira: o prazo
+                    que este compromisso espelha, a tarefa que o
+                    originou e a intimação que o motivou. E o que você
+                    escrever acima vira linha no histórico do caso, que
+                    é de onde sai a prestação de contas. */}
                 <button
                   onClick={() => acao(`/api/v1/agenda/${it.id}/concluir`,
-                    { resultado }, "Registrado no histórico do caso.")}
+                    { resultado },
+                    "Realizado. Prazo, tarefa e intimação ligados a ele "
+                    + "foram fechados, e ficou registrado no caso.")}
                   className={`${btn} flex-1 bg-[#1DB954] text-[#0A1628]`}>Realizado</button>
                 <button
                   onClick={() => {

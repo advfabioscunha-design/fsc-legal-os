@@ -537,6 +537,21 @@ ROTULO_EVENTO = {
     "CASO_ESCRITORIO_CRIADO": "Caso cadastrado",
     "CLIENTE_RETORNOU": "Cliente respondeu",
     "CONTATO_ATUALIZADO": "Contato atualizado",
+    # O QUE FOI FEITO NA AGENDA ENTRA NO HISTÓRICO
+    #
+    # Audiência realizada, prazo cumprido, perícia feita, reunião com o
+    # cliente: isso era registrado em `eventos` e não tinha rótulo
+    # aqui, então sumia da linha do tempo. A prestação de contas saía
+    # contando documento e comunicação, e não contava o trabalho, que é
+    # justamente o que o cliente pagou.
+    "AGENDA_REALIZADA": "Ato realizado",
+    "AGENDA_CANCELADA": "Compromisso cancelado",
+    "AGENDA_REAGENDADA": "Compromisso remarcado",
+    "PRAZO_CUMPRIDO": "Prazo cumprido",
+    "TAREFA_CONCLUIDA": "Tarefa concluída",
+    "INTIMACAO_RESOLVIDA": "Intimação resolvida",
+    "RESPOSTA_DO_ESCRITORIO": "Resposta do escritório",
+    "ATENDIMENTO_URGENCIA": "Prioridade registrada",
 }
 
 
@@ -564,6 +579,17 @@ def montar_historico(caso_id: str) -> list[dict]:
             elif e["tipo"] in ("DOCUMENTOS_RECEBIDOS_DO_CLIENTE",
                                "ASSINADO_RECEBIDO_EMAIL"):
                 det = ", ".join(p.get("arquivos", []) or [])
+            elif e["tipo"] in ("AGENDA_REALIZADA", "AGENDA_CANCELADA",
+                               "AGENDA_REAGENDADA"):
+                # O título diz o que era; o resultado diz o que houve. A
+                # prestação de contas precisa dos dois: "audiência de
+                # conciliação" sem "acordo não aceito" não informa nada.
+                det = " · ".join(x for x in [
+                    p.get("titulo"), p.get("resultado") or p.get("motivo")] if x)
+            elif e["tipo"] in ("PRAZO_CUMPRIDO", "TAREFA_CONCLUIDA",
+                               "INTIMACAO_RESOLVIDA"):
+                det = " · ".join(x for x in [p.get("titulo"),
+                                             p.get("resultado")] if x)
             linha.append({"quando": e["criado_em"], "o_que": rot, "detalhe": det})
     except Exception:
         pass

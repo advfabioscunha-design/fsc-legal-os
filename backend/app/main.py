@@ -215,6 +215,9 @@ def _agendar_radar():
                 try:
                     from .agentes import agenda as _ag
                     r["agenda"] = _ag.espelhar_prazos()
+                    # As intimações entram no mesmo passo: elas são o
+                    # começo do trabalho, e ficavam fora do dia.
+                    r["agenda_intimacoes"] = _ag.espelhar_intimacoes()
                 except Exception as e:
                     r["agenda"] = {"erro": str(e)}
                 try:
@@ -4853,9 +4856,10 @@ def agenda_nota_apagar(nota_id: str):
 
 @app.post("/api/v1/agenda/espelhar-prazos")
 def agenda_espelhar(dias: int = 60):
-    """Põe na agenda os prazos abertos que ainda não estão lá."""
+    """Põe na agenda os prazos e as intimações que ainda não estão lá."""
     from .agentes import agenda
-    return agenda.espelhar_prazos(dias)
+    return {"prazos": agenda.espelhar_prazos(dias),
+            "intimacoes": agenda.espelhar_intimacoes(dias)}
 
 
 @app.get("/api/v1/agenda/feed/{token}.ics")

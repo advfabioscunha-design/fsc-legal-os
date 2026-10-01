@@ -156,7 +156,16 @@ def criar(dados: dict, quem: str = "", forcar: bool = False) -> dict:
         "numero_processo": dados.get("numero_processo") or None,
         "prazo_id": dados.get("prazo_id") or None,
         "tarefa_id": dados.get("tarefa_id") or None,
+        "intimacao_id": dados.get("intimacao_id") or None,
         "anotacao_id": dados.get("anotacao_id") or None,
+        # O DIA EM QUE NÃO DÁ MAIS
+        #
+        # A agenda mostrava a data de fazer, que é a data de trabalho,
+        # e não a data limite. São coisas diferentes e a diferença é o
+        # que separa um dia corrido de uma perda de prazo: quem olha o
+        # compromisso precisa saber se ainda tem folga ou se hoje é o
+        # último dia.
+        "prazo_fatal": dados.get("prazo_fatal") or None,
         "responsavel_id": dados.get("responsavel_id") or None,
         "status": "ABERTO",
         "criado_por": quem or "escritório",
@@ -274,25 +283,103 @@ def reagendar(item_id: str, nova_data: str, motivo: str = "",
 
 
 def concluir(item_id: str, resultado: str = "", quem: str = "") -> dict:
-    """Marca como realizado e escreve o que houve no histórico do caso."""
+    """Marca como realizado, fecha o que estava ligado e registra no caso.
+
+    A AGENDA É O LUGAR ONDE O TRABALHO ACONTECE
+    --------------------------------------------
+    Um compromisso da agenda quase nunca existe sozinho: ele é o
+    espelho de um prazo, de uma tarefa ou de uma intimação. Marcar
+    "realizado" aqui e deixar o prazo aberto em `prazos` produzia a
+    pior combinação possível: a agenda dizendo que estava feito e a
+    controladoria cobrando o mesmo ato no dia seguinte. Quem usa o
+    sistema aprende a não confiar em nenhuma das duas telas.
+
+    Agora o realizado fecha a cadeia inteira, e o que foi feito vira
+    linha no histórico do caso, que é de onde sai a prestação de
+    contas. Trabalho que não fica registrado não existe na hora de
+    prestar contas, e foi feito do mesmo jeito.
+    """
     db = get_db()
     r = db.table("agenda_itens").select("*,casos(id)").eq("id", item_id) \
         .limit(1).execute().data
     if not r:
         raise ValueError("Compromisso não encontrado.")
     item = r[0]
+    agora = _agora()
 
     db.table("agenda_itens").update({
         "status": "REALIZADO",
-        "atualizado_em": _agora(),
+        "concluido_em": agora,
+        "resultado": (resultado or "")[:4000] or None,
+        "atualizado_em": agora,
         "historico": _anotar(item, "REALIZADO", quem, {"resultado": resultado}),
     }).eq("id", item_id).execute()
+
+    fechados: list[str] = []
+
+    # 1. O prazo que este compromisso espelha.
+    if item.get("prazo_id"):
+        try:
+            db.table("prazos").update({"status": "CONCLUIDO"}) \
+                .eq("id", item["prazo_id"]).execute()
+            fechados.append("prazo")
+            if item.get("caso_id"):
+                registrar_evento(item["caso_id"], "PRAZO_CUMPRIDO", {
+                    "titulo": item.get("titulo"), "resultado": resultado,
+                    "quem": quem, "data": item.get("data")})
+        except Exception as e:
+            print(f"[agenda] prazo não fechado: {e}")
+
+    # 2. A tarefa, quando o compromisso nasceu de uma.
+    if item.get("tarefa_id"):
+        try:
+            db.table("tarefas").update({
+                "status": "FEITA", "concluida_em": agora,
+            }).eq("id", item["tarefa_id"]).execute()
+            fechados.append("tarefa")
+            if item.get("caso_id"):
+                registrar_evento(item["caso_id"], "TAREFA_CONCLUIDA", {
+                    "titulo": item.get("titulo"), "resultado": resultado,
+                    "quem": quem})
+        except Exception as e:
+            print(f"[agenda] tarefa não fechada: {e}")
+
+    # 3. A intimação que originou o ato.
+    if item.get("intimacao_id"):
+        try:
+            db.table("intimacoes").update({"status": "RESOLVIDO", "lida": True}) \
+                .eq("id", item["intimacao_id"]).execute()
+            fechados.append("intimacao")
+            if item.get("caso_id"):
+                registrar_evento(item["caso_id"], "INTIMACAO_RESOLVIDA", {
+                    "titulo": item.get("titulo"), "resultado": resultado,
+                    "quem": quem})
+        except Exception as e:
+            print(f"[agenda] intimação não fechada: {e}")
+
+    # 4. A anotação que fica na pasta do cliente, com o que houve.
+    #    O evento serve à linha do tempo; a anotação serve a quem abre
+    #    a pasta e quer ler, com as próprias palavras de quem fez.
+    if item.get("caso_id") and (resultado or "").strip():
+        try:
+            db.table("anotacoes").insert({
+                "texto": f"{item.get('titulo') or 'Compromisso'}: {resultado}"[:4000],
+                "caso_id": item["caso_id"],
+                "cliente_id": item.get("cliente_id"),
+                "numero_processo": item.get("numero_processo"),
+                "status": "RESOLVIDA", "resultado": (resultado or "")[:4000],
+                "resolvido_em": agora,
+                "criado_por": quem or "agenda",
+            }).execute()
+        except Exception as e:
+            print(f"[agenda] anotação não registrada: {e}")
 
     if item.get("caso_id"):
         registrar_evento(item["caso_id"], "AGENDA_REALIZADA", {
             "tipo": item.get("tipo"), "titulo": item.get("titulo"),
-            "data": item.get("data"), "resultado": resultado, "quem": quem})
-    return {"ok": True}
+            "data": item.get("data"), "resultado": resultado, "quem": quem,
+            "fechados": fechados})
+    return {"ok": True, "fechados": fechados}
 
 
 def cancelar(item_id: str, motivo: str = "", quem: str = "") -> dict:
@@ -605,6 +692,9 @@ def espelhar_prazos(dias: int = 60) -> dict:
         "casos(numero_processo)"
     ).eq("status", "ABERTO").gte("data", hoje.isoformat()) \
         .lte("data", limite).limit(500).execute().data or []
+    # O prazo fatal vem junto. Sem ele a agenda mostra a data de
+    # trabalho como se fosse o limite, e quem vê um prazo de amanhã
+    # não sabe se tem mais uma semana ou se amanhã é o fim.
 
     criados = 0
     for p in prazos:
@@ -619,12 +709,63 @@ def espelhar_prazos(dias: int = 60) -> dict:
                 "caso_id": p.get("caso_id"),
                 "numero_processo": (p.get("casos") or {}).get("numero_processo"),
                 "prazo_id": p["id"],
+                "prazo_fatal": str(p.get("prazo_fatal"))[:10]
+                if p.get("prazo_fatal") else None,
                 "responsavel_id": p.get("responsavel_id"),
             }, quem="controladoria", forcar=True)
             criados += 1
         except Exception as e:
             print(f"[agenda] prazo não espelhado: {e}")
     return {"criados": criados, "considerados": len(prazos)}
+
+
+
+def espelhar_intimacoes(dias: int = 60) -> dict:
+    """Põe na agenda as intimações com prazo a vencer.
+
+    A intimação é o começo do trabalho, e estava fora da agenda: ela
+    vivia na tela de intimações e o advogado tinha de olhar dois
+    lugares para saber o que o dia exigia. Pior, marcar a intimação
+    como resolvida lá não mexia na agenda, e marcar o compromisso como
+    feito aqui não mexia lá.
+
+    O espelho resolve os dois: a intimação aparece no dia, e o
+    `intimacao_id` faz o "realizado" fechar as duas pontas de uma vez.
+    A verdade continua morando em `intimacoes`."""
+    db = get_db()
+    hoje = date.today()
+    limite = (hoje + timedelta(days=dias)).isoformat()
+
+    ja = {x["intimacao_id"] for x in db.table("agenda_itens")
+          .select("intimacao_id").in_("status", list(STATUS_VIVO))
+          .limit(3000).execute().data if x.get("intimacao_id")}
+
+    pendentes = db.table("intimacoes").select(
+        "id,conteudo,prazo_em,numero_processo,caso_id,tribunal"
+    ).eq("status", "A_RESOLVER").not_.is_("prazo_em", "null") \
+        .gte("prazo_em", hoje.isoformat()).lte("prazo_em", limite) \
+        .limit(500).execute().data or []
+
+    criados = 0
+    for i in pendentes:
+        if i["id"] in ja:
+            continue
+        resumo = " ".join(str(i.get("conteudo") or "").split())[:160]
+        try:
+            criar({
+                "tipo": "PRAZO",
+                "titulo": f"Intimação: {resumo or i.get('numero_processo') or ''}"[:200],
+                "descricao": str(i.get("conteudo") or "")[:1500],
+                "data": str(i.get("prazo_em"))[:10],
+                "prazo_fatal": str(i.get("prazo_em"))[:10],
+                "caso_id": i.get("caso_id"),
+                "numero_processo": i.get("numero_processo"),
+                "intimacao_id": i["id"],
+            }, quem="controladoria", forcar=True)
+            criados += 1
+        except Exception as e:
+            print(f"[agenda] intimação não espelhada: {e}")
+    return {"criados": criados, "considerados": len(pendentes)}
 
 
 # ── Feed para assinar no Google Calendar ────────────────────────
