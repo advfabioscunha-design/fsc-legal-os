@@ -370,7 +370,13 @@ legislação informada. Regras da casa:
 - Quando o cliente optou por manter um ponto contra a orientação,
   redija do jeito que ele pediu E inclua, ao final, uma cláusula de
   ciência registrando que a orientação foi prestada.
-- Não escreva parecer, comentário nem explicação: só o contrato."""
+- Não escreva parecer, comentário nem explicação: só o contrato.
+- TEXTO CORRIDO, SEM MARCAÇÃO. Nada de sustenido para título, asterisco
+  para negrito ou linha de hífens para separar seção. Os modelos que
+  você recebe como apoio usam esses sinais porque são arquivos de
+  texto; o contrato que você escreve é o documento final, e ali eles
+  aparecem escritos, à vista do cliente. Título é uma linha curta em
+  MAIÚSCULAS; ênfase se faz com a palavra certa, não com asterisco."""
 
 SYSTEM_REVISOR = """Você é advogado revisor da FC Advocacia. Leia o
 contrato inteiro e aponte o que precisa mudar antes de ir ao cliente.
@@ -1712,20 +1718,45 @@ def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
             run.font.size = Pt(11 if i == 0 else 9)
         doc.add_paragraph()
 
-    for bloco in (texto or "").split("\n"):
-        bloco = bloco.rstrip()
-        if not bloco:
+    # O QUE ERA MARCAÇÃO VIRA FORMATAÇÃO
+    #
+    # Os modelos do escritório são arquivos markdown e o redator escreve
+    # como eles. Jogar essas linhas cruas no documento fazia o contrato
+    # chegar ao cliente com `## CAPÍTULO I` e `**Cláusula 2ª**` à mostra,
+    # como se ninguém tivesse lido antes de mandar.
+    #
+    # A leitura acontece em `core/texto`, uma vez só, e serve também ao
+    # arquivo que abre no Word: os dois formatos saem do mesmo
+    # entendimento do que é título, item e negrito.
+    from ..core.texto import linhas_do_documento
+
+    for l in linhas_do_documento(texto):
+        if l["tipo"] == "vazio":
             doc.add_paragraph()
             continue
+
         par = doc.add_paragraph()
-        limpo = bloco.strip()
-        titulo = limpo.isupper() and len(limpo) < 90
-        par.alignment = (WD_ALIGN_PARAGRAPH.CENTER if titulo
-                         else WD_ALIGN_PARAGRAPH.JUSTIFY)
-        par.paragraph_format.first_line_indent = None if titulo else Cm(1.25)
         par.paragraph_format.space_after = Pt(6)
-        run = par.add_run(limpo)
-        run.bold = titulo
+
+        if l["tipo"] == "titulo":
+            par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            par.paragraph_format.first_line_indent = None
+            run = par.add_run("".join(t for t, _ in l["pedacos"]))
+            run.bold = True
+            continue
+
+        if l["tipo"] == "item":
+            par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            par.paragraph_format.left_indent = Cm(1.25)
+            par.paragraph_format.first_line_indent = Cm(-0.5)
+            par.add_run("• ")
+        else:
+            par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            par.paragraph_format.first_line_indent = Cm(1.25)
+
+        for trecho, negrito in l["pedacos"]:
+            run = par.add_run(trecho)
+            run.bold = negrito
 
     if com_timbre and numero:
         rodape = doc.add_paragraph()

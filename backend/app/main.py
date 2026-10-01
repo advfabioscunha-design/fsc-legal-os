@@ -4255,9 +4255,12 @@ def baixar_documento_word(pedido_id: str):
         raise HTTPException(404, "Documento ainda não escrito.")
     p = r[0]
 
-    linhas = "".join(
-        f"<p>{(l or '&nbsp;').replace('&', '&amp;').replace('<', '&lt;')}</p>"
-        for l in str(p["minuta"]).split("\n"))
+    # O mesmo entendimento que monta o PDF: título centralizado, negrito
+    # onde o markdown dizia negrito, e os sinais fora do texto. Sem isto
+    # o advogado abria o Word e via `## CAPÍTULO I` e `**Cláusula 2ª**`
+    # escritos com todos os asteriscos.
+    from .core.texto import documento_em_html
+    linhas = documento_em_html(str(p["minuta"]))
     html = (
         '<html xmlns:w="urn:schemas-microsoft-com:office:word">'
         '<head><meta charset="utf-8"><title>'
