@@ -772,7 +772,53 @@ def espelhar_intimacoes(dias: int = 60) -> dict:
             criados += 1
         except Exception as e:
             print(f"[agenda] intimação não espelhada: {e}")
-    return {"criados": criados, "considerados": len(pendentes)}
+
+    # A INTIMAÇÃO SEM PRAZO CALCULADO TAMBÉM PRECISA APARECER
+    #
+    # O cálculo do prazo usa o padrão do tipo de ato, e há publicação
+    # cujo tipo o classificador não reconhece: fica com `prazo_em` nulo.
+    # Pela regra de cima ela não entrava na agenda, e era exatamente a
+    # publicação mais perigosa que desaparecia — a que ninguém sabe
+    # quando vence.
+    #
+    # Ela entra no dia em que foi lida, e não numa data inventada: o
+    # compromisso é conferir o prazo, não cumpri-lo. O título diz isso
+    # com todas as letras, para ninguém tratar a data como prazo fatal.
+    sem_prazo = db.table("intimacoes").select(
+        "id,conteudo,numero_processo,caso_id,tribunal,data_movimento"
+    ).eq("status", "A_RESOLVER").is_("prazo_em", "null") \
+        .gte("data_movimento", (hoje - timedelta(days=dias)).isoformat()) \
+        .limit(300).execute().data or []
+
+    a_conferir = 0
+    for i in sem_prazo:
+        if i["id"] in ja:
+            continue
+        # Publicação antiga que ainda está aberta vem para hoje: deixá-la
+        # numa data passada seria nascer atrasada e já invisível.
+        lida = str(i.get("data_movimento") or "")[:10] or hoje.isoformat()
+        dia = max(lida, hoje.isoformat())
+        resumo = " ".join(str(i.get("conteudo") or "").split())[:140]
+        try:
+            criar({
+                "tipo": "TAREFA",
+                "titulo": f"Conferir o prazo desta intimação: "
+                          f"{resumo or i.get('numero_processo') or ''}"[:200],
+                "descricao": ("O prazo desta publicação não foi calculado "
+                              "automaticamente. Confira no processo e lance "
+                              "o prazo.\n\n"
+                              + str(i.get("conteudo") or "")[:1500]),
+                "data": dia,
+                "caso_id": i.get("caso_id"),
+                "numero_processo": i.get("numero_processo"),
+                "intimacao_id": i["id"],
+            }, quem="controladoria", forcar=True)
+            a_conferir += 1
+        except Exception as e:
+            print(f"[agenda] intimação sem prazo não espelhada: {e}")
+
+    return {"criados": criados, "considerados": len(pendentes),
+            "a_conferir": a_conferir, "sem_prazo": len(sem_prazo)}
 
 
 

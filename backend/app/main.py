@@ -134,6 +134,27 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[agenda] espelho do balcão não agendado: {e}")
+        # A INTIMAÇÃO TEM DE CHEGAR NA AGENDA NO DIA EM QUE CHEGA
+        #
+        # O espelho das intimações só acontecia no fechamento das 18h. Uma
+        # publicação lida às 9h ficava nove horas sem existir na agenda,
+        # e uma lida numa sexta de feriado esperava até segunda. Quem
+        # trabalha pela agenda não via o ato; quem marcava realizado na
+        # agenda não tinha o que fechar na página de intimações, porque o
+        # vínculo entre as duas é justamente este espelho.
+        #
+        # De hora em hora, no minuto 25 para não disputar a vez com o
+        # espelho do balcão (10 e 40) nem com a régua (5 e 35). A função
+        # não duplica: antes de criar, ela confere o que já está lá.
+        try:
+            from .agentes import agenda as _ag2
+            sched.add_job(
+                _ag2.espelhar_intimacoes,
+                CronTrigger(minute=25),
+                id="espelho_intimacoes", replace_existing=True, max_instances=1,
+            )
+        except Exception as e:
+            print(f"[agenda] espelho das intimações não agendado: {e}")
         # Régua de pendências: de 6 em 6 horas, enquanto faltar o
         # indispensável. Roda de meia em meia hora e a própria função
         # decide de quem está na hora de cobrar.

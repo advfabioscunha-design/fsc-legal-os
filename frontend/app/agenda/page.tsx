@@ -136,6 +136,7 @@ export default function AgendaPage() {
             className={`${btn} ml-auto bg-[#C9A24D] text-[#0A1628] hover:brightness-110`}>
             + Novo compromisso
           </button>
+          <TrazerParaAgenda depois={carregar} />
           <AssinarCalendario />
         </div>
 
@@ -217,6 +218,47 @@ export default function AgendaPage() {
 /* ── O endereço do calendário assinável ───────────────────────────
    Assinar não é importar: o Google relê o endereço sozinho, então o que
    muda aqui aparece lá sem ninguém reenviar nada. */
+/* TRAZER PRAZOS E INTIMAÇÕES PARA A AGENDA
+ *
+ * Sozinho isso acontece de hora em hora e no fechamento das 18h. O botão
+ * existe para quando não se pode esperar a hora cheia: a publicação
+ * chegou agora e o ato é para hoje.
+ *
+ * O espelho é o que liga as duas telas. É por ele que marcar realizado
+ * aqui fecha a intimação lá, e por isso vale puxar na mão quando se
+ * acabou de ler uma publicação nova. */
+function TrazerParaAgenda({ depois }: { depois: () => void }) {
+  const [rodando, setRodando] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function trazer() {
+    setRodando(true); setMsg("");
+    try {
+      const r = await fetch(`${API}/api/v1/agenda/espelhar-prazos?dias=60`,
+                            { method: "POST" });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { setMsg("Não consegui agora."); return; }
+      const novos = (d.prazos?.criados || 0) + (d.intimacoes?.criados || 0);
+      const conferir = d.intimacoes?.a_conferir || 0;
+      setMsg(novos || conferir
+        ? `${novos} na agenda` + (conferir ? `, ${conferir} com prazo a conferir` : "")
+        : "Nada novo para trazer.");
+      depois();
+    } catch { setMsg("Falha de conexão."); }
+    finally { setRodando(false); }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button onClick={trazer} disabled={rodando}
+        className={`${btn} border border-[#2D7DD2]/60 text-[#2D7DD2] hover:bg-[#2D7DD2]/10 disabled:opacity-50`}>
+        {rodando ? "Trazendo…" : "Trazer prazos e intimações"}
+      </button>
+      {msg && <span className="text-[11px] text-white/45">{msg}</span>}
+    </div>
+  );
+}
+
 function AssinarCalendario() {
   const [aberto, setAberto] = useState(false);
   const [token, setToken] = useState("");
