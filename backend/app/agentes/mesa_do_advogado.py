@@ -124,6 +124,11 @@ documento, inclua o que estiver em volta até ficar único.
 `substituir` é o texto final, pronto, sem marcação e sem comentário.
 Nada de colchete explicando o que você fez.
 
+PARA EXCLUIR, `substituir` vai vazio. É assim que se apaga uma
+cláusula, um parágrafo ou uma frase: põe em `procurar` o trecho
+inteiro, com a quebra de linha que sobraria, e deixa `substituir` como
+texto vazio. Não escreva "removido" nem deixe o espaço do que saiu.
+
 Pode mandar várias alterações de uma vez quando ele pedir várias. E
 diga, na resposta, o que mudou e por quê, em uma linha por alteração:
 ele vai conferir antes de aprovar, e precisa saber onde olhar.

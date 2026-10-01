@@ -109,6 +109,8 @@ Pegue o menor trecho que identifique o lugar sem ambiguidade; se ele
 se repetir no documento, inclua o que estiver em volta até ficar único.
 
 `substituir` é o texto final, pronto, sem marcação e sem comentário.
+Para EXCLUIR, `substituir` vai vazio: põe em `procurar` o trecho
+inteiro e deixa `substituir` como texto vazio.
 
 NUNCA apague ou altere uma citação de julgado para "encaixar" o
 argumento. Mudar ementa, número ou relator de acórdão é falsidade, não
