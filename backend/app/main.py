@@ -93,6 +93,25 @@ async def _porteiro(request: Request, call_next):
         # vier junto dela pode ser interno demais para sair daqui.
         de_dentro = getattr(getattr(request.state, "usuario", None) or {},
                             "get", lambda *_: None)("papel")
+
+        # A FALTA DE SALDO NÃO É UM DEFEITO, E NÃO PODE PARECER UM
+        #
+        # Sem crédito na conta da Anthropic, a API recusa em menos de um
+        # segundo e todo agente para junto: redator, revisor, atendente,
+        # negociador, esteira. O texto que vem de lá está em inglês e
+        # fala de "credit balance", o que manda quem lê procurar defeito
+        # no sistema. Horas podem se perder assim, e o conserto é de um
+        # minuto no painel de cobrança.
+        texto = str(e).lower()
+        if "credit balance" in texto or "insufficient" in texto:
+            return JSONResponse(
+                {"detail": "A conta de IA do escritório está sem saldo, e "
+                           "por isso nenhum agente consegue trabalhar agora. "
+                           "Recarregue em console.anthropic.com, em Plans & "
+                           "Billing. Assim que o saldo entrar, é só clicar "
+                           "de novo: nada se perdeu."},
+                status_code=503)
+
         corpo = {"detail": "Deu erro aqui no servidor ao executar esta ação. "
                            "O escritório já tem o registro do que houve."}
         if de_dentro in ("OPERADOR", "ADMIN"):
