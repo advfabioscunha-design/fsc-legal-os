@@ -226,8 +226,14 @@ function PainelDoPedido({ id, fechar, recarregar }:
       } catch { /* uma batida perdida não é erro: a próxima vem em 4s */ }
     }
     bater();
-    const t = setInterval(bater, 4000);
-    return () => { vivo = false; clearInterval(t); };
+    const t = setInterval(() => { if (!document.hidden) bater(); }, 4000);
+    // Voltar para a aba traz tudo de uma vez, sem esperar a batida.
+    document.addEventListener("visibilitychange", bater);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", bater);
+    };
   }, [aba, id]);
 
   async function acao(caminho: string, corpo: any = {}, rotulo = "") {

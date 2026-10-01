@@ -779,11 +779,30 @@ function Conversa({ pedidoId, aoMudar }: {
   }, [pedidoId]);
 
   useEffect(() => { carregar(); }, [carregar]);
-  // Recarrega a cada meio minuto. O escritório responde por aqui e o
-  // cliente não deve precisar atualizar a página para ver a resposta.
+
+  /* QUATRO SEGUNDOS, PORQUE DO OUTRO LADO TEM GENTE
+   *
+   * Eram trinta. Serviam quando o escritório respondia por agente, em
+   * segundos, e a página só precisava não ficar velha. Agora o
+   * advogado assume a conversa e digita ele mesmo: meio minuto de
+   * atraso faz o cliente ver "oi" quando a pergunta seguinte já foi
+   * feita, e responder fora de hora. Conversa com trinta segundos de
+   * eco não é conversa.
+   *
+   * Com a aba escondida a batida para. O cliente que deixou a página
+   * aberta num segundo plano não está esperando nada, e quando voltar
+   * o `visibilitychange` traz tudo de uma vez. */
   useEffect(() => {
-    const t = setInterval(() => { if (!segurando.current) carregar(); }, 30000);
-    return () => clearInterval(t);
+    function bater() {
+      if (document.hidden || segurando.current) return;
+      carregar();
+    }
+    const t = setInterval(bater, 4000);
+    document.addEventListener("visibilitychange", bater);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", bater);
+    };
   }, [carregar]);
 
   /* O ROLAR QUE ARRASTAVA A PÁGINA INTEIRA
