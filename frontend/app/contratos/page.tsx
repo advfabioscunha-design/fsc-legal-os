@@ -251,6 +251,29 @@ function PainelDoPedido({ id, fechar, recarregar }:
     finally { setOcupado(""); }
   }
 
+  async function enviarMensagem() {
+    const texto = msg.trim();
+    if (!texto) return;
+    const canais = ["PLATAFORMA"];
+    if (porEmail) canais.push("EMAIL");
+    if (porWhats) canais.push("WHATSAPP");
+    // A caixa esvazia antes da resposta do servidor: quem apertou Enter
+    // já está pensando na frase seguinte, e ver o texto antigo parado
+    // ali faz duvidar se saiu.
+    setMsg("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/mensagem`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto, autor: "ESCRITORIO", canais }),
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (!r.ok) { setMsg(texto); setErro(j?.detail || "Não consegui enviar."); return; }
+      if (j?.falhas?.length) setErro(`Enviado, mas ${j.falhas.join("; ")}`);
+      if (j?.atendimento) setAtendimento(j.atendimento);
+      carregar();
+    } catch { setMsg(texto); setErro("Falha de conexão."); }
+  }
+
   async function excluir() {
     const pago = Boolean(p?.pago_em);
     const aviso = pago
@@ -794,23 +817,37 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 computador, sai para a rua e continua no telefone. O e-mail
                 é para o recado que precisa ficar fora da conversa.
               </p>
+              {/* ENTER MANDA, SHIFT+ENTER PULA LINHA
+
+                  Era um campo de uma linha só, sem tratar tecla
+                  nenhuma: Enter não fazia nada e não havia como quebrar
+                  parágrafo. Quem escreve o dia inteiro em conversa
+                  aperta Enter sem pensar, e a mensagem ficava parada na
+                  caixa esperando um clique que ninguém dava.
+
+                  É a mesma regra das duas telas do cliente, de
+                  propósito: a mão de quem passa de uma para outra não
+                  deve precisar reaprender. */}
               <div className="flex gap-2">
-                <input value={msg} onChange={(e) => setMsg(e.target.value)}
-                  placeholder="escrever para o cliente…" className={inp} />
-                <button
-                  onClick={async () => {
-                    if (!msg.trim()) return;
-                    const canais = ["PLATAFORMA"];
-                    if (porEmail) canais.push("EMAIL");
-                    if (porWhats) canais.push("WHATSAPP");
-                    const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/mensagem`, {
-                      method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ texto: msg, autor: "ESCRITORIO", canais }),
-                    });
-                    const j = await r.json().catch(() => ({}));
-                    if (j?.falhas?.length) setErro(`Enviado, mas ${j.falhas.join("; ")}`);
-                    setMsg(""); carregar();
+                <textarea value={msg}
+                  onChange={(e) => {
+                    setMsg(e.target.value);
+                    // Cresce com o texto, até um limite. Caixa de uma
+                    // linha esconde o que já foi escrito, e quem não vê
+                    // o que escreveu não revisa antes de mandar.
+                    const el = e.target as HTMLTextAreaElement;
+                    el.style.height = "auto";
+                    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault(); enviarMensagem();
+                    }
+                  }}
+                  rows={1}
+                  placeholder="escrever para o cliente…  (Enter envia, Shift+Enter pula linha)"
+                  className={`${inp} resize-none`} />
+                <button onClick={enviarMensagem} disabled={!msg.trim()}
                   className={`${btn} shrink-0 bg-[#C9A24D] text-[#0A1628]`}>Enviar</button>
               </div>
             </div>

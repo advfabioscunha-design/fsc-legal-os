@@ -939,9 +939,16 @@ export default function AreaCliente() {
                 className="rounded-xl border border-black/10 px-3 py-2.5 text-lg leading-none text-charcoal/70 hover:border-gold hover:text-navy">📎</button>
               <button type="button" onClick={() => cameraRef.current?.click()} title="Tirar foto do documento"
                 className="rounded-xl border border-black/10 px-3 py-2.5 text-lg leading-none text-charcoal/70 hover:border-gold hover:text-navy">📷</button>
-              <textarea value={input} onChange={(e) => setInput(e.target.value)}
+              <textarea value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  const el = e.target as HTMLTextAreaElement;
+                  el.style.height = "auto";
+                  el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+                }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
-                rows={1} placeholder="Escreva sua mensagem…"
+                rows={1}
+                placeholder="Escreva sua mensagem…  (Enter envia, Shift+Enter pula linha)"
                 className="max-h-32 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm outline-none focus:border-gold" />
               <button type="submit" disabled={enviando}
                 className="rounded-xl bg-gold px-5 py-2.5 text-sm font-semibold text-navy transition hover:bg-amber disabled:opacity-50">Enviar</button>

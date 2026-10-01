@@ -934,11 +934,18 @@ function Conversa({ pedidoId, aoMudar }: {
             setTexto(e.target.value);
             ultimaTecla.current = Date.now();
             avisarQueEstouDigitando();
+            // Cresce com o texto, até um limite. Caixa de uma linha
+            // esconde o que já foi escrito, e quem não vê o que
+            // escreveu não revisa antes de mandar.
+            const el = e.target as HTMLTextAreaElement;
+            el.style.height = "auto";
+            el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mandarTexto(); }
           }}
-          rows={1} placeholder="escreva aqui"
+          rows={1}
+          placeholder="escreva aqui  (Enter envia, Shift+Enter pula linha)"
           className={`flex-1 resize-none ${cx}`} />
         <button onClick={() => mandarTexto()} disabled={ocupado || !texto.trim()}
           className="rounded-lg bg-[#C9A84C] px-4 text-sm font-bold text-[#0A1628] disabled:opacity-40">
