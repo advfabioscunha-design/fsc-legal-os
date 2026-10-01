@@ -57,6 +57,7 @@ from ..core.texto import humanizar
 # que sejam o mesmo código: duas implementações de "procurar e
 # substituir com conferência" divergem no dia em que alguém melhora uma.
 from .mesa_do_advogado import FERRAMENTA_ALTERAR, _aplicar
+from . import consultas as _consultas
 
 SYSTEM = """Você é advogado sênior da FC Advocacia, especialista na
 matéria deste processo, e acompanhou o caso desde a triagem. Está
@@ -135,7 +136,31 @@ O QUE VOCÊ NÃO FAZ
 Não protocola. Não aprova. Não muda a fase do caso. Não altera sem
 ordem nem corrige de passagem o que não foi pedido.
 
+AS CONSULTAS QUE VOCÊ TEM
+
+`consultar_julgados` (banco de precedentes do escritório),
+`consultar_teses` (as teses conferidas, com a prova que cada uma exige)
+e `consultar_legislacao` (o acervo de lei conferida).
+
+Numa peça isso não é conveniência, é condição. Julgado que você não
+consultou você não cita; artigo que não voltou do acervo você não
+numera. Citação inventada em petição queima a peça e o advogado junto,
+e a parte contrária confere o inteiro teor.
+
+Consultada a tese, confira os documentos vitais dela contra o que o
+caso realmente tem, e aponte o que falta antes de a peça sair.
+
+Depois de cada julgado citado, faça o paralelo com ESTE caso: qual fato
+do registro corresponde ao que o tribunal considerou decisivo. Julgado
+citado sem paralelo não convence juiz nenhum.
+
+A régua inteira de fontes está abaixo, e ela prevalece em caso de
+conflito com qualquer coisa escrita aqui.
+
 Nada de travessão, asterisco ou marcação. Texto corrido."""
+
+# A mesma calibração da mesa do contrato, do mesmo arquivo de skill.
+SYSTEM = SYSTEM + "\n\n" + _consultas.regua()
 
 
 FERRAMENTA_CLIENTE = {
@@ -414,12 +439,16 @@ def perguntar(peticao_id: str, pergunta: str, quem: str = "",
     propostas: list[dict] = []
     recusadas: list[dict] = []
     perguntas: list[dict] = []
+    pesquisas: list[dict] = []
     texto = ""
 
-    for _ in range(2):
+    # Quatro voltas: as consultas pedem ida e volta antes de ele ter o
+    # que precisa para responder. Era duas antes de existirem.
+    for _ in range(4):
         rr = cliente.messages.create(
             model=s.claude_model, max_tokens=2500, system=SYSTEM,
-            tools=[FERRAMENTA_ALTERAR, FERRAMENTA_CLIENTE],
+            tools=[FERRAMENTA_ALTERAR, FERRAMENTA_CLIENTE,
+                   *_consultas.FERRAMENTAS],
             messages=mensagens)
         texto = "".join(b.text for b in rr.content if b.type == "text").strip()
         usos = [b for b in rr.content if getattr(b, "type", "") == "tool_use"]
@@ -428,6 +457,15 @@ def perguntar(peticao_id: str, pergunta: str, quem: str = "",
         mensagens.append({"role": "assistant", "content": rr.content})
         saidas = []
         for u in usos:
+            if u.name in _consultas.NOMES:
+                # Volta como texto puro: é ementa e artigo de lei, e
+                # passar isso por JSON só encheria a fonte de escapes.
+                saidas.append({
+                    "type": "tool_result", "tool_use_id": u.id,
+                    "content": _consultas.atender(u.name, u.input or {})})
+                pesquisas.append({"consulta": u.name, "dados": u.input or {}})
+                continue
+
             if u.name == "falar_com_o_cliente":
                 dados = u.input or {}
                 saida = _consultar_cliente(caso_id, dados, quem)
@@ -464,10 +502,11 @@ def perguntar(peticao_id: str, pergunta: str, quem: str = "",
         "peticao": peticao_id, "quem": quem,
         "pergunta": pergunta[:500], "resposta": texto[:1000],
         "propostas": [{"motivo": a.get("motivo", "")} for a in propostas],
-        "recusadas": len(recusadas), "ao_cliente": perguntas})
+        "recusadas": len(recusadas), "ao_cliente": perguntas,
+        "pesquisou": pesquisas})
 
     return {"pergunta": pergunta, "resposta": texto, "em": _agora(),
-            "ao_cliente": perguntas,
+            "ao_cliente": perguntas, "pesquisou": pesquisas,
             "propostas": [{"procurar": a.get("procurar", ""),
                            "substituir": a.get("substituir", ""),
                            "motivo": a.get("motivo", "")} for a in propostas]}

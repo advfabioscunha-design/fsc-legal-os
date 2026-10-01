@@ -54,6 +54,7 @@ from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.texto import humanizar
+from . import consultas as _consultas
 
 SYSTEM = """Você é advogado sênior da FC Advocacia, especialista na
 matéria deste contrato, e acompanhou este pedido do começo ao fim.
@@ -166,7 +167,23 @@ sozinho é documento em que ninguém confia. E não escreve ao cliente por
 conta própria: cada palavra que sai daqui chega como palavra do
 escritório.
 
+AS CONSULTAS QUE VOCÊ TEM
+
+Três, e elas valem mais que a sua memória: `consultar_julgados` (banco
+de precedentes do escritório), `consultar_teses` (as teses conferidas,
+com a prova que cada uma exige) e `consultar_legislacao` (o acervo de
+lei conferida).
+
+Use antes de citar, não depois. Julgado, súmula e artigo só entram na
+resposta se tiverem voltado de uma consulta ou se estiverem no material
+do pedido. A régua inteira disso está logo abaixo, e ela está acima
+desta instrução em caso de conflito.
+
 Nada de travessão, asterisco ou marcação. Texto corrido."""
+
+# A régua de fonte, igual para os dois especialistas, vem do arquivo da
+# skill: é lá que se calibra o agente, sem mexer em código.
+SYSTEM = SYSTEM + "\n\n" + _consultas.regua()
 
 
 # A ferramenta é deliberadamente burra: procurar e substituir, literal.
@@ -473,17 +490,20 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
     propostas: list[dict] = []
     recusadas: list[dict] = []
     perguntas: list[dict] = []
+    pesquisas: list[dict] = []
     texto = ""
 
-    # Duas voltas, não mais. A primeira é o modelo responder, e talvez
-    # pedir alterações; a segunda é ele comentar o que foi aplicado e o
-    # que foi recusado. Mais do que isso só serviria para ele insistir
-    # num trecho que não existe, gastando o tempo de quem está esperando
-    # com a tela aberta.
-    for volta in range(2):
+    # Quatro voltas. Era duas antes das consultas, e duas não bastam
+    # quando ele precisa pesquisar antes de responder: uma volta para
+    # consultar julgado, outra para a tese, outra para propor a alteração
+    # e a última para comentar o que foi recusado. Mais do que isso só
+    # serviria para ele insistir num trecho que não existe, gastando o
+    # tempo de quem está com a tela aberta esperando.
+    for volta in range(4):
         r = cliente.messages.create(
             model=s.claude_model, max_tokens=2500, system=SYSTEM,
-            tools=[FERRAMENTA_ALTERAR, FERRAMENTA_CLIENTE],
+            tools=[FERRAMENTA_ALTERAR, FERRAMENTA_CLIENTE,
+                   *_consultas.FERRAMENTAS],
             messages=mensagens,
         )
         texto = "".join(b.text for b in r.content if b.type == "text").strip()
@@ -494,6 +514,17 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
         mensagens.append({"role": "assistant", "content": r.content})
         resultados = []
         for u in usos:
+            if u.name in _consultas.NOMES:
+                # A consulta volta como TEXTO, não como JSON: é texto de
+                # ementa e de artigo de lei, e empacotar isso em JSON só
+                # faria o modelo ler a fonte com barras de escape no meio.
+                resultados.append({
+                    "type": "tool_result", "tool_use_id": u.id,
+                    "content": _consultas.atender(u.name, u.input or {})})
+                pesquisas.append({"consulta": u.name,
+                                  "dados": u.input or {}})
+                continue
+
             if u.name == "falar_com_o_cliente":
                 dados = u.input or {}
                 saida = _consultar_cliente(pedido_id, dados, quem)
@@ -556,14 +587,18 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
         "pergunta": pergunta[:500], "resposta": texto[:1000],
         "propostas": resumo_alteracoes,
         "recusadas": len(recusadas),
+        "pesquisou": pesquisas,
         "ao_cliente": perguntas})
 
     # As propostas voltam INTEIRAS, com o trecho a procurar e o que
     # entra no lugar: é a tela que vai mostrar o antes e o depois, e é o
     # servidor que vai aplicar quando o advogado aceitar. Cortar o texto
     # aqui faria a aplicação falhar por trecho incompleto.
+    # O que ele consultou vai para a tela junto com a resposta. Não é
+    # enfeite: é como o advogado sabe se a citação veio do banco ou se
+    # saiu da cabeça do modelo, sem ter de confiar na palavra dele.
     return {"pergunta": pergunta, "resposta": texto, "em": _agora(),
-            "ao_cliente": perguntas,
+            "ao_cliente": perguntas, "pesquisou": pesquisas,
             "propostas": [{"procurar": a.get("procurar", ""),
                            "substituir": a.get("substituir", ""),
                            "motivo": a.get("motivo", "")} for a in propostas]}

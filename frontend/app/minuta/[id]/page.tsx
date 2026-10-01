@@ -479,6 +479,7 @@ function Especialista({ id, minuta, aoAlterar }: {
       setConversa([...antes, { pergunta: q, resposta: j.resposta,
                                propostas: j.propostas,
                                ao_cliente: j.ao_cliente,
+                               pesquisou: j.pesquisou,
                                quem_rotulo: "Advogado", em: j.em }]);
 
       /* ELE MEXEU NO TEXTO
@@ -578,6 +579,36 @@ function Especialista({ id, minuta, aoAlterar }: {
               </div>
             ) : (
               <p className="px-3 text-[11px] italic text-white/35">lendo o caso…</p>
+            )}
+
+            {/* ONDE ELE FOI BUSCAR
+
+                Julgado, tese e artigo de lei o especialista não tira da
+                memória: consulta o acervo do escritório. Mostrar aqui o
+                que ele consultou é o que permite ao advogado confiar na
+                citação sem conferir uma por uma — e perceber na hora
+                quando ele respondeu sem consultar nada. */}
+            {(c.pesquisou || []).length > 0 && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                <p className="text-[10px] font-bold text-white/45">
+                  Consultou antes de responder
+                </p>
+                {c.pesquisou.map((p: any, k: number) => {
+                  const d = p.dados || {};
+                  const onde = p.consulta === "consultar_julgados"
+                    ? "banco de precedentes"
+                    : p.consulta === "consultar_teses"
+                      ? "banco de teses" : "acervo de legislação";
+                  const alvo = [d.tema, d.grupo, d.termo, d.lei,
+                                d.artigo ? `art. ${d.artigo}` : "",
+                                d.tribunal].filter(Boolean).join(" · ");
+                  return (
+                    <p key={k} className="mt-1 text-[10px] leading-relaxed text-white/55">
+                      · {onde}{alvo ? <>: <i>{alvo}</i></> : null}
+                    </p>
+                  );
+                })}
+              </div>
             )}
 
             {/* O que saiu para o cliente, dito aqui também: a pergunta

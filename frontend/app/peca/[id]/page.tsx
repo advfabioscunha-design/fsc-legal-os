@@ -387,7 +387,8 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
       }
       setConversa([...anteriores, {
         pergunta: q, resposta: j.resposta, propostas: j.propostas,
-        ao_cliente: j.ao_cliente, quem_rotulo: "Advogado", em: j.em }]);
+        ao_cliente: j.ao_cliente, pesquisou: j.pesquisou,
+        quem_rotulo: "Advogado", em: j.em }]);
     } catch { setConversa(anteriores); setErro("Falha de conexão."); }
     finally { setPensando(false); }
   }
@@ -468,6 +469,36 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
               </div>
             ) : (
               <p className="px-3 text-[11px] italic text-white/35">lendo o processo…</p>
+            )}
+
+            {/* ONDE ELE FOI BUSCAR
+
+                Numa peça isso pesa mais que no contrato: citação que a
+                parte contrária confere no inteiro teor precisa ter vindo
+                do banco, e é aqui que o advogado vê que veio. Resposta
+                com jurisprudência e sem linha de consulta é resposta
+                para desconfiar. */}
+            {(c.pesquisou || []).length > 0 && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                <p className="text-[10px] font-bold text-white/45">
+                  Consultou antes de responder
+                </p>
+                {c.pesquisou.map((p: any, k: number) => {
+                  const d = p.dados || {};
+                  const onde = p.consulta === "consultar_julgados"
+                    ? "banco de precedentes"
+                    : p.consulta === "consultar_teses"
+                      ? "banco de teses" : "acervo de legislação";
+                  const alvo = [d.tema, d.grupo, d.termo, d.lei,
+                                d.artigo ? `art. ${d.artigo}` : "",
+                                d.tribunal].filter(Boolean).join(" · ");
+                  return (
+                    <p key={k} className="mt-1 text-[10px] leading-relaxed text-white/55">
+                      · {onde}{alvo ? <>: <i>{alvo}</i></> : null}
+                    </p>
+                  );
+                })}
+              </div>
             )}
 
             {(c.ao_cliente || []).length > 0 && (
