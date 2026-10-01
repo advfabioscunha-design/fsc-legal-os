@@ -69,12 +69,6 @@ export default function Portal() {
     }
   }
 
-  function handleKey(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      enviar();
-    }
-  }
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "#0A1628", fontFamily: "Inter, sans-serif" }}>
@@ -171,10 +165,9 @@ export default function Portal() {
           <textarea
             className="flex-1 rounded-xl border border-white/10 bg-[#1A3A6B]/20 px-4 py-3 text-white placeholder-[#8899AA] text-sm focus:outline-none focus:border-[#2D7DD2] transition-colors resize-none"
             rows={3}
-            placeholder="Descreva sua situacao detalhadamente... (Enter para enviar)"
+            placeholder="Descreva sua situação com detalhes. Use Enter para pular linha e o botão ao lado para enviar."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
           />
           <button
             onClick={enviar}

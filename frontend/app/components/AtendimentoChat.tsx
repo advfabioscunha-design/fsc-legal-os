@@ -254,7 +254,7 @@ export default function AtendimentoChat({
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
+
                     rows={1}
                     placeholder="Escreva sua mensagem…"
                     className="max-h-28 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm text-charcoal outline-none focus:border-gold"

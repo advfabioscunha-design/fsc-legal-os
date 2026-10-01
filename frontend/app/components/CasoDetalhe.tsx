@@ -1895,9 +1895,6 @@ function ConversaDoCaso({ casoId }: { casoId: string }) {
 
       <div className="mt-3 flex gap-2">
         <textarea value={texto} onChange={(e) => setTexto(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); responder(); }
-          }}
           rows={2} placeholder="responder ao cliente…"
           className="flex-1 resize-none rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm outline-none focus:border-[#C9A84C]" />
         <button onClick={responder} disabled={enviando || !texto.trim()}

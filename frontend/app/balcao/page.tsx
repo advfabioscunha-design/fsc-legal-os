@@ -689,10 +689,13 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
       )}
 
       <div className="mt-3 flex gap-2">
-        <input value={texto} onChange={(e) => setTexto(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && enviar(texto)}
+        {/* Caixa de várias linhas, e o Enter pula linha: quem está
+            negociando escreve frase longa, e no celular a tecla de
+            quebrar linha é a mesma de enviar. Quem envia é o botão. */}
+        <textarea value={texto} onChange={(e) => setTexto(e.target.value)}
+          rows={2}
           placeholder="pergunte, ou diga o que achou do valor"
-          className="flex-1 rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
+          className="flex-1 resize-none rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]" />
         <button onClick={() => enviar(texto)} disabled={pensando}
           className="rounded-lg border border-white/20 px-4 text-sm text-white/70 hover:border-white/40 disabled:opacity-40">
           Enviar

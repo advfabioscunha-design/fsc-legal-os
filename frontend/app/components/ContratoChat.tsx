@@ -143,7 +143,7 @@ export default function ContratoChat({ nome, email, onVoltar }: { nome: string; 
 
       <form onSubmit={enviar} className="flex items-end gap-2 border-t border-black/5 p-4">
         <textarea value={input} onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
+
           rows={1} placeholder="Escreva sua mensagem…"
           className="max-h-32 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm outline-none focus:border-gold" />
         <button type="submit" disabled={enviando || !casoId}

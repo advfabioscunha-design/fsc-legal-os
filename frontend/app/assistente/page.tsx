@@ -59,7 +59,7 @@ export default function AssistentePage() {
         </div>
         <form onSubmit={enviar} className="mt-3 flex items-end gap-2">
           <textarea value={input} onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
+
             rows={1} placeholder="Escreva sua dúvida…"
             className="max-h-32 flex-1 resize-none rounded-xl border border-white/15 bg-[#0B1F3B] px-4 py-2.5 text-sm text-white outline-none focus:border-[#C9A24D]" />
           <button type="submit" disabled={enviando} className="rounded-xl bg-[#C9A24D] px-5 py-2.5 text-sm font-bold text-[#0A1628] disabled:opacity-50">Enviar</button>

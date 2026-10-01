@@ -2686,10 +2686,96 @@ def recado_de_pendencia(pend: dict) -> str:
     return "\n\n".join(partes)
 
 
+# O papel vem do nome do campo no catálogo ("locatario_nome"), e nome de
+# campo não leva acento. Mas quem lê isto é o cliente, na conversa: pedir
+# "o endereço completo do locatario" é escrever errado na cara dele.
+_COMO_SE_ESCREVE = {
+    "locatario": "locatário", "comodatario": "comodatário",
+    "cessionario": "cessionário", "mutuario": "mutuário",
+    "outorgado": "outorgado", "conjuge": "cônjuge",
+    "contratada": "contratada", "beneficiario": "beneficiário",
+    "procurador": "procurador", "testemunha": "testemunha",
+    "destinatario": "destinatário", "proprietario": "proprietário",
+    "arrendatario": "arrendatário", "devedor_solidario": "devedor solidário",
+}
+
+
+def _como_se_chama(papel: str) -> str:
+    bruto = str(papel or "").strip().lower()
+    return _COMO_SE_ESCREVE.get(bruto, bruto.replace("_", " "))
+
+
 def _rotulo(item: dict) -> str:
     if item.get("papel"):
-        return f"{item['rotulo']} do {str(item['papel']).replace('_', ' ')}"
+        return f"{item['rotulo']} do {_como_se_chama(item['papel'])}"
     return item["rotulo"]
+
+
+def conferencia_do_que_chegou(pedido_id: str, abertura: str = "") -> dict:
+    """O recado que o cliente recebe depois de mandar alguma coisa.
+
+    É aqui que se decide o que dizer a quem respondeu PELA METADE, que é
+    o caso mais comum e o pior de tratar. Três desfechos, e cada um pede
+    uma frase diferente:
+
+    CHEGOU TUDO. Diz que está completo e que segue para a conferência
+    final. O cliente precisa ouvir que acabou a parte dele, senão fica
+    esperando uma cobrança que não vem e acha que o pedido parou.
+
+    FALTA SÓ O QUE NÃO TRAVA. Agradece, diz o que ainda ajuda e deixa
+    claro que o documento NÃO está parado por isso. Cobrar com a mesma
+    urgência o que não é indispensável ensina o cliente a ignorar a
+    cobrança seguinte, que pode ser a que importa.
+
+    FALTA O INDISPENSÁVEL. Lista item por item, sem resumir, e PERGUNTA
+    se ele consegue agora ou prefere mandar depois. A pergunta não é
+    gentileza: quem não consegue no momento costuma sumir de vergonha,
+    e uma pergunta aberta devolve a conversa. E diz, sem culpar
+    ninguém, que o prazo fica parado enquanto faltar, porque o
+    escritório não pode escrever o contrato sem aquilo.
+
+    Nunca repete a lista inteira quando só um item ficou faltando: o
+    cliente que mandou quatro de cinco coisas e recebe de volta os cinco
+    pedidos de novo entende que ninguém olhou o que ele mandou."""
+    pend = pendencias_do_pedido(pedido_id)
+    faltam = [_rotulo(i) for i in pend["obrigatorias"]]
+    extras = [_rotulo(i) for i in pend["complementares"]]
+    abertura = (abertura or "").strip()
+
+    if not faltam and not extras:
+        texto = ((abertura + " ") if abertura else "") + (
+            "Com isso, está completo: tenho tudo o que preciso da sua "
+            "parte. Agora o documento segue para a conferência final e eu "
+            "te aviso assim que estiver pronto para você ler.")
+        return {"texto": texto, "completo": True, "travado": False,
+                "faltam": [], "complementares": []}
+
+    if not faltam:
+        texto = ((abertura + " ") if abertura else "") + (
+            "O essencial já está aqui e o documento não está parado. "
+            "Quando puder, me mande ainda: " + "; ".join(extras) + ". "
+            "Pode ser depois, sem pressa.")
+        return {"texto": texto, "completo": False, "travado": False,
+                "faltam": [], "complementares": extras}
+
+    partes = [abertura] if abertura else []
+    if len(faltam) == 1:
+        partes.append("Para eu conseguir fechar o documento, ainda preciso "
+                      "de uma informação: " + faltam[0] + ".")
+    else:
+        partes.append("Para eu conseguir fechar o documento, ainda faltam "
+                      f"{len(faltam)} informações: " + "; ".join(faltam) + ".")
+    partes.append("Você consegue me passar isso agora, ou prefere me mandar "
+                  "mais tarde? Se precisar procurar em algum lugar, me diga "
+                  "e eu aguardo.")
+    partes.append("Enquanto faltar, o prazo fica parado, porque o documento "
+                  "não pode ser escrito sem essa parte. Assim que chegar, o "
+                  "relógio volta a andar do ponto em que parou.")
+    if extras:
+        partes.append("Se tiver em mãos, aproveite e me mande também: "
+                      + "; ".join(extras) + ". Isso não é indispensável.")
+    return {"texto": " ".join(partes), "completo": False, "travado": True,
+            "faltam": faltam, "complementares": extras}
 
 
 def _guardar_recado_de_pendencia(pedido_id: str, pend: dict) -> None:

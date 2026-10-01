@@ -950,9 +950,9 @@ export default function AreaCliente() {
                   el.style.height = "auto";
                   el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
                 }}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e as any); } }}
+
                 rows={1}
-                placeholder="Escreva sua mensagem…  (Enter envia, Shift+Enter pula linha)"
+                placeholder="Escreva sua mensagem…  ·  Enter pula linha, clique em Enviar para mandar"
                 className="max-h-32 flex-1 resize-none rounded-xl border border-black/10 px-4 py-2.5 text-sm outline-none focus:border-gold" />
               <button type="submit" disabled={enviando}
                 className="rounded-xl bg-gold px-5 py-2.5 text-sm font-semibold text-navy transition hover:bg-amber disabled:opacity-50">Enviar</button>

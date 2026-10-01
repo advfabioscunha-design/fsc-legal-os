@@ -190,6 +190,45 @@ avisar_o_escritorio.
 Se faltar alguma informação da parte do cliente, liste o que falta, na
 íntegra, sem resumir. Lista resumida faz a pessoa voltar duas vezes.
 
+QUANDO O CLIENTE MANDA PELA METADE
+
+É o caso mais comum, e tratá-lo mal custa horas de prazo. Quem mandou
+quatro de cinco coisas não está de má vontade: ou não tinha a quinta em
+mãos, ou achou que tinha mandado.
+
+Primeiro reconheça o que CHEGOU, com nome. Depois diga o que ainda
+falta, item por item, e PERGUNTE se ele consegue agora ou prefere mandar
+mais tarde. A pergunta é o que mantém a conversa aberta: quem não
+consegue no momento e só recebe cobrança costuma sumir, e aí o pedido
+fica parado até alguém cobrar de novo.
+
+Se o que falta for indispensável, diga que o prazo fica parado enquanto
+faltar, e que o relógio volta a andar do ponto em que parou. Não é
+ameaça nem cobrança: é a explicação de por que o documento não anda, e
+ela é justa dos dois lados.
+
+Se o que falta NÃO for indispensável, diga isso com todas as letras: que
+o documento não está parado por causa disso e que pode vir depois.
+Cobrar tudo com a mesma urgência ensina a pessoa a ignorar a próxima
+cobrança, que pode ser a que importa.
+
+QUANDO ELE DIZ QUE JÁ MANDOU
+
+Não discuta e não repita a lista antiga. A situação acima foi levantada
+agora: confira nela o que realmente está faltando neste momento.
+
+Faltando ainda: diga o que já consta e devolva a lista NOVA, só com o
+que resta, reconhecendo o que chegou. Repetir os cinco pedidos para quem
+mandou quatro é dizer que ninguém olhou o que ele mandou.
+
+Não faltando mais nada: diga que agora está completo, que não precisa
+mandar mais nada, e que o documento segue para a conferência final.
+Essa frase é a que ninguém lembra de escrever e a que o cliente mais
+espera. Sem ela, ele fica esperando uma cobrança que não vem e conclui
+que o pedido parou.
+
+Em nenhum dos dois casos prometa data: o prazo é o que está na situação.
+
 QUANDO O CLIENTE ESTÁ COM PRESSA, HÁ DUAS SAÍDAS, E A ORDEM IMPORTA
 
 Se for um pedido de contrato ainda em andamento e ele quiser adiantar
@@ -536,6 +575,19 @@ def _texto_da_situacao(s: dict) -> str:
         if s["falta_complementar"]:
             L.append("Falta, mas pode vir depois e não atrasa: "
                      + "; ".join(s["falta_complementar"]) + ".")
+        if not s["falta_indispensavel"] and not s["falta_complementar"]:
+            # A FRASE QUE FECHA A COBRANÇA
+            #
+            # Sem esta linha o agente não tinha como AFIRMAR que estava
+            # completo: ele só sabia o que faltava, e silêncio sobre o
+            # que falta não é o mesmo que confirmação de que não falta.
+            # O cliente mandava a última coisa e não recebia o aviso de
+            # que acabou a parte dele.
+            L.append("NÃO FALTA MAIS NADA da parte do cliente. Se ele "
+                     "perguntar, ou se tiver acabado de mandar algo, diga "
+                     "que agora está completo, que não precisa mandar mais "
+                     "nada e que o documento segue para a conferência "
+                     "final. Não peça documento nenhum.")
         if s["prazo_alteracao_ate"]:
             L.append(f"Ajustes sem custo até {s['prazo_alteracao_ate']}.")
         if s.get("urgente"):
@@ -844,6 +896,7 @@ def ler_e_encaminhar(pedido_id: str, documentos: list[dict]) -> dict:
     from . import contratos_online
 
     lidos, preenchidos = [], 0
+    conferencia: dict = {}
     partes: list[str] = []
     for d in documentos or []:
         try:
@@ -877,20 +930,29 @@ def ler_e_encaminhar(pedido_id: str, documentos: list[dict]) -> dict:
     try:
         db = get_db()
         if preenchidos:
-            aviso = (f"Recebi e li {'o documento' if len(lidos) == 1 else 'os documentos'} "
-                     + ", ".join(str(x) for x in lidos)
-                     + f". Já aproveitei {preenchidos} informação"
-                     + ("ões" if preenchidos > 1 else "")
-                     + " que estavam faltando.")
+            abertura = (f"Recebi e li {'o documento' if len(lidos) == 1 else 'os documentos'} "
+                        + ", ".join(str(x) for x in lidos)
+                        + f". Já aproveitei {preenchidos} informação"
+                        + ("ões" if preenchidos > 1 else "")
+                        + " que estavam faltando.")
         else:
-            aviso = ("Recebi e li " + ("o documento " if len(lidos) == 1
-                                       else "os documentos ")
-                     + ", ".join(str(x) for x in lidos)
-                     + ". Está guardado com o seu pedido.")
-        falta = (saida.get("pendencias") or {}).get("obrigatorias") or []
-        if falta:
-            aviso += (" Ainda preciso de: "
-                      + "; ".join(str(f.get("rotulo") or f) for f in falta) + ".")
+            abertura = ("Recebi e li " + ("o documento " if len(lidos) == 1
+                                          else "os documentos ")
+                        + ", ".join(str(x) for x in lidos)
+                        + ". Está guardado com o seu pedido.")
+
+        # O RECADO DEPOIS DE UM ENVIO PELA METADE
+        #
+        # Antes daqui, o aviso listava o que faltava e parava. Quem
+        # mandou metade das coisas lia uma cobrança e sumia, e o pedido
+        # ficava parado até a régua de cobrança bater de novo horas
+        # depois. Agora a mesma mensagem pergunta se ele consegue
+        # agora, e diz com todas as letras quando NÃO falta mais nada,
+        # que é a frase que ninguém pensa em escrever e que é a que o
+        # cliente mais espera.
+        conferencia = contratos_online.conferencia_do_que_chegou(
+            pedido_id, abertura)
+        aviso = conferencia["texto"]
         db.table("pedidos_mensagens").insert({
             "pedido_id": pedido_id, "autor": "AGENTE",
             "texto": aviso[:4000], "canais": ["PLATAFORMA"],
@@ -900,5 +962,6 @@ def ler_e_encaminhar(pedido_id: str, documentos: list[dict]) -> dict:
 
     registrar_evento(None, "ATENDIMENTO_DOCUMENTO_LIDO",
                      {"pedido_id": pedido_id, "arquivos": lidos,
-                      "preenchidos": preenchidos})
+                      "preenchidos": preenchidos,
+                      "ainda_falta": (conferencia or {}).get("faltam")})
     return {"lidos": len(lidos), "arquivos": lidos, "preenchidos": preenchidos}

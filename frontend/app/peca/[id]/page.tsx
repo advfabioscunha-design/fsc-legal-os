@@ -592,7 +592,7 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
         </div>
         <div className="flex gap-2">
           <input value={pergunta} onChange={(e) => setPergunta(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") mandar(); }}
+
             placeholder="pergunte sobre o processo ou a peça…"
             className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-xs text-white outline-none focus:border-[#C9A24D]" />
           <button onClick={() => mandar()} disabled={pensando || !pergunta.trim()}

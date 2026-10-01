@@ -960,11 +960,8 @@ function Conversa({ pedidoId, aoMudar }: {
             el.style.height = "auto";
             el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
           }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mandarTexto(); }
-          }}
           rows={1}
-          placeholder="escreva aqui  (Enter envia, Shift+Enter pula linha)"
+          placeholder="escreva aqui  ·  Enter pula linha, clique em Enviar para mandar"
           className={`flex-1 resize-none ${cx}`} />
         <button onClick={() => mandarTexto()} disabled={ocupado || !texto.trim()}
           className="rounded-lg bg-[#C9A84C] px-4 text-sm font-bold text-[#0A1628] disabled:opacity-40">

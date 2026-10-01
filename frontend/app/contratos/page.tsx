@@ -867,13 +867,8 @@ function PainelDoPedido({ id, fechar, recarregar }:
                     el.style.height = "auto";
                     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault(); enviarMensagem();
-                    }
-                  }}
                   rows={1}
-                  placeholder="escrever para o cliente…  (Enter envia, Shift+Enter pula linha)"
+                  placeholder="escrever para o cliente…  ·  Enter pula linha, clique em Enviar para mandar"
                   className={`${inp} resize-none`} />
                 <button onClick={enviarMensagem} disabled={!msg.trim()}
                   className={`${btn} shrink-0 bg-[#C9A24D] text-[#0A1628]`}>Enviar</button>
@@ -1066,7 +1061,7 @@ function Consultar({ id }: { id: string }) {
 
       <div className="flex gap-2 pt-1">
         <input value={pergunta} onChange={(e) => setPergunta(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") perguntar(); }}
+
           placeholder="o que você quer saber sobre este pedido…"
           className={inp} />
         <button onClick={perguntar} disabled={pensando || !pergunta.trim()}
