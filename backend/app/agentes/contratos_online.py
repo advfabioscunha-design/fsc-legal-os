@@ -1349,6 +1349,9 @@ def concluir_coleta(pedido_id: str, com_timbre: bool | None = None) -> dict:
     # relógio parado; ele volta a andar quando a última pendência for
     # atendida.
     campos["avanca_em"] = None if pend["trava"] else _mais(JANELA_REDACAO)
+    # Nascendo travado, a espera começa a contar agora.
+    if pend["trava"]:
+        campos["relogio_parado_em"] = _agora()
 
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "BALCAO_COLETA_CONCLUIDA",
@@ -2517,10 +2520,24 @@ def revisar_pendencias(pedido_id: str) -> dict:
     É aqui que o relógio volta a andar, e a hora de graça nasce: se as
     quatro horas já passaram enquanto o pedido esperava, avançar no
     mesmo segundo entregaria um documento sem a informação que acabou
-    de chegar. A hora é o tempo de incorporá-la."""
+    de chegar. A hora é o tempo de incorporá-la.
+
+    O RELÓGIO DA ENTREGA TAMBÉM PARA
+    --------------------------------
+    São dois relógios diferentes, e os dois tinham de parar. O da fase
+    já parava: `avanca_em` nulo segura a esteira. O da ENTREGA não, e
+    era o que importava para o cliente: o escritório prometeu 24 horas,
+    o cliente demorou oito para mandar o CPF do fiador, e o prazo
+    continuava correndo contra quem estava esperando. Quem combinou 24
+    horas de trabalho não combinou 16.
+
+    Agora o tempo parado é contado e somado ao vencimento. Esperar o
+    cliente não consome o prazo do escritório, e o prazo do escritório
+    continua sendo o que foi vendido."""
     db = get_db()
     r = db.table("pedidos_contrato") \
-        .select("id,fase,fase_em,avanca_em,pendencias,urgente").eq("id", pedido_id) \
+        .select("id,fase,fase_em,avanca_em,pendencias,urgente,"
+                "relogio_parado_em,horas_paradas").eq("id", pedido_id) \
         .limit(1).execute().data
     if not r:
         raise ValueError("Pedido não encontrado.")
@@ -2533,13 +2550,32 @@ def revisar_pendencias(pedido_id: str) -> dict:
     if p.get("fase") in _PROXIMA:
         if pend["trava"]:
             campos["avanca_em"] = None
+            # Marca o início da espera uma vez só. Remarcar a cada
+            # salvamento zeraria o tempo parado justamente de quem
+            # mandou metade da informação e sumiu.
+            if not p.get("relogio_parado_em"):
+                campos["relogio_parado_em"] = _agora()
         elif antes_travava:
             janela = _janela(p["fase"], bool(p.get("urgente")))
             ja_passou = _horas_desde(p.get("fase_em")) >= janela
             campos["avanca_em"] = _mais(HORA_DE_GRACA if ja_passou else
                                         janela - _horas_desde(p.get("fase_em")))
+            # Fecha a conta da espera e devolve o tempo ao prazo.
+            if p.get("relogio_parado_em"):
+                parado = _horas_desde(p["relogio_parado_em"])
+                campos["horas_paradas"] = round(
+                    float(p.get("horas_paradas") or 0) + max(parado, 0), 3)
+                campos["relogio_parado_em"] = None
 
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+
+    # A agenda acompanha: o compromisso de entrega anda para a frente
+    # pelo tempo que ficou esperando, e muda de dia quando precisa.
+    try:
+        from . import agenda as _ag
+        _ag.sincronizar_pedido(pedido_id)
+    except Exception as e:
+        print(f"[balcao] agenda não acompanhou a pendência: {e}")
 
     if antes_travava and not pend["trava"]:
         registrar_evento(None, "BALCAO_PENDENCIA_ATENDIDA",

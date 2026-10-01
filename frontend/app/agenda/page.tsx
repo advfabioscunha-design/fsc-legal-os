@@ -502,8 +502,18 @@ function Compromisso({ it, membros, acao }:
         { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
     : "";
 
+  /* O PRAZO PARADO NÃO É PRAZO ESQUECIDO
+   *
+   * Enquanto falta informação do cliente, o relógio da entrega fica
+   * suspenso e o vencimento anda junto com a espera. Sem dizer isso na
+   * tela, quem olha vê um prazo que não se move e conclui que está
+   * largado, quando o correto é o contrário: ele está parado porque a
+   * bola não está com o escritório. */
   const avisoFatal =
-    horasAteFatal !== null
+    it.aguardando_cliente
+      ? { texto: `parado, esperando o cliente${horaCurta ? ` · retomando vence ${horaCurta}` : ""}`,
+          cor: "#8899AA" }
+    : horasAteFatal !== null
       ? horasAteFatal < 0
         ? { texto: `prazo venceu ${horaCurta}`, cor: "#C0392B" }
         : horasAteFatal < 1

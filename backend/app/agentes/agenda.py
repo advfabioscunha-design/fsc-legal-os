@@ -793,9 +793,25 @@ def espelhar_intimacoes(dias: int = 60) -> dict:
 def _vencimento_do_pedido(p: dict) -> datetime | None:
     """Quando a entrega vence, de verdade.
 
-    Conta do pagamento, que é quando o trabalho começa. Sem pagamento
-    não há prazo correndo, e inventar um seria prometer o que não foi
-    contratado."""
+    Três parcelas, e a terceira é a que faltava:
+
+      do pagamento        é quando o trabalho começa. Sem pagamento não
+                          há prazo correndo, e inventar um seria
+                          prometer o que não foi contratado.
+      mais o prazo        24 horas, ou 6 com urgência.
+      mais a espera       o tempo em que o pedido ficou parado
+                          aguardando informação do cliente.
+
+    A terceira existe porque o escritório vendeu horas de trabalho, não
+    horas de calendário. O cliente que demora oito horas para mandar o
+    CPF do fiador não está consumindo o prazo de quem está esperando
+    por ele, e contar assim entregaria em dezesseis horas um serviço
+    de vinte e quatro.
+
+    A espera em curso entra na conta junto com a já encerrada. Sem
+    isso, o vencimento ficaria parado no lugar errado durante toda a
+    espera e daria um salto no momento em que o cliente respondesse,
+    que é justamente quando ninguém está olhando a agenda."""
     pago = p.get("pago_em")
     if not pago:
         return None
@@ -805,7 +821,21 @@ def _vencimento_do_pedido(p: dict) -> datetime | None:
         return None
     if t.tzinfo is None:
         t = t.replace(tzinfo=timezone.utc)
-    return t + timedelta(hours=int(p.get("prazo_entrega_horas") or 24))
+
+    parado = float(p.get("horas_paradas") or 0)
+    if p.get("relogio_parado_em"):
+        try:
+            desde = datetime.fromisoformat(
+                str(p["relogio_parado_em"]).replace("Z", "+00:00"))
+            if desde.tzinfo is None:
+                desde = desde.replace(tzinfo=timezone.utc)
+            parado += max(
+                (datetime.now(timezone.utc) - desde).total_seconds() / 3600, 0)
+        except ValueError:
+            pass
+
+    return t + timedelta(
+        hours=int(p.get("prazo_entrega_horas") or 24) + parado)
 
 
 # Fora destas, o documento está com o cliente ou já acabou: não há
@@ -825,7 +855,7 @@ def sincronizar_pedido(pedido_id: str) -> dict:
     db = get_db()
     r = db.table("pedidos_contrato").select(
         "id,numero,tipo,servico_livre,fase,pago_em,prazo_entrega_horas,"
-        "urgente,cliente_id,excluido_em"
+        "urgente,cliente_id,excluido_em,horas_paradas,relogio_parado_em"
     ).eq("id", pedido_id).limit(1).execute().data
     if not r:
         return {"ok": False, "motivo": "pedido não encontrado"}
@@ -859,8 +889,10 @@ def sincronizar_pedido(pedido_id: str) -> dict:
         "prazo_fatal": local.date().isoformat(),
         "atualizado_em": _agora(),
     }
+    campos["aguardando_cliente"] = bool(p.get("relogio_parado_em"))
 
     if existentes:
+        campos["aguardando_cliente"] = bool(p.get("relogio_parado_em"))
         db.table("agenda_itens").update(campos) \
             .eq("id", existentes[0]["id"]).execute()
         return {"ok": True, "atualizado": existentes[0]["id"],
@@ -869,12 +901,16 @@ def sincronizar_pedido(pedido_id: str) -> dict:
     nome = (p.get("servico_livre") if p.get("tipo") == "OUTRO"
             else str(p.get("tipo") or "").replace("_", " ").lower())
     horas = int(p.get("prazo_entrega_horas") or 24)
+    parado = bool(p.get("relogio_parado_em"))
     criar({
         "tipo": "PRAZO",
         "titulo": f"Entregar {nome} · {p.get('numero') or ''}".strip()[:200],
         "descricao": (f"Prazo de {horas} horas contratado pelo cliente"
                       + (", com urgência" if p.get("urgente") else "")
-                      + ". O relógio corre do pagamento."),
+                      + ". O relógio corre do pagamento e para enquanto "
+                        "faltar informação do cliente."
+                      + (" AGORA ESTÁ PARADO, esperando o cliente."
+                         if parado else "")),
         "cliente_id": p.get("cliente_id"),
         "pedido_id": pedido_id,
         **campos,
