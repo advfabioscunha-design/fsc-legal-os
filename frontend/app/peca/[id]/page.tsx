@@ -311,6 +311,34 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
   id: string; texto: string; aoAlterar: (novo: string) => void;
 }) {
   const [antes, setAntes] = useState<string | null>(null);
+  const [aplicadas, setAplicadas] = useState<Set<string>>(new Set());
+  const [aplicando, setAplicando] = useState(false);
+
+  async function aplicar(lista: any[], marca: string) {
+    if (aplicando) return;
+    setAplicando(true); setErro("");
+    try {
+      const r = await fetch(`${API}/api/v1/alteracoes/aplicar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto: naTela, alteracoes: lista }),
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (!r.ok) { setErro(j?.detail || "Não consegui aplicar."); return; }
+      if (j.aplicadas > 0) {
+        setAntes(naTela);
+        aoAlterar(j.texto);
+        setAplicadas((s) => new Set([...s, marca]));
+      }
+      if ((j.recusadas || []).length > 0) {
+        setErro("Não consegui aplicar: "
+          + j.recusadas.map((x: any) => x.porque).join("; ")
+          + ". O trecho mudou depois da proposta; peça de novo.");
+      }
+    } catch { setErro("Falha de conexão."); }
+    finally { setAplicando(false); }
+  }
+
+
   const [conversa, setConversa] = useState<any[]>([]);
   const [pergunta, setPergunta] = useState("");
   const [pensando, setPensando] = useState(false);
@@ -358,9 +386,8 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
         return;
       }
       setConversa([...anteriores, {
-        pergunta: q, resposta: j.resposta, alteracoes: j.alteracoes,
+        pergunta: q, resposta: j.resposta, propostas: j.propostas,
         ao_cliente: j.ao_cliente, quem_rotulo: "Advogado", em: j.em }]);
-      if (j.texto) { setAntes(naTela); aoAlterar(j.texto); }
     } catch { setConversa(anteriores); setErro("Falha de conexão."); }
     finally { setPensando(false); }
   }
@@ -456,22 +483,55 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
               </div>
             )}
 
-            {(c.alteracoes || []).length > 0 && (
-              <div className="rounded-lg border border-[#1DB954]/30 bg-[#1DB954]/5 px-3 py-2">
-                <p className="text-[10px] font-bold text-[#1DB954]">
-                  {c.alteracoes.length === 1
-                    ? "1 alteração aplicada na peça"
-                    : `${c.alteracoes.length} alterações aplicadas na peça`}
+            {/* A PROPOSTA ESPERA O ACEITE
+
+                O especialista não mexe no texto sozinho. Ele mostra o
+                que sai e o que entra, e o documento só muda quando o
+                advogado clica. Quem assina decide o que entra, e
+                autorizar com um clique é mais rápido do que conferir
+                depois o que mudou sem aviso.
+
+                A conferência do trecho é refeita no servidor na hora de
+                aplicar: entre a proposta e o aceite, o advogado pode ter
+                editado justamente aquele parágrafo. */}
+            {(c.propostas || []).length > 0 && (
+              <div className="space-y-2 rounded-lg border border-[#C9A24D]/30 bg-[#C9A24D]/5 p-2">
+                <p className="text-[10px] font-bold text-[#C9A24D]">
+                  {c.propostas.length === 1
+                    ? "1 alteração proposta, esperando você"
+                    : `${c.propostas.length} alterações propostas, esperando você`}
                 </p>
-                {c.alteracoes.map((a: any, k: number) => (
-                  <p key={k} className="mt-1 text-[10px] leading-relaxed text-white/55">
-                    · {a.motivo}
-                  </p>
-                ))}
-                {i === conversa.length - 1 && antes !== null && (
-                  <button onClick={() => { aoAlterar(antes); setAntes(null); }}
-                    className="mt-1.5 text-[10px] text-white/45 underline decoration-dotted hover:text-white">
-                    desfazer e voltar o texto de antes
+                {c.propostas.map((a: any, k: number) => {
+                  const feito = aplicadas.has(`${i}-${k}`);
+                  return (
+                    <div key={k} className="rounded border border-white/10 bg-[#0A1628] p-2">
+                      <p className="text-[10px] leading-relaxed text-white/60">
+                        {a.motivo}
+                      </p>
+                      {a.procurar && (
+                        <p className="mt-1 whitespace-pre-line break-words text-[10px] leading-relaxed text-[#ff9a8f] line-through">
+                          {String(a.procurar).slice(0, 300)}
+                        </p>
+                      )}
+                      <p className="mt-0.5 whitespace-pre-line break-words text-[10px] leading-relaxed text-[#9ae6a4]">
+                        {String(a.substituir || "").slice(0, 300)
+                          || "(o trecho sai do documento)"}
+                      </p>
+                      <button
+                        onClick={() => aplicar([a], `${i}-${k}`)}
+                        disabled={feito || aplicando}
+                        className="mt-1.5 rounded bg-[#1DB954] px-2.5 py-1 text-[10px] font-bold text-white disabled:opacity-40">
+                        {feito ? "aplicada" : "Aplicar esta"}
+                      </button>
+                    </div>
+                  );
+                })}
+                {c.propostas.length > 1 && (
+                  <button
+                    onClick={() => aplicar(c.propostas, `${i}-todas`)}
+                    disabled={aplicando}
+                    className="w-full rounded bg-[#C9A24D] px-3 py-1.5 text-[10px] font-bold text-[#0A1628] disabled:opacity-40">
+                    Aplicar todas
                   </button>
                 )}
               </div>
@@ -481,6 +541,12 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
         <div ref={fim} />
       </div>
 
+      {antes !== null && (
+        <button onClick={() => { aoAlterar(antes); setAntes(null); }}
+          className="px-3 pb-2 text-left text-[10px] text-white/45 underline decoration-dotted hover:text-white">
+          desfazer a última alteração aplicada
+        </button>
+      )}
       {erro && <p className="px-3 pb-2 text-[11px] text-[#ffb3aa]">{erro}</p>}
 
       <div className="space-y-2 border-t border-white/10 p-3">

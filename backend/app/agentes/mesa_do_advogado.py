@@ -105,9 +105,16 @@ que falta decidir antes de o documento sair.
 
 QUANDO ELE MANDA ALTERAR
 
-Aí você mexe no texto, com a ferramenta `alterar_texto`. Só quando ele
-pedir: "corrija", "ajuste", "troque", "reescreva essa cláusula". Em
-pergunta, você responde; em ordem, você executa.
+Aí você PROPÕE a alteração, com a ferramenta `alterar_texto`. Só quando
+ele pedir: "corrija", "ajuste", "troque", "reescreva", "exclua".
+
+A proposta não entra no texto sozinha. Ela aparece na tela dele com um
+botão de aplicar, e o documento só muda quando ele clicar. Isso é de
+propósito: quem assina a peça decide o que entra nela, e autorizar com
+um clique é mais rápido do que conferir depois o que mudou sem aviso.
+
+Então não diga "alterei" nem "corrigi". Diga o que você propõe e por
+quê, e deixe claro que está esperando o aceite dele.
 
 Como usar sem estragar o contrato:
 
@@ -173,9 +180,11 @@ Nada de travessão, asterisco ou marcação. Texto corrido."""
 # Reescrita completa não tem como ser conferida: só comparando tudo.
 FERRAMENTA_ALTERAR = {
     "name": "alterar_texto",
-    "description": ("Aplica alterações no contrato que está na tela do "
-                    "advogado. Use só quando ele pedir para corrigir, "
-                    "ajustar, trocar ou reescrever algo."),
+    "description": ("Propõe alterações no documento que está na tela do "
+                    "advogado. Elas NÃO entram no texto sozinhas: ficam "
+                    "esperando o aceite dele, que aplica com um clique. "
+                    "Use quando ele pedir para corrigir, ajustar, trocar, "
+                    "reescrever ou excluir algo."),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -461,7 +470,7 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
     s = get_settings()
     cliente = _claude()
     base = minuta_na_tela or ""
-    feitas: list[dict] = []
+    propostas: list[dict] = []
     recusadas: list[dict] = []
     perguntas: list[dict] = []
     texto = ""
@@ -492,12 +501,20 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
                     perguntas.append({"assunto": dados.get("assunto", ""),
                                       "pergunta": dados.get("pergunta", "")})
             else:
-                pedidas = (u.input or {}).get("alteracoes") or []
-                base, ok, nao = _aplicar(base, pedidas)
-                feitas += ok
+                # CONFERE AGORA, APLICA SÓ COM O ACEITE
+                #
+                # A conferência acontece aqui, contra o texto que está
+                # na tela, para o advogado não receber uma proposta que
+                # não tem como ser aplicada. O que ela produz é a lista
+                # de propostas válidas; o texto não muda.
+                _, ok, nao = _aplicar(base, (u.input or {}).get("alteracoes") or [])
+                propostas += ok
                 recusadas += nao
                 saida = {
-                    "aplicadas": len(ok),
+                    "propostas_registradas": len(ok),
+                    "aguardando": ("As propostas estão na tela do advogado "
+                                   "esperando o aceite dele. O texto ainda "
+                                   "não mudou."),
                     "recusadas": [{"procurar": x.get("procurar", "")[:120],
                                    "porque": x.get("porque")} for x in nao],
                 }
@@ -524,7 +541,7 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
                   + ". O trecho pode ter mudado depois que eu li. Peça de "
                     "novo que eu tento com o texto atual.")
 
-    resumo_alteracoes = [{"motivo": a.get("motivo", "")} for a in feitas]
+    resumo_alteracoes = [{"motivo": a.get("motivo", "")} for a in propostas]
 
     # O QUE FICA GRAVADO É O QUE REAPARECE AMANHÃ
     #
@@ -537,21 +554,19 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
     registrar_evento(None, "ADVOGADO_CONSULTOU", {
         "pedido": pedido_id, "quem": quem,
         "pergunta": pergunta[:500], "resposta": texto[:1000],
-        "alteracoes": resumo_alteracoes,
+        "propostas": resumo_alteracoes,
         "recusadas": len(recusadas),
         "ao_cliente": perguntas})
 
-    saida = {"pergunta": pergunta, "resposta": texto, "em": _agora(),
-             "ao_cliente": perguntas,
-             "alteracoes": [{"procurar": a.get("procurar", "")[:200],
-                             "substituir": a.get("substituir", "")[:200],
-                             "motivo": a.get("motivo", "")} for a in feitas]}
-    # O texto novo só volta se alguma coisa mudou de fato. Devolver o
-    # mesmo texto faria a tela marcar alterações pendentes à toa e pedir
-    # confirmação ao sair de uma página onde nada foi alterado.
-    if feitas:
-        saida["minuta"] = base
-    return saida
+    # As propostas voltam INTEIRAS, com o trecho a procurar e o que
+    # entra no lugar: é a tela que vai mostrar o antes e o depois, e é o
+    # servidor que vai aplicar quando o advogado aceitar. Cortar o texto
+    # aqui faria a aplicação falhar por trecho incompleto.
+    return {"pergunta": pergunta, "resposta": texto, "em": _agora(),
+            "ao_cliente": perguntas,
+            "propostas": [{"procurar": a.get("procurar", ""),
+                           "substituir": a.get("substituir", ""),
+                           "motivo": a.get("motivo", "")} for a in propostas]}
 
 
 def consultas(pedido_id: str, limite: int = 50) -> list[dict]:
@@ -571,7 +586,7 @@ def consultas(pedido_id: str, limite: int = 50) -> list[dict]:
         pay = l.get("payload") or {}
         if pay.get("pedido") != pedido_id:
             continue
-        alt = pay.get("alteracoes")
+        alt = pay.get("propostas") or pay.get("alteracoes")
         # QUEM FALOU FICA DITO, E NÃO DEDUZIDO
         #
         # Reaberto uma semana depois, o fio sem autor vira monólogo: não
@@ -587,8 +602,8 @@ def consultas(pedido_id: str, limite: int = 50) -> list[dict]:
                       "quem": pay.get("quem"),
                       # Versões antigas gravavam só a contagem. Virar
                       # lista aqui evita a tela ter de saber disso.
-                      "alteracoes": alt if isinstance(alt, list)
-                      else ([{"motivo": "alteração aplicada"}] * int(alt or 0)),
+                      "propostas": alt if isinstance(alt, list)
+                      else ([{"motivo": "alteração proposta"}] * int(alt or 0)),
                       "ao_cliente": pay.get("ao_cliente") or [],
                       "em": l.get("criado_em")})
     return saida[-limite:]

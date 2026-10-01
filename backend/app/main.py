@@ -1694,6 +1694,36 @@ def listar_peticoes(caso_id: str):
 # resposta estava no computador de alguém.
 # ══════════════════════════════════════════════════════════════════
 
+class AceiteDeAlteracoes(BaseModel):
+    texto: str
+    alteracoes: list[dict]
+
+
+# ── APLICAR O QUE O ADVOGADO AUTORIZOU ─────────────────────────
+#
+# O especialista propõe; isto executa. Duas rotas e não uma porque o
+# texto vem da tela e volta para a tela: o servidor não adivinha qual
+# era a versão aberta, e aplicar contra a versão do banco podia
+# sobrescrever o que o advogado digitou no meio tempo.
+#
+# A conferência é a mesma de sempre: trecho literal, único, ou recusa.
+# Ela acontece DE NOVO aqui, e não só quando a proposta foi montada,
+# porque entre a proposta e o aceite o advogado pode ter editado
+# justamente aquele parágrafo.
+
+@app.post("/api/v1/alteracoes/aplicar")
+def aplicar_alteracoes(body: AceiteDeAlteracoes):
+    """Aplica no texto as alterações que o advogado aceitou."""
+    from .agentes.mesa_do_advogado import _aplicar
+    if not (body.texto or "").strip():
+        raise HTTPException(400, "O texto está vazio.")
+    novo, feitas, recusadas = _aplicar(body.texto, body.alteracoes or [])
+    return {"texto": novo,
+            "aplicadas": len(feitas),
+            "recusadas": [{"motivo": x.get("motivo"),
+                           "porque": x.get("porque")} for x in recusadas]}
+
+
 @app.get("/api/v1/peticoes/{peticao_id}")
 def obter_peticao(peticao_id: str):
     """A peça e o essencial do caso dela, para a mesa de correção."""

@@ -98,8 +98,14 @@ errada é peça perdida, e isso se vê no andamento, não no texto.
 
 QUANDO ELE MANDA ALTERAR
 
-Aí você mexe no texto, com `alterar_texto`. Só quando ele pedir. As
-regras são as mesmas de qualquer edição cuidadosa:
+Aí você PROPÕE a alteração, com `alterar_texto`. Só quando ele pedir.
+
+A proposta não entra no texto sozinha: aparece na tela dele com um
+botão de aplicar, e a peça só muda quando ele clicar. Numa peça que vai
+ser protocolada, quem assina decide o que entra. Não diga "alterei":
+diga o que propõe e por quê.
+
+As regras são as mesmas de qualquer edição cuidadosa:
 
 `procurar` tem de ser trecho LITERAL do texto na tela, caractere por
 caractere. Errou uma vírgula, a alteração é recusada e nada acontece,
@@ -405,7 +411,7 @@ def perguntar(peticao_id: str, pergunta: str, quem: str = "",
 
     s = get_settings()
     cliente = _claude()
-    feitas: list[dict] = []
+    propostas: list[dict] = []
     recusadas: list[dict] = []
     perguntas: list[dict] = []
     texto = ""
@@ -429,11 +435,16 @@ def perguntar(peticao_id: str, pergunta: str, quem: str = "",
                     perguntas.append({"assunto": dados.get("assunto", ""),
                                       "pergunta": dados.get("pergunta", "")})
             else:
-                base, ok, nao = _aplicar(
+                # Confere contra o texto da tela e guarda a proposta. O
+                # texto não muda aqui: muda quando o advogado aceitar.
+                _, ok, nao = _aplicar(
                     base, (u.input or {}).get("alteracoes") or [])
-                feitas += ok
+                propostas += ok
                 recusadas += nao
-                saida = {"aplicadas": len(ok),
+                saida = {"propostas_registradas": len(ok),
+                         "aguardando": ("Estão na tela do advogado "
+                                        "esperando o aceite. A peça ainda "
+                                        "não mudou."),
                          "recusadas": [{"procurar": x.get("procurar", "")[:120],
                                         "porque": x.get("porque")} for x in nao]}
             saidas.append({"type": "tool_result", "tool_use_id": u.id,
@@ -452,15 +463,14 @@ def perguntar(peticao_id: str, pergunta: str, quem: str = "",
     registrar_evento(caso_id, "ADVOGADO_CONSULTOU_PECA", {
         "peticao": peticao_id, "quem": quem,
         "pergunta": pergunta[:500], "resposta": texto[:1000],
-        "alteracoes": [{"motivo": a.get("motivo", "")} for a in feitas],
+        "propostas": [{"motivo": a.get("motivo", "")} for a in propostas],
         "recusadas": len(recusadas), "ao_cliente": perguntas})
 
-    saida = {"pergunta": pergunta, "resposta": texto, "em": _agora(),
-             "ao_cliente": perguntas,
-             "alteracoes": [{"motivo": a.get("motivo", "")} for a in feitas]}
-    if feitas:
-        saida["texto"] = base
-    return saida
+    return {"pergunta": pergunta, "resposta": texto, "em": _agora(),
+            "ao_cliente": perguntas,
+            "propostas": [{"procurar": a.get("procurar", ""),
+                           "substituir": a.get("substituir", ""),
+                           "motivo": a.get("motivo", "")} for a in propostas]}
 
 
 def consultas(peticao_id: str, limite: int = 50) -> list[dict]:
@@ -477,13 +487,13 @@ def consultas(peticao_id: str, limite: int = 50) -> list[dict]:
         if pay.get("peticao") != peticao_id:
             continue
         quem = (pay.get("quem") or "").strip()
-        alt = pay.get("alteracoes")
+        alt = pay.get("propostas") or pay.get("alteracoes")
         saida.append({
             "quem_rotulo": (f"{quem} (advogado)" if quem
                             and quem.lower() != "advogado" else "Advogado"),
             "pergunta": pay.get("pergunta"),
             "resposta": pay.get("resposta"),
-            "alteracoes": alt if isinstance(alt, list) else [],
+            "propostas": alt if isinstance(alt, list) else [],
             "ao_cliente": pay.get("ao_cliente") or [],
             "em": l.get("criado_em")})
     return saida[-limite:]
