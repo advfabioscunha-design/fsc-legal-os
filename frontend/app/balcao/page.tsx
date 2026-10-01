@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
+import { useRascunho } from "@/lib/rascunho";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -522,7 +523,7 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
 }) {
   const [falas, setFalas] = useState<{ de: "agente" | "cliente"; texto: string }[]>([]);
   const [conta, setConta] = useState<any>(null);
-  const [texto, setTexto] = useState("");
+  const [texto, setTexto, limparRascunho] = useRascunho(`negociacao-${pedidoId}`);
   const [pensando, setPensando] = useState(false);
   const [usouSaida, setUsouSaida] = useState(false);
   const [propostaEnviada, setPropostaEnviada] = useState(false);
@@ -557,7 +558,7 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
   const enviar = useCallback(async (msg: string, vaiSair = false) => {
     if (!msg.trim() && !vaiSair) return;
     if (msg.trim()) setFalas((f) => [...f, { de: "cliente", texto: msg }]);
-    setTexto(""); setPensando(true);
+    limparRascunho(); setPensando(true);
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/negociar`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -569,6 +570,9 @@ function Negociacao({ pedidoId, escolhido, aoFechar, aoVoltar }: {
       if (d?.proposta_registrada) setPropostaEnviada(true);
       if (d?.fechou) aoFechar(d.conta);
     } catch {
+      // O texto volta para a caixa: quem perdeu a conexão não pode
+      // perder também o que escreveu.
+      if (msg.trim()) setTexto(msg);
       setFalas((f) => [...f, { de: "agente", texto: "Tive um problema de conexão. Pode repetir?" }]);
     } finally { setPensando(false); }
   }, [pedidoId, aoFechar]);

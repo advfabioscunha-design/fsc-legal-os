@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ModalPeticionar from "./ModalPeticionar";
 import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
+import { useRascunho } from "@/lib/rascunho";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 const GRUPOS = ["BANCARIO", "IMOBILIARIO", "TRABALHISTA", "PREVIDENCIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"];
@@ -1782,7 +1783,7 @@ function LinhaDoTempo({ casoId, nota, setNota, addNota }: {
  */
 function ConversaDoCaso({ casoId }: { casoId: string }) {
   const [msgs, setMsgs] = useState<any[]>([]);
-  const [texto, setTexto] = useState("");
+  const [texto, setTexto, limparRascunho] = useRascunho(`caso-resposta-${caso.id}`);
   const [enviando, setEnviando] = useState(false);
   const [tambem, setTambem] = useState(true);
   const [erro, setErro] = useState("");
@@ -1849,7 +1850,7 @@ function ConversaDoCaso({ casoId }: { casoId: string }) {
         }),
       });
       if (!r.ok) { setErro("Não consegui enviar. Tente de novo."); return; }
-      setTexto("");
+      limparRascunho();
       await carregar();
     } catch { setErro("Sem conexão com o servidor."); }
     finally { setEnviando(false); }

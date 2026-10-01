@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 import ContratoChat from "../components/ContratoChat";
+import { useRascunho } from "@/lib/rascunho";
 
 // O endereço da API do escritório. O padrão existe para o caso de a
 // variável faltar no build: endereço de exemplo ou texto vazio faziam
@@ -131,7 +132,10 @@ export default function AreaCliente() {
   const [casos, setCasos] = useState<Caso[]>([]);
   const [caso, setCaso] = useState<Caso | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
+  // O rascunho fica por caso: a frase escrita para um processo não
+  // pode reaparecer dentro de outro.
+  const [input, setInput, limparRascunho] = useRascunho(
+    `cliente-${caso?.id || "novo"}`);
   const [enviando, setEnviando] = useState(false);
   const [dandoCiencia, setDandoCiencia] = useState<string | null>(null);
   const [subindoAssinado, setSubindoAssinado] = useState<string | null>(null);
@@ -309,7 +313,7 @@ export default function AreaCliente() {
     const texto = input.trim();
     if (!texto || enviando) return;
     setMsgs((m) => [...m, { autor: "CLIENTE", conteudo: texto }]);
-    setInput(""); setEnviando(true);
+    limparRascunho(); setEnviando(true);
     try {
       if (!caso) {
         const r = await fetch(`${API}/api/v1/leads`, {
@@ -330,7 +334,16 @@ export default function AreaCliente() {
         const data = r.ok ? await r.json() : null;
         addAgente(data?.resposta);
       }
-    } catch { addAgente(null); }
+    } catch {
+      // O ENVIO FALHOU: O TEXTO VOLTA PARA A CAIXA
+      //
+      // Limpar a caixa antes de enviar deixa a conversa fluida, mas
+      // se a rede cai a pessoa perde o que escreveu — e perde logo na
+      // mensagem mais difícil, que é a que ela estava pensando para
+      // escrever. Aqui o texto volta, e o rascunho volta com ele.
+      setInput(texto);
+      addAgente(null);
+    }
     finally { setEnviando(false); }
   }
 

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import VisualizadorProtegido from "../../components/VisualizadorProtegido";
 import { esperarAVez } from "../../components/ritmoDaConversa";
 import { baixarComToken } from "../../../lib/baixar";
+import { useRascunho } from "@/lib/rascunho";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -753,7 +754,7 @@ function Conversa({ pedidoId, aoMudar }: {
   pedidoId: string; aoMudar?: () => void;
 }) {
   const [falas, setFalas] = useState<any[]>([]);
-  const [texto, setTexto] = useState("");
+  const [texto, setTexto, limparRascunho] = useRascunho(`pedido-${pedidoId}`);
   const [ocupado, setOcupado] = useState(false);
   const [pensando, setPensando] = useState(false);
   const [aviso, setAviso] = useState("");
@@ -846,7 +847,7 @@ function Conversa({ pedidoId, aoMudar }: {
     const conteudo = (msg ?? texto).trim();
     if (!conteudo) return;
     setOcupado(true); setAviso("");
-    if (msg === undefined) setTexto("");
+    if (msg === undefined) limparRascunho();
 
     // A fala do cliente aparece na hora, com marca própria, para ele
     // ver que saiu. A do escritório é que espera a vez.

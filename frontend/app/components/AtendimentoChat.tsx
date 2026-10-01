@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRascunho } from "@/lib/rascunho";
 
 // O endereço da API do escritório. O padrão existe para o caso de a
 // variável faltar no build: endereço de exemplo ou texto vazio faziam
@@ -37,7 +38,8 @@ export default function AtendimentoChat({
   const [email, setEmail] = useState("");
   const [casoId, setCasoId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([SAUDACAO]);
-  const [input, setInput] = useState("");
+  const [input, setInput, limparRascunho] = useRascunho(
+    `atendimento-${casoId || "sala"}`);
   const [enviando, setEnviando] = useState(false);
   const caixaRef = useRef<HTMLDivElement | null>(null);
 
@@ -113,7 +115,7 @@ export default function AtendimentoChat({
     const texto = input.trim();
     if (!texto || enviando) return;
     setMsgs((m) => [...m, { autor: "CLIENTE", conteudo: texto }]);
-    setInput("");
+    limparRascunho();
     setEnviando(true);
     try {
       if (!casoId) {

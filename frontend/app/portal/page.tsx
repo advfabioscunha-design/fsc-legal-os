@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRascunho } from "@/lib/rascunho";
 
 // O endereço da API do escritório. O padrão existe para o caso de a
 // variável faltar no build: endereço de exemplo ou texto vazio faziam
@@ -23,7 +24,7 @@ const IconBot = () => (
 export default function Portal() {
   const [casoId, setCasoId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<{ autor: string; texto: string }[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput, limparRascunho] = useRascunho("portal");
   const [nome, setNome] = useState("");
   const [contato, setContato] = useState("");
   const [loading, setLoading] = useState(false);
@@ -43,7 +44,7 @@ export default function Portal() {
         { autor: "CLIENTE", texto: input },
         { autor: "AGENTE", texto: d.primeira_resposta ?? "Olá! Recebi sua mensagem. Um momento..." },
       ]);
-      setInput("");
+      limparRascunho();
     } finally {
       setLoading(false);
     }
@@ -54,7 +55,7 @@ export default function Portal() {
     if (!casoId) return iniciar();
     const texto = input;
     setMsgs((m) => [...m, { autor: "CLIENTE", texto }]);
-    setInput("");
+    limparRascunho();
     setLoading(true);
     try {
       const r = await fetch(`${API}/api/v1/casos/${casoId}/mensagens`, {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { baixarComToken } from "../../../lib/baixar";
 import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
+import { useRascunho } from "@/lib/rascunho";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -430,7 +431,8 @@ function Especialista({ id, minuta, aoAlterar }: {
 
 
   const [conversa, setConversa] = useState<any[]>([]);
-  const [pergunta, setPergunta] = useState("");
+  const [pergunta, setPergunta, limparRascunho] =
+    useRascunho(`mesa-minuta-${id}`);
   const [pensando, setPensando] = useState(false);
   const [erro, setErro] = useState("");
   const [aberto, setAberto] = useState(true);
@@ -456,7 +458,7 @@ function Especialista({ id, minuta, aoAlterar }: {
   async function mandar(texto?: string) {
     const q = (texto ?? pergunta).trim();
     if (!q || pensando) return;
-    setPergunta(""); setErro(""); setPensando(true);
+    limparRascunho(); setErro(""); setPensando(true);
     const antes = conversa;
     setConversa([...antes, { pergunta: q, resposta: "",
                              quem_rotulo: "Advogado",

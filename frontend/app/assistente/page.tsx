@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import PainelLayout from "../components/PainelLayout";
+import { useRascunho } from "@/lib/rascunho";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 type Msg = { role: "user" | "assistant"; content: string };
@@ -12,7 +13,7 @@ const SAUDACAO: Msg = {
 
 export default function AssistentePage() {
   const [msgs, setMsgs] = useState<Msg[]>([SAUDACAO]);
-  const [input, setInput] = useState("");
+  const [input, setInput, limparRascunho] = useRascunho("assistente");
   const [enviando, setEnviando] = useState(false);
   const caixa = useRef<HTMLDivElement | null>(null);
   /* Rola a caixa, e não a página: `scrollIntoView` arrasta todos os
@@ -28,7 +29,7 @@ export default function AssistentePage() {
     if (!texto || enviando) return;
     const historico = msgs.filter((m) => m !== SAUDACAO);
     setMsgs((m) => [...m, { role: "user", content: texto }]);
-    setInput(""); setEnviando(true);
+    limparRascunho(); setEnviando(true);
     try {
       const r = await fetch(`${API}/api/v1/assistente`, {
         method: "POST", headers: { "Content-Type": "application/json" },

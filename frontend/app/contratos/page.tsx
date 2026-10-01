@@ -4,6 +4,7 @@ import PainelLayout from "../components/PainelLayout";
 import VisualizadorProtegido from "../components/VisualizadorProtegido";
 import { baixarComToken } from "../../lib/baixar";
 import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
+import { useRascunho } from "@/lib/rascunho";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -165,7 +166,10 @@ function PainelDoPedido({ id, fechar, recarregar }:
   const [conversa, setConversa] = useState<any[]>([]);
   const [aba, setAba] = useState<
     "pedido" | "minuta" | "conversa" | "consultar">("pedido");
-  const [msg, setMsg] = useState("");
+  // Vale dos dois lados: mensagem do escritório escrita pela metade e
+  // perdida ao trocar de aba é retrabalho, e às vezes é pior, porque
+  // o cliente fica sem a resposta que já estava pronta.
+  const [msg, setMsg, limparRascunhoMsg] = useRascunho(`operador-${id}`);
   /* CHAT E WHATSAPP SÃO A MESMA CONVERSA
    *
    * O cliente começa no computador, sai para a rua e continua pelo
@@ -267,7 +271,7 @@ function PainelDoPedido({ id, fechar, recarregar }:
     // A caixa esvazia antes da resposta do servidor: quem apertou Enter
     // já está pensando na frase seguinte, e ver o texto antigo parado
     // ali faz duvidar se saiu.
-    setMsg("");
+    limparRascunhoMsg();
     // Aparece na conversa na hora, com marca própria, antes de o
     // servidor confirmar. O envio ainda passa pelo e-mail, que leva
     // segundos: esperar por ele para desenhar a própria frase faz a
@@ -971,7 +975,8 @@ function FaixaDoAtendimento({ id, estado, aoMudar }: {
  * foi conferido. */
 function Consultar({ id }: { id: string }) {
   const [historico, setHistorico] = useState<any[]>([]);
-  const [pergunta, setPergunta] = useState("");
+  const [pergunta, setPergunta, limparRascunhoPergunta] =
+    useRascunho(`especialista-${id}`);
   const [pensando, setPensando] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -993,7 +998,7 @@ function Consultar({ id }: { id: string }) {
     // trinta segundos olhando a própria pergunta parada dá a impressão
     // de que o clique não pegou.
     setHistorico((h) => [...h, { pergunta: texto, resposta: "", em: "agora" }]);
-    setPergunta("");
+    limparRascunhoPergunta();
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/consultar`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1503,7 +1508,7 @@ function EditorDaMinuta({ pedidoId, minuta, podeEditar, aoSalvar }: {
  */
 function PerguntarOuDevolver({ id, aoMudar }: { id: string; aoMudar: () => void }) {
   const [aberto, setAberto] = useState<"" | "perguntar" | "devolver">("");
-  const [texto, setTexto] = useState("");
+  const [texto, setTexto, limparRascunho] = useRascunho(`conferencia-${id}`);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
 
@@ -1516,7 +1521,7 @@ function PerguntarOuDevolver({ id, aoMudar }: { id: string; aoMudar: () => void 
         body: JSON.stringify({ [campo]: texto.trim(), quem: "advogado" }),
       });
       if (!r.ok) { setAviso("Não deu certo. Tente de novo."); return; }
-      setTexto(""); setAberto("");
+      limparRascunho(); setAberto("");
       setAviso(rota === "/perguntar"
         ? "Pergunta enviada pelos três canais. A resposta aparece na conversa."
         : "Devolvido para ajuste com o seu apontamento.");

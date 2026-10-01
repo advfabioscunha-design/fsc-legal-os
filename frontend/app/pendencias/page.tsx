@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import PainelLayout from "../components/PainelLayout";
 import CaixaArquivada from "../components/CaixaArquivada";
+import { useRascunho } from "@/lib/rascunho";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -48,8 +49,10 @@ export default function Pendencias() {
   const [status, setStatus] = useState("ABERTA");
   const [loading, setLoading] = useState(true);
 
-  // formulário
-  const [texto, setTexto] = useState("");
+  // formulário. O texto fica guardado: anotação de pendência é
+  // escrita devagar, consultando outra tela, e perder no meio é o
+  // que faz a pessoa desistir de anotar.
+  const [texto, setTexto, limparRascunho] = useRascunho("pendencia-nova");
   const [data, setData] = useState("");
   const [prioridade, setPrioridade] = useState("MEDIA");
   const [responsavel, setResponsavel] = useState("");
@@ -106,7 +109,7 @@ export default function Pendencias() {
         }),
       });
       if (r.ok) {
-        setTexto(""); setData(""); setCaso(null); setBusca(""); setAchados([]);
+        limparRascunho(); setData(""); setCaso(null); setBusca(""); setAchados([]);
         setPrioridade("MEDIA"); setResponsavel("");
         load();
       }

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import DocumentoRevisao from "./DocumentoRevisao";
+import { useRascunho } from "@/lib/rascunho";
 
 // O endereço da API do escritório. O padrão existe para o caso de a
 // variável faltar no build: endereço de exemplo ou texto vazio faziam
@@ -17,7 +18,8 @@ const FALLBACK =
 export default function ContratoChat({ nome, email, onVoltar }: { nome: string; email: string; onVoltar: () => void }) {
   const [casoId, setCasoId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput, limparRascunho] = useRascunho(
+    `contrato-${casoId || "novo"}`);
   const [enviando, setEnviando] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [pago, setPago] = useState(false);
@@ -88,7 +90,7 @@ export default function ContratoChat({ nome, email, onVoltar }: { nome: string; 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     const texto = input.trim();
-    setInput("");
+    limparRascunho();
     await enviarTexto(texto);
   }
 
