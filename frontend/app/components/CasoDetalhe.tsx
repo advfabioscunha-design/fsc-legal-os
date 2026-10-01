@@ -1095,6 +1095,25 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                     </div>
                   )}
 
+                  {/* A MESA DA PEÇA
+
+                      Aqui a peça só podia ser lida, num bloco dobrável,
+                      em letra miúda. Quem precisasse corrigir uma
+                      vírgula copiava para o Word, corrigia lá e
+                      protocolava de lá: o sistema ficava com uma versão
+                      e o juízo recebia outra, e na hora de explicar o
+                      que foi protocolado a resposta estava no
+                      computador de alguém.
+
+                      O botão abre a mesma mesa que o contrato tem, com
+                      o especialista do caso ao lado. A leitura rápida
+                      continua abaixo, para quem só quer conferir sem
+                      sair daqui. */}
+                  <a href={`/peca/${pet.id}`} target="_blank" rel="noreferrer"
+                    className="mt-3 inline-block rounded-lg bg-[#C9A84C] px-4 py-2 text-xs font-bold text-[#0A1628] hover:brightness-110">
+                    Abrir a peça para corrigir
+                  </a>
+
                   {pet.markdown_final && (
                     <details className="mt-3">
                       <summary className="cursor-pointer text-[11px] text-white/45 hover:text-white/70">

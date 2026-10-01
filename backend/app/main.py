@@ -1684,6 +1684,123 @@ def listar_peticoes(caso_id: str):
         return []
 
 
+# ══════════════════════════════════════════════════════════════════
+# A MESA DA PEÇA — o mesmo que o contrato tem, do lado judicial
+#
+# A peça era escrita uma vez e nunca mais editada por dentro do
+# sistema: quem precisasse corrigir copiava para o Word, corrigia lá e
+# protocolava de lá. A partir daí o sistema guardava uma versão e o
+# juízo recebia outra, e na hora de explicar o que foi protocolado a
+# resposta estava no computador de alguém.
+# ══════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/peticoes/{peticao_id}")
+def obter_peticao(peticao_id: str):
+    """A peça e o essencial do caso dela, para a mesa de correção."""
+    r = get_db().table("peticoes") \
+        .select("*, casos(id,titulo,numero_processo,tribunal,estado,"
+                "prazo_fatal,prazo_descricao,fase_judicial,grupo,"
+                "clientes(nome))") \
+        .eq("id", peticao_id).limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Peça não encontrada.")
+    return r[0]
+
+
+class TextoDaPeca(BaseModel):
+    texto: str
+    quem: str = ""
+
+
+@app.put("/api/v1/peticoes/{peticao_id}/texto")
+def salvar_peticao(peticao_id: str, body: TextoDaPeca):
+    """Grava a correção do advogado, guardando a versão anterior."""
+    from .agentes import mesa_do_processo
+    try:
+        return mesa_do_processo.salvar_texto(peticao_id, body.texto, body.quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class ConsultaDaPeca(BaseModel):
+    pergunta: str
+    quem: str = ""
+    texto: str = ""
+    anteriores: list[dict] = []
+
+
+@app.post("/api/v1/peticoes/{peticao_id}/consultar")
+def consultar_peca(peticao_id: str, body: ConsultaDaPeca):
+    """O especialista do caso judicial responde ao advogado."""
+    from .agentes import mesa_do_processo
+    try:
+        return mesa_do_processo.perguntar(
+            peticao_id, body.pergunta, body.quem,
+            texto_na_tela=body.texto, anteriores=body.anteriores)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/peticoes/{peticao_id}/consultas")
+def consultas_da_peca(peticao_id: str):
+    from .agentes import mesa_do_processo
+    return mesa_do_processo.consultas(peticao_id)
+
+
+def _peca_para_documento(peticao_id: str) -> tuple[str, str]:
+    """O texto da peça e o nome do arquivo. Prefere o final, que é o que
+    tem a jurisprudência injetada; cai na base quando ela ainda não
+    rodou, para o advogado não ficar sem nada para ler."""
+    r = get_db().table("peticoes") \
+        .select("markdown_final,markdown_base,titulo,casos(numero_processo)") \
+        .eq("id", peticao_id).limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Peça não encontrada.")
+    p = r[0]
+    texto = (p.get("markdown_final") or p.get("markdown_base") or "").strip()
+    if not texto:
+        raise HTTPException(400, "A peça ainda não tem texto.")
+    proc = ((p.get("casos") or {}).get("numero_processo") or "").replace("/", "-")
+    nome = "_".join(x for x in [proc, (p.get("titulo") or "peca")] if x)
+    return texto, nome.replace(" ", "_")[:80]
+
+
+@app.get("/api/v1/peticoes/{peticao_id}/documento.doc")
+def peca_em_word(peticao_id: str):
+    """A peça em Word, para o advogado ler no editor que ele usa.
+
+    Sai sem timbre: petição vai com o endereçamento ao juízo no alto e
+    é protocolada em sistema próprio, onde o papel do escritório não
+    tem função nenhuma."""
+    from fastapi.responses import Response
+    from .core.texto import documento_em_html
+    texto, nome = _peca_para_documento(peticao_id)
+    html = ('<html xmlns:w="urn:schemas-microsoft-com:office:word">'
+            '<head><meta charset="utf-8"><title>' + nome + '</title></head>'
+            '<body><div style="font-family:Times New Roman,serif;'
+            'font-size:12pt;line-height:1.5;text-align:justify">'
+            + documento_em_html(texto) + "</div></body></html>")
+    return Response(
+        content=html.encode("utf-8"), media_type="application/msword",
+        headers={"Content-Disposition": f'attachment; filename="{nome}.doc"'})
+
+
+@app.get("/api/v1/peticoes/{peticao_id}/pdf")
+def peca_em_pdf(peticao_id: str):
+    """A peça em PDF, para conferir a página antes de protocolar."""
+    from fastapi.responses import Response
+    from .agentes import contratos_online, documentos
+    texto, nome = _peca_para_documento(peticao_id)
+    try:
+        docx = contratos_online._docx_da_minuta(texto, com_timbre=False)
+        pdf = documentos.converter_para_pdf(docx)
+    except Exception as e:
+        raise HTTPException(503, f"Não consegui gerar o PDF agora: {e}")
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f'inline; filename="{nome}.pdf"'})
+
+
 @app.post("/api/v1/peticoes/{peticao_id}/precedentes")
 def injetar_precedentes(peticao_id: str):
     """Troca cada tag por julgado real do banco. Tag sem julgado aderente é
