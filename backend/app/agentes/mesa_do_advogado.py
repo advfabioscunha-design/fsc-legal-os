@@ -128,11 +128,31 @@ Pode mandar várias alterações de uma vez quando ele pedir várias. E
 diga, na resposta, o que mudou e por quê, em uma linha por alteração:
 ele vai conferir antes de aprovar, e precisa saber onde olhar.
 
+QUANDO O PONTO É DO CLIENTE
+
+Há coisa que o advogado não decide sozinho, e ele sabe quais são: o
+cliente pediu algo que a lei não admite, falta um dado que só ele tem,
+ou a correção muda o que foi combinado. Nessas, o advogado manda você
+falar com o cliente, e você usa `falar_com_o_cliente`.
+
+Escreva a pergunta COMO O CLIENTE VAI LER. Ele não é do ramo: nada de
+artigo de lei solto, nada de "cláusula 12ª, parágrafo único" sem dizer
+do que ela trata. Diga em uma frase o que está em jogo, o que acontece
+se ficar como está, e o que você precisa que ele responda. Se for
+pedido de ciência, deixe claro que a escolha continua sendo dele.
+
+A pergunta sai pelos três canais e a resposta volta na conversa do
+pedido. Você não espera por ela: avise o advogado que a pergunta saiu e
+siga. Quando a resposta chegar, ela aparece no material do pedido, e
+ele vai te perguntar de novo.
+
 O QUE VOCÊ NÃO FAZ
 
-Não fala com o cliente. Não aprova nada. Não altera sem ordem, nem
-"aproveita" para corrigir de passagem o que ele não pediu: quem assina
-é ele, e documento que muda sozinho é documento em que ninguém confia.
+Não aprova nada. Não altera sem ordem, nem "aproveita" para corrigir de
+passagem o que ele não pediu: quem assina é ele, e documento que muda
+sozinho é documento em que ninguém confia. E não escreve ao cliente por
+conta própria: cada palavra que sai daqui chega como palavra do
+escritório.
 
 Nada de travessão, asterisco ou marcação. Texto corrido."""
 
@@ -179,6 +199,31 @@ FERRAMENTA_ALTERAR = {
             },
         },
         "required": ["alteracoes"],
+    },
+}
+
+
+FERRAMENTA_CLIENTE = {
+    "name": "falar_com_o_cliente",
+    "description": ("Manda uma pergunta ao cliente pelos três canais e "
+                    "registra a pendência no pedido. Use quando o advogado "
+                    "mandar consultar o cliente, pedir ciência dele ou "
+                    "buscar um dado que só ele tem."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "pergunta": {
+                "type": "string",
+                "description": ("A mensagem como o cliente vai ler: sem "
+                                "jargão, dizendo o que está em jogo e o "
+                                "que ele precisa responder."),
+            },
+            "assunto": {
+                "type": "string",
+                "description": "O ponto do contrato, em poucas palavras.",
+            },
+        },
+        "required": ["pergunta", "assunto"],
     },
 }
 
@@ -347,6 +392,31 @@ def dossie(pedido_id: str) -> str:
     return "\n".join(partes)
 
 
+def _consultar_cliente(pedido_id: str, dados: dict, quem: str) -> dict:
+    """Manda a pergunta ao cliente e registra a pendência no pedido.
+
+    Reaproveita o caminho que o advogado já usava à mão, o mesmo que
+    grava a dúvida em `duvidas_advogado` e manda pelos três canais.
+    Ter duas portas para a mesma coisa é ter duas que envelhecem
+    diferente: um dia uma passa a registrar e a outra não, e ninguém
+    descobre até alguém procurar a pergunta que sumiu."""
+    pergunta = (dados.get("pergunta") or "").strip()
+    if len(pergunta) < 10:
+        return {"enviada": False,
+                "porque": "a pergunta ficou curta demais para o cliente "
+                          "entender do que se trata"}
+    try:
+        from . import contratos_online
+        contratos_online.perguntar_ao_cliente(
+            pedido_id, pergunta, quem=quem or "advogado")
+        return {"enviada": True,
+                "aviso": "A pergunta saiu pelos três canais. A resposta do "
+                         "cliente entra na conversa do pedido."}
+    except Exception as e:
+        print(f"[mesa] pergunta ao cliente não saiu: {e}")
+        return {"enviada": False, "porque": str(e)[:200]}
+
+
 def perguntar(pedido_id: str, pergunta: str, quem: str = "",
               minuta_na_tela: str = "",
               anteriores: list[dict] | None = None) -> dict:
@@ -388,6 +458,7 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
     base = minuta_na_tela or ""
     feitas: list[dict] = []
     recusadas: list[dict] = []
+    perguntas: list[dict] = []
     texto = ""
 
     # Duas voltas, não mais. A primeira é o modelo responder, e talvez
@@ -398,7 +469,8 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
     for volta in range(2):
         r = cliente.messages.create(
             model=s.claude_model, max_tokens=2500, system=SYSTEM,
-            tools=[FERRAMENTA_ALTERAR], messages=mensagens,
+            tools=[FERRAMENTA_ALTERAR, FERRAMENTA_CLIENTE],
+            messages=mensagens,
         )
         texto = "".join(b.text for b in r.content if b.type == "text").strip()
         usos = [b for b in r.content if getattr(b, "type", "") == "tool_use"]
@@ -408,17 +480,25 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
         mensagens.append({"role": "assistant", "content": r.content})
         resultados = []
         for u in usos:
-            pedidas = (u.input or {}).get("alteracoes") or []
-            base, ok, nao = _aplicar(base, pedidas)
-            feitas += ok
-            recusadas += nao
-            resultados.append({
-                "type": "tool_result", "tool_use_id": u.id,
-                "content": json.dumps({
+            if u.name == "falar_com_o_cliente":
+                dados = u.input or {}
+                saida = _consultar_cliente(pedido_id, dados, quem)
+                if saida.get("enviada"):
+                    perguntas.append({"assunto": dados.get("assunto", ""),
+                                      "pergunta": dados.get("pergunta", "")})
+            else:
+                pedidas = (u.input or {}).get("alteracoes") or []
+                base, ok, nao = _aplicar(base, pedidas)
+                feitas += ok
+                recusadas += nao
+                saida = {
                     "aplicadas": len(ok),
                     "recusadas": [{"procurar": x.get("procurar", "")[:120],
                                    "porque": x.get("porque")} for x in nao],
-                }, ensure_ascii=False)})
+                }
+            resultados.append({
+                "type": "tool_result", "tool_use_id": u.id,
+                "content": json.dumps(saida, ensure_ascii=False)})
         mensagens.append({"role": "user", "content": resultados})
 
     texto = humanizar(texto)
@@ -439,12 +519,25 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
                   + ". O trecho pode ter mudado depois que eu li. Peça de "
                     "novo que eu tento com o texto atual.")
 
+    resumo_alteracoes = [{"motivo": a.get("motivo", "")} for a in feitas]
+
+    # O QUE FICA GRAVADO É O QUE REAPARECE AMANHÃ
+    #
+    # O evento é o histórico das tratativas: quem reabrir o documento
+    # daqui a uma semana precisa ver não só o que foi perguntado, mas o
+    # que foi alterado no texto e o que foi consultado com o cliente.
+    # Sem isso, a conversa reaberta vira um monte de perguntas sem
+    # consequência, e ninguém sabe se a cláusula mudou porque o
+    # especialista mexeu ou porque alguém editou à mão.
     registrar_evento(None, "ADVOGADO_CONSULTOU", {
         "pedido": pedido_id, "quem": quem,
         "pergunta": pergunta[:500], "resposta": texto[:1000],
-        "alteracoes": len(feitas), "recusadas": len(recusadas)})
+        "alteracoes": resumo_alteracoes,
+        "recusadas": len(recusadas),
+        "ao_cliente": perguntas})
 
     saida = {"pergunta": pergunta, "resposta": texto, "em": _agora(),
+             "ao_cliente": perguntas,
              "alteracoes": [{"procurar": a.get("procurar", "")[:200],
                              "substituir": a.get("substituir", "")[:200],
                              "motivo": a.get("motivo", "")} for a in feitas]}
@@ -473,8 +566,24 @@ def consultas(pedido_id: str, limite: int = 50) -> list[dict]:
         pay = l.get("payload") or {}
         if pay.get("pedido") != pedido_id:
             continue
-        saida.append({"pergunta": pay.get("pergunta"),
+        alt = pay.get("alteracoes")
+        # QUEM FALOU FICA DITO, E NÃO DEDUZIDO
+        #
+        # Reaberto uma semana depois, o fio sem autor vira monólogo: não
+        # se sabe se a frase é instrução do advogado ou conclusão do
+        # especialista, e as duas têm peso diferente na hora de
+        # justificar o que foi assinado.
+        quem = (pay.get("quem") or "").strip()
+        saida.append({"quem_rotulo": (f"{quem} (advogado)" if quem
+                                      and quem.lower() != "advogado"
+                                      else "Advogado"),
+                      "pergunta": pay.get("pergunta"),
                       "resposta": pay.get("resposta"),
                       "quem": pay.get("quem"),
+                      # Versões antigas gravavam só a contagem. Virar
+                      # lista aqui evita a tela ter de saber disso.
+                      "alteracoes": alt if isinstance(alt, list)
+                      else ([{"motivo": "alteração aplicada"}] * int(alt or 0)),
+                      "ao_cliente": pay.get("ao_cliente") or [],
                       "em": l.get("criado_em")})
     return saida[-limite:]

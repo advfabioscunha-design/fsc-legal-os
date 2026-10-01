@@ -379,7 +379,9 @@ function Especialista({ id, minuta, aoAlterar }: {
     if (!q || pensando) return;
     setPergunta(""); setErro(""); setPensando(true);
     const antes = conversa;
-    setConversa([...antes, { pergunta: q, resposta: "" }]);
+    setConversa([...antes, { pergunta: q, resposta: "",
+                             quem_rotulo: "Advogado",
+                             em: new Date().toISOString() }]);
     try {
       const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/consultar`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -397,7 +399,9 @@ function Especialista({ id, minuta, aoAlterar }: {
         return;
       }
       setConversa([...antes, { pergunta: q, resposta: j.resposta,
-                               alteracoes: j.alteracoes }]);
+                               alteracoes: j.alteracoes,
+                               ao_cliente: j.ao_cliente,
+                               quem_rotulo: "Advogado", em: j.em }]);
 
       /* ELE MEXEU NO TEXTO
        *
@@ -466,15 +470,60 @@ function Especialista({ id, minuta, aoAlterar }: {
         )}
         {conversa.map((c, i) => (
           <div key={i} className="space-y-1.5">
-            <p className="rounded-lg bg-white/5 px-3 py-2 text-[11px] text-white/75">
-              {c.pergunta}
-            </p>
-            {c.resposta ? (
-              <p className="whitespace-pre-line rounded-lg bg-[#2D7DD2]/10 px-3 py-2 text-[11px] leading-relaxed text-white/85">
-                {c.resposta}
+            {/* QUEM FALOU, EM CADA LINHA
+
+                Reaberto uma semana depois, o fio sem autor vira um
+                monólogo: não dá para saber se a frase é instrução do
+                advogado ou conclusão do especialista, e as duas têm
+                peso diferente na hora de justificar o que foi assinado.
+                A hora vem junto pelo mesmo motivo da conversa com o
+                cliente: prazo se confere com relógio, não com memória. */}
+            <div>
+              <p className="mb-0.5 px-1 text-[10px] font-bold text-white/35">
+                {c.quem_rotulo || "Advogado"}
+                {c.em && (
+                  <span className="ml-2 font-normal text-white/25">
+                    {new Date(c.em).toLocaleString("pt-BR", {
+                      day: "2-digit", month: "2-digit",
+                      hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
               </p>
+              <p className="rounded-lg bg-white/5 px-3 py-2 text-[11px] text-white/75">
+                {c.pergunta}
+              </p>
+            </div>
+            {c.resposta ? (
+              <div>
+                <p className="mb-0.5 px-1 text-[10px] font-bold text-[#2D7DD2]">
+                  Especialista do caso
+                </p>
+                <p className="whitespace-pre-line rounded-lg bg-[#2D7DD2]/10 px-3 py-2 text-[11px] leading-relaxed text-white/85">
+                  {c.resposta}
+                </p>
+              </div>
             ) : (
               <p className="px-3 text-[11px] italic text-white/35">lendo o caso…</p>
+            )}
+
+            {/* O que saiu para o cliente, dito aqui também: a pergunta
+                vive na conversa do pedido, e quem está nesta tela
+                precisa saber que ela saiu sem ter de trocar de aba. */}
+            {(c.ao_cliente || []).length > 0 && (
+              <div className="rounded-lg border border-[#E5A44C]/30 bg-[#E5A44C]/5 px-3 py-2">
+                <p className="text-[10px] font-bold text-[#E5A44C]">
+                  Pergunta enviada ao cliente pelos três canais
+                </p>
+                {c.ao_cliente.map((q: any, k: number) => (
+                  <p key={k} className="mt-1 text-[10px] leading-relaxed text-white/60">
+                    · {q.assunto ? <b>{q.assunto}: </b> : null}{q.pergunta}
+                  </p>
+                ))}
+                <p className="mt-1 text-[10px] text-white/35">
+                  A resposta dele entra na conversa do pedido e aparece aqui
+                  no material quando você perguntar de novo.
+                </p>
+              </div>
             )}
             {/* O que ele mexeu no documento, dito com todas as letras.
                 Alteração que acontece sem aviso é alteração que ninguém
