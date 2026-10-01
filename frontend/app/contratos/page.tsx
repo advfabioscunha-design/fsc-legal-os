@@ -493,9 +493,24 @@ function PainelDoPedido({ id, fechar, recarregar }:
           {fase === "REVISAO_ADV" && (
             <div>
               <p className="mb-2 text-[11px] leading-relaxed text-white/60">
-                Leia no Word, corrija na aba Minuta. Nada chega ao cliente sem esta leitura.
+                Abra o documento para ler e corrigir. Nada chega ao cliente sem esta leitura.
               </p>
               <div className="flex flex-wrap items-center gap-2">
+                {/* A MESA, E NÃO A CAIXINHA
+
+                    Corrigir contrato numa caixa de quinze linhas dentro
+                    do painel não funciona: para conferir se a cláusula
+                    12 contradiz a 4, a pessoa rola e perde o lugar. Quem
+                    revisa assim revisa mal, e por isso baixava o Word,
+                    corrigia lá e não devolvia nada — o sistema ficava
+                    com uma versão e o advogado com outra.
+
+                    Em página inteira ele corrige, vê em PDF e aprova
+                    sem sair do lugar. */}
+                <a href={`/minuta/${id}`} target="_blank" rel="noreferrer"
+                  className="rounded-lg bg-[#C9A24D] px-4 py-2 text-xs font-bold text-[#0A1628] hover:brightness-110">
+                  Abrir o documento para corrigir
+                </a>
                 {/* LER NO WORD, CONFERIR NO PDF
 
                     Eram coisas diferentes tratadas como uma só. Ler um
