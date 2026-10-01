@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import PainelLayout from "../components/PainelLayout";
 import VisualizadorProtegido from "../components/VisualizadorProtegido";
+import { baixarComToken } from "../../lib/baixar";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -508,10 +509,13 @@ function PainelDoPedido({ id, fechar, recarregar }:
                     Minuta, que salva sozinha. Documento editado em dois
                     lugares vira duas versões, e a que chega ao cliente
                     é sempre a errada. */}
-                <a href={`${API}/api/v1/contratos/pedidos/${id}/documento.doc`}
+                <button
+                  onClick={() => baixarComToken(
+                    `/api/v1/contratos/pedidos/${id}/documento.doc`,
+                    `${p.numero || "contrato"}.doc`).catch((e) => setErro(String(e.message || e)))}
                   className="rounded-lg border border-[#2D7DD2]/60 px-4 py-2 text-xs font-semibold text-[#2D7DD2] hover:bg-[#2D7DD2]/10">
                   Abrir no Word para ler
-                </a>
+                </button>
                 <a href={`${API}/api/v1/contratos/pedidos/${id}/pdf`}
                   target="_blank" rel="noreferrer"
                   onClick={() => {

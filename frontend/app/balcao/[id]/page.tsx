@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import VisualizadorProtegido from "../../components/VisualizadorProtegido";
 import { esperarAVez } from "../../components/ritmoDaConversa";
+import { baixarComToken } from "../../../lib/baixar";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -661,15 +662,22 @@ export default function PedidoDoCliente() {
                 ? "Preparando o arquivo para você baixar."
                 : "Enviado para assinatura eletrônica. Quando todos assinarem, a cópia final vai para o seu e-mail."}</p>
             )}
+            {/* Botão, e não link: o crachá da sessão é posto pelo embrulho
+                do fetch, e navegação de link não passa por ele. Como link,
+                o cliente recebia "Faça login para acessar" estando logado. */}
             {(faseAtual === "ASSINATURA" || faseAtual === "ENTREGUE") && (
-              <a href={`${API}/api/v1/contratos/pedidos/${id}/documento.doc`}
+              <button
+                onClick={() => baixarComToken(
+                  `/api/v1/contratos/pedidos/${id}/documento.doc`,
+                  `${pedido?.numero || "contrato"}.doc`)
+                  .catch((e) => alert(e.message || "Não consegui baixar agora."))}
                 className="mb-3 inline-flex items-center gap-2 rounded-lg bg-[#1DB954] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#17a349]">
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"
                   stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
                   <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" />
                 </svg>
                 Baixar o meu documento em Word
-              </a>
+              </button>
             )}
             {faseAtual === "ENTREGUE" && (
               <div className="space-y-2">
