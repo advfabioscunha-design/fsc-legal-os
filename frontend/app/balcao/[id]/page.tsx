@@ -69,6 +69,10 @@ export default function PedidoDoCliente() {
   const [partesOk, setPartesOk] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
+  // O que o agente preencheu sozinho, lendo a conversa.
+  const [aproveitados, setAproveitados] = useState<string[]>([]);
+  // O que ainda falta, mostrado ANTES de concluir.
+  const [falta, setFalta] = useState<any>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
 
@@ -88,6 +92,35 @@ export default function PedidoDoCliente() {
   }, [id]);
 
   useEffect(() => { carregar(); }, [carregar]);
+
+  /* O QUE ELE JÁ CONTOU NO CHAT NÃO SE PERGUNTA DE NOVO
+   *
+   * Enquanto esperava a confirmação do pagamento, o cliente escreveu no
+   * chat o nome do outro contratante, o endereço do imóvel, o valor
+   * combinado. Essa informação ficava na conversa e morria lá: a tela
+   * de coleta abria em branco e perguntava tudo de novo, que é o jeito
+   * mais rápido de fazer alguém achar que ninguém leu o que ele mandou.
+   *
+   * Roda uma vez, quando a coleta abre. Falhar aqui não impede nada: a
+   * tela abre igual e ele preenche à mão. */
+  const jaAproveitou = useRef(false);
+  useEffect(() => {
+    if (jaAproveitou.current) return;
+    if (!pedido || (pedido.fase !== "COLETA" && pedido.fase !== "CIENCIA")) return;
+    jaAproveitou.current = true;
+    (async () => {
+      try {
+        const r = await fetch(
+          `${API}/api/v1/contratos/pedidos/${id}/aproveitar-conversa`,
+          { method: "POST" });
+        const j = await r.json().catch(() => ({}));
+        if (j?.preenchidos > 0) {
+          setAproveitados(j.campos || []);
+          carregar();
+        }
+      } catch { /* a tela abre do mesmo jeito */ }
+    })();
+  }, [pedido, id, carregar]);
   useEffect(() => {
     fetch(`${API}/api/v1/contratos/pix`).then((r) => r.json()).then(setPix).catch(() => {});
   }, []);
@@ -121,8 +154,34 @@ export default function PedidoDoCliente() {
      manda o pedido para a redação. Sem a separação, ou o redator
      começava com meia informação, ou o cliente ficava preso numa tela
      que não avançava. */
+  /* CONFERIR ANTES DE CONCLUIR, E NÃO DEPOIS
+   *
+   * O cliente clica em enviar achando que terminou. Se faltar coisa, ele
+   * só descobre quando o escritório cobrar, horas depois. Aqui ele vê a
+   * lista antes, e decide na hora: preenche agora, ou manda depois. */
+  async function conferirAntesDeConcluir() {
+    setOcupado(true); setAviso("");
+    try {
+      await fetch(`${API}/api/v1/contratos/pedidos/${id}/dados`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dados: valores, observacoes }),
+      });
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/o-que-falta`);
+      const j = await r.json().catch(() => ({}));
+      const obrig = Array.isArray(j?.obrigatorias) ? j.obrigatorias : [];
+      const compl = Array.isArray(j?.complementares) ? j.complementares : [];
+      if (obrig.length === 0 && compl.length === 0) {
+        await concluirColeta();
+        return;
+      }
+      setFalta({ obrigatorias: obrig, complementares: compl });
+    } catch { setAviso("Não foi possível conferir agora. Tente de novo."); }
+    finally { setOcupado(false); }
+  }
+
   async function concluirColeta() {
     setOcupado(true); setAviso("");
+    setFalta(null);
     try {
       await fetch(`${API}/api/v1/contratos/pedidos/${id}/dados`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -510,6 +569,18 @@ export default function PedidoDoCliente() {
 
             {comoEnviar && (
               <div className="mt-4 flex flex-wrap items-center gap-3">
+                {/* O QUE O AGENTE JÁ PREENCHEU SOZINHO
+                    Dito com todas as letras, porque campo que aparece
+                    preenchido sem explicação assusta: a pessoa acha que
+                    o sistema inventou, e apaga. */}
+                {aproveitados.length > 0 && (
+                  <p className="w-full rounded-lg border border-[#1DB954]/30 bg-[#1DB954]/5 px-3 py-2 text-[12px] leading-relaxed text-white/75">
+                    Aproveitei o que você já tinha me contado na conversa e
+                    preenchi {aproveitados.length === 1 ? "um campo" : `${aproveitados.length} campos`}
+                    {aproveitados.length <= 6 ? `: ${aproveitados.join(", ")}` : ""}.
+                    Confira, e corrija o que não estiver certo.
+                  </p>
+                )}
                 <button onClick={salvarColeta} disabled={ocupado}
                   className="rounded-lg border border-white/20 px-5 py-2.5 text-sm font-semibold text-white/80 hover:border-white/40 disabled:opacity-50">
                   {ocupado ? "Salvando…" : "Salvar e continuar depois"}
@@ -519,14 +590,76 @@ export default function PedidoDoCliente() {
                     a maior parte do contrato não depende daquele dado,
                     e segurar tudo por causa de um campo faz o cliente
                     esperar por nada. */}
-                <button onClick={concluirColeta} disabled={ocupado}
+                <button onClick={conferirAntesDeConcluir} disabled={ocupado}
                   className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-bold text-[#0A1628] hover:bg-[#d8b95e] disabled:opacity-40">
-                  Terminei, pode escrever
+                  {ocupado ? "Conferindo…" : "Terminei, pode escrever"}
                 </button>
                 {!partesOk && (
                   <span className="text-xs text-white/45">
                     o escritório começa e avisa o que ainda falta
                   </span>
+                )}
+
+                {/* O QUE AINDA FALTA, ANTES DE CONCLUIR
+                 *
+                 * O cliente clica em enviar achando que terminou. Se
+                 * faltar coisa, ele só descobria quando o escritório
+                 * cobrasse, horas depois. Agora ele vê a lista na hora e
+                 * escolhe: preenche agora, ou manda depois.
+                 *
+                 * As duas saídas são reais. Nada aqui segura o pedido:
+                 * o escritório começa a escrever com o que tem, e o que
+                 * falta é cobrado no caminho. Oferecer "mandar depois" e
+                 * depois travar o pedido seria mentir no botão. */}
+                {falta && (
+                  <div className="w-full rounded-xl border border-[#E5A44C]/40 bg-[#E5A44C]/5 p-4">
+                    <p className="text-sm font-bold text-[#E5A44C]">
+                      Antes de eu começar, está faltando isto
+                    </p>
+
+                    {falta.obrigatorias.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-[12px] text-white/75">
+                          Sem isto o documento não se conclui:
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {falta.obrigatorias.map((x: string) => (
+                            <li key={x} className="text-[12px] text-white/60">· {x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {falta.complementares.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-[12px] text-white/75">
+                          Isto ajuda, mas pode vir depois e não atrasa:
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {falta.complementares.map((x: string) => (
+                            <li key={x} className="text-[12px] text-white/45">· {x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <p className="mt-3 text-[12px] leading-relaxed text-white/55">
+                      Você pode preencher agora, ou mandar depois pelo chat.
+                      De qualquer jeito eu já começo a escrever o que dá com
+                      o que você informou.
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button onClick={() => setFalta(null)}
+                        className="rounded-lg border border-white/25 px-4 py-2 text-sm font-semibold text-white/80 hover:border-white/50">
+                        Vou preencher agora
+                      </button>
+                      <button onClick={concluirColeta} disabled={ocupado}
+                        className="rounded-lg bg-[#C9A84C] px-4 py-2 text-sm font-bold text-[#0A1628] disabled:opacity-40">
+                        {ocupado ? "Enviando…" : "Mando depois, pode começar"}
+                      </button>
+                    </div>
+                  </div>
                 )}
                 {comoEnviar === "FORMULARIO" && (
                   <span className="text-xs text-white/45">

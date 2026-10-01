@@ -6080,6 +6080,46 @@ class FimDaColeta(BaseModel):
     com_timbre: bool | None = None
 
 
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/aproveitar-conversa")
+def balcao_aproveitar_conversa(pedido_id: str):
+    """Preenche o quadro da coleta com o que o cliente já contou no chat.
+
+    Chamada quando a tela de coleta abre. Antes disso, o que ele escreveu
+    enquanto esperava o pagamento ficava na conversa e morria lá: a tela
+    abria em branco e perguntava de novo tudo o que ele já tinha dito,
+    que é o jeito mais rápido de fazer alguém achar que ninguém leu.
+
+    Falhar aqui não impede nada: a tela abre e ele preenche à mão."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.varrer_a_conversa(pedido_id)
+    except Exception as e:
+        print(f"[balcao] varredura da conversa falhou: {e}")
+        return {"preenchidos": 0, "erro": esquema.erro_amigavel(
+            e, "aproveitar o que você já escreveu")}
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/o-que-falta")
+def balcao_o_que_falta(pedido_id: str):
+    """O que ainda falta informar, separado entre o que trava e o que não.
+
+    A tela usa isto no botão de enviar: o cliente vê o que está faltando
+    ANTES de concluir, e decide se preenche agora ou manda depois."""
+    from .agentes import contratos_online
+    try:
+        pend = contratos_online.pendencias_do_pedido(pedido_id)
+    except Exception as e:
+        return {"obrigatorias": [], "complementares": [],
+                "erro": esquema.erro_amigavel(e, "conferir o que falta")}
+    return {
+        "obrigatorias": [contratos_online._rotulo(i)
+                         for i in pend["obrigatorias"]],
+        "complementares": [contratos_online._rotulo(i)
+                           for i in pend["complementares"]],
+        "trava": pend["trava"],
+    }
+
+
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/coleta-concluida")
 def balcao_coleta_concluida(pedido_id: str, body: FimDaColeta):
     """O cliente terminou de informar. A partir daqui o redator assume."""

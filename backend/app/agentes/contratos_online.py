@@ -3019,6 +3019,80 @@ FERRAMENTA_COMPLEMENTO = [{
 }]
 
 
+# Mensagem com cara de trazer informação. Serve para não gastar uma
+# chamada de modelo em "ok", "obrigado" e "bom dia", que é metade do que
+# se escreve numa conversa de atendimento.
+#
+# O critério é generoso de propósito: deixar passar uma mensagem útil
+# custa um dado perdido, e deixar passar uma inútil custa centavos.
+def _pode_ter_dado(texto: str) -> bool:
+    t = (texto or "").strip()
+    if len(t) < 12:
+        return False
+    if any(c.isdigit() for c in t):
+        return True          # CPF, data, valor, número, CEP, telefone
+    if len(t.split()) >= 6:
+        return True          # frase inteira costuma trazer nome ou endereço
+    return "@" in t          # e-mail
+
+
+def varrer_a_conversa(pedido_id: str, limite: int = 60) -> dict:
+    """Lê a conversa inteira e preenche o quadro com o que já foi dito.
+
+    O CLIENTE JÁ TINHA MANDADO, E NINGUÉM TINHA OLHADO
+
+    Quem contrata conta tudo na conversa: o nome do outro contratante, o
+    endereço do imóvel, o valor combinado, o prazo. Isso acontece
+    enquanto ele espera a confirmação do pagamento, antes de a tela de
+    coleta existir.
+
+    Até aqui essa informação ficava na conversa e morria lá: a tela de
+    coleta abria em branco e perguntava de novo tudo o que ele já tinha
+    escrito. É o jeito mais rápido de fazer uma pessoa achar que ninguém
+    leu o que ela mandou.
+
+    Esta varredura junta o que ele disse, de todas as mensagens dele, e
+    preenche o quadro. O que não foi dito continua em branco, que é a
+    única resposta honesta para o que não se sabe.
+
+    POR QUE A CONVERSA INTEIRA, E NÃO MENSAGEM POR MENSAGEM
+
+    Porque o dado quase nunca vem inteiro numa frase só. "O imóvel é na
+    rua das Acácias" numa mensagem, "número 120" na seguinte, "Porto
+    Velho" três mensagens depois. Lida isolada, cada uma é um pedaço
+    inútil; lidas juntas, são um endereço."""
+    db = get_db()
+    pend = pendencias_do_pedido(pedido_id)
+    if not pend["itens"]:
+        return {"preenchidos": 0, "nada_a_preencher": True}
+
+    try:
+        falas = db.table("pedidos_mensagens") \
+            .select("autor,texto,criado_em").eq("pedido_id", pedido_id) \
+            .order("criado_em").limit(limite).execute().data or []
+    except Exception as e:
+        print(f"[balcao] conversa não lida para a varredura: {e}")
+        return {"preenchidos": 0, "erro": str(e)}
+
+    # SÓ O QUE O CLIENTE ESCREVEU
+    #
+    # As falas do agente contêm os mesmos rótulos ("me manda o CPF do
+    # fiador") e, lidas junto, fazem o modelo preencher o campo com a
+    # pergunta em vez da resposta.
+    dele = [f"{(x.get('texto') or '').strip()}" for x in falas
+            if str(x.get("autor") or "").upper() == "CLIENTE"
+            and (x.get("texto") or "").strip()]
+    if not dele:
+        return {"preenchidos": 0, "sem_conversa": True}
+
+    junto = "\n".join(dele)[:12000]
+    saida = complementar_com_a_resposta(pedido_id, junto)
+    registrar_evento(None, "BALCAO_CONVERSA_VARRIDA",
+                     {"pedido_id": pedido_id, "mensagens": len(dele),
+                      "preenchidos": saida.get("preenchidos", 0)})
+    return saida
+
+
 def complementar_com_a_resposta(pedido_id: str, texto: str) -> dict:
     """Lê o que o cliente mandou e preenche o que dá.
 
@@ -3291,12 +3365,30 @@ def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
         and r[0].get("fase") in _PROXIMA
 
     saida: dict = {"registrado": True, "travado_antes": travado}
-    if travado:
-        saida.update(complementar_com_a_resposta(pedido_id, texto))
+
+    # APROVEITAR O QUE ELE ESCREVEU, EM QUALQUER FASE
+    #
+    # Isto só rodava quando o pedido estava PARADO esperando informação,
+    # nas fases de redação em diante. Mas o cliente conta as coisas
+    # bem antes: enquanto espera a confirmação do pagamento, ele escreve
+    # o nome do outro contratante, o endereço do imóvel, o valor
+    # combinado. Tudo isso ficava na conversa e morria lá, e a tela de
+    # coleta abria em branco perguntando de novo o que ele já tinha dito.
+    #
+    # Agora vale em qualquer fase. A trava passa a ser outra, e melhor:
+    # só roda se houver pendência a preencher e se a mensagem tiver cara
+    # de trazer dado. Mensagem de "ok, obrigado" não precisa de leitura
+    # por modelo, e cobrar uma chamada de IA por "bom dia" é desperdício
+    # que o cliente paga em lentidão.
+    if _pode_ter_dado(texto) or anexos:
+        try:
+            saida.update(complementar_com_a_resposta(pedido_id, texto))
+        except Exception as e:
+            print(f"[balcao] não aproveitei a mensagem agora: {e}")
+    if travado and anexos and saida.get("preenchidos", 0) == 0:
         # Anexo também destrava: documento que chega costuma trazer a
         # informação que faltava, mesmo sem uma linha escrita.
-        if anexos and saida.get("preenchidos", 0) == 0:
-            saida["pendencias"] = revisar_pendencias(pedido_id)
+        saida["pendencias"] = revisar_pendencias(pedido_id)
 
     # NINGUÉM FICA SEM RESPOSTA
     #
