@@ -295,16 +295,19 @@ export default function MesaDaMinuta() {
           </span>
         </div>
 
-        {/* A folha. Fundo claro, serifa e largura de página: o olho lê
-            contrato assim, e o contraste do painel escuro cansa em dois
-            parágrafos. */}
-        <textarea
-          value={texto}
-          onChange={(e) => digitou(e.target.value)}
-          spellCheck
-          className="min-h-[70vh] w-full resize-y rounded-lg border border-white/10 bg-[#F7F5EF] p-10 font-serif text-[15px] leading-[1.8] text-[#1A1A1A] outline-none focus:border-[#C9A24D]"
-          style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
-        />
+        <div className="flex flex-col gap-4 lg:flex-row">
+          {/* A folha. Fundo claro, serifa e largura de página: o olho lê
+              contrato assim, e o contraste do painel escuro cansa em
+              dois parágrafos. */}
+          <textarea
+            value={texto}
+            onChange={(e) => digitou(e.target.value)}
+            spellCheck
+            className="min-h-[70vh] flex-1 resize-y rounded-lg border border-white/10 bg-[#F7F5EF] p-10 font-serif text-[15px] leading-[1.8] text-[#1A1A1A] outline-none focus:border-[#C9A24D]"
+            style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+          />
+          <Especialista id={id} minuta={texto} />
+        </div>
 
         <p className="mt-3 text-[11px] leading-relaxed text-white/35">
           Salva sozinho dois segundos depois que você para de digitar, e
@@ -314,5 +317,166 @@ export default function MesaDaMinuta() {
         </p>
       </div>
     </main>
+  );
+}
+
+/* O ESPECIALISTA DO CASO, AO LADO DO DOCUMENTO
+ *
+ * Quem confere um contrato tem dúvida enquanto lê, não depois. "De onde
+ * saiu este prazo", "o cliente chegou a pedir isso", "esta cláusula de
+ * garantia se sustenta". Guardar a dúvida para procurar a resposta
+ * depois é como revisar de memória: ou se perde o lugar no texto, ou se
+ * deixa passar.
+ *
+ * Por isso ele fica na mesma tela, à direita, e enxerga o que importa:
+ * todo o registro do pedido e O TEXTO QUE ESTÁ NA TELA AGORA, com as
+ * alterações ainda não salvas. Comentar a versão do banco enquanto o
+ * advogado edita outra é o jeito mais rápido de perder a confiança de
+ * quem está trabalhando.
+ *
+ * ELE NÃO ESCREVE NO DOCUMENTO
+ *
+ * Sugere a redação, e quem cola é o advogado. Agente que edita contrato
+ * sozinho, enquanto alguém edita o mesmo arquivo, produz duas versões
+ * e nenhuma confiável. Além disso a conferência final é ato dele: o que
+ * vai para o cliente precisa ter passado pela mão de quem assina.
+ */
+function Especialista({ id, minuta }: { id: string; minuta: string }) {
+  const [conversa, setConversa] = useState<any[]>([]);
+  const [pergunta, setPergunta] = useState("");
+  const [pensando, setPensando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [aberto, setAberto] = useState(true);
+  const fim = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/consultas`);
+        const d = await r.json();
+        if (Array.isArray(d)) setConversa(d);
+      } catch { /* histórico é conforto, não trava a pergunta */ }
+    })();
+  }, [id]);
+
+  useEffect(() => {
+    // Rola a própria caixa, e não a página: scrollIntoView arrasta a
+    // tela inteira e tira o documento da frente de quem está editando.
+    const c = fim.current?.parentElement;
+    if (c) c.scrollTop = c.scrollHeight;
+  }, [conversa, pensando]);
+
+  async function mandar(texto?: string) {
+    const q = (texto ?? pergunta).trim();
+    if (!q || pensando) return;
+    setPergunta(""); setErro(""); setPensando(true);
+    const antes = conversa;
+    setConversa([...antes, { pergunta: q, resposta: "" }]);
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/consultar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pergunta: q, quem: "advogado", minuta,
+          anteriores: antes.slice(-6).map((c: any) => ({
+            pergunta: c.pergunta, resposta: c.resposta })),
+        }),
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (!r.ok) {
+        setConversa(antes);
+        setErro([j?.detail || "Não consegui responder.", j?.tecnico]
+                  .filter(Boolean).join("  —  "));
+        return;
+      }
+      setConversa([...antes, { pergunta: q, resposta: j.resposta }]);
+    } catch { setConversa(antes); setErro("Falha de conexão."); }
+    finally { setPensando(false); }
+  }
+
+  const atalhos = [
+    ["Revisar o texto da tela",
+     "Leia o contrato que estou editando agora e aponte, em ordem de "
+     + "gravidade, o que está nulo, frágil ou ambíguo. Seja específico: "
+     + "cláusula, problema e a redação que você usaria."],
+    ["O que falta decidir",
+     "O que ainda precisa de decisão antes de este documento sair, e o "
+     + "que depende do cliente?"],
+    ["Confere com o que foi pedido",
+     "Compare o contrato com os dados do pedido e com o que o cliente "
+     + "escreveu. Tem algo divergente, faltando ou inventado?"],
+  ] as const;
+
+  if (!aberto) {
+    return (
+      <button onClick={() => setAberto(true)}
+        className="self-start rounded-lg border border-[#C9A24D]/50 px-3 py-2 text-[11px] font-semibold text-[#C9A24D] hover:bg-[#C9A24D]/10">
+        Abrir o especialista
+      </button>
+    );
+  }
+
+  return (
+    <aside className="flex w-full flex-col rounded-xl border border-white/10 bg-[#0B1F3B] lg:w-[380px]">
+      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+        <span className="text-[11px] font-bold text-[#C9A24D]">
+          Especialista do caso
+        </span>
+        <button onClick={() => setAberto(false)}
+          className="ml-auto text-[11px] text-white/35 hover:text-white">
+          ocultar
+        </button>
+      </div>
+
+      <div className="max-h-[60vh] min-h-[200px] flex-1 space-y-3 overflow-y-auto p-3">
+        {conversa.length === 0 && (
+          <p className="text-[11px] leading-relaxed text-white/45">
+            Ele acompanhou este pedido do começo ao fim: a negociação, a
+            coleta, as duas revisões e o que o cliente decidiu. Enxerga o
+            texto que você está editando agora, inclusive o que ainda não
+            foi salvo. Sugere a redação; quem aplica é você.
+          </p>
+        )}
+        {conversa.map((c, i) => (
+          <div key={i} className="space-y-1.5">
+            <p className="rounded-lg bg-white/5 px-3 py-2 text-[11px] text-white/75">
+              {c.pergunta}
+            </p>
+            {c.resposta ? (
+              <p className="whitespace-pre-line rounded-lg bg-[#2D7DD2]/10 px-3 py-2 text-[11px] leading-relaxed text-white/85">
+                {c.resposta}
+              </p>
+            ) : (
+              <p className="px-3 text-[11px] italic text-white/35">lendo o caso…</p>
+            )}
+          </div>
+        ))}
+        <div ref={fim} />
+      </div>
+
+      {erro && (
+        <p className="px-3 pb-2 text-[11px] text-[#ffb3aa]">{erro}</p>
+      )}
+
+      <div className="space-y-2 border-t border-white/10 p-3">
+        <div className="flex flex-wrap gap-1.5">
+          {atalhos.map(([rotulo, texto]) => (
+            <button key={rotulo} onClick={() => mandar(texto)} disabled={pensando}
+              className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] text-white/55 hover:border-white/40 hover:text-white/85 disabled:opacity-40">
+              {rotulo}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input value={pergunta} onChange={(e) => setPergunta(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") mandar(); }}
+            placeholder="pergunte sobre o caso ou o texto…"
+            className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-xs text-white outline-none focus:border-[#C9A24D]" />
+          <button onClick={() => mandar()} disabled={pensando || !pergunta.trim()}
+            className="shrink-0 rounded-lg bg-[#C9A24D] px-3 py-2 text-[11px] font-bold text-[#0A1628] disabled:opacity-40">
+            {pensando ? "…" : "Perguntar"}
+          </button>
+        </div>
+      </div>
+    </aside>
   );
 }

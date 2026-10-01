@@ -4287,7 +4287,7 @@ def baixar_documento_word(pedido_id: str):
     quando: quando ele falha, o documento ainda sai por aqui."""
     from fastapi.responses import Response
     r = get_db().table("pedidos_contrato") \
-        .select("minuta,numero,fase,aprovado_cliente_em") \
+        .select("minuta,numero,fase,aprovado_cliente_em,com_timbre") \
         .eq("id", pedido_id).limit(1).execute().data
     if not r or not (r[0].get("minuta") or "").strip():
         raise HTTPException(404, "Documento ainda não escrito.")
@@ -4299,12 +4299,36 @@ def baixar_documento_word(pedido_id: str):
     # escritos com todos os asteriscos.
     from .core.texto import documento_em_html
     linhas = documento_em_html(str(p["minuta"]))
+
+    # O MESMO TIMBRE DO PDF, E PELO MESMO MOTIVO
+    #
+    # O que o advogado lê no Word tem de ser o que o cliente vai
+    # receber. Se o PDF sai com a marca e o Word sai sem, ele confere
+    # uma página e aprova outra, e a diferença aparece quando já está
+    # com o cliente.
+    #
+    # A logo vai embutida no próprio arquivo, em base64: documento com
+    # imagem apontando para um endereço quebra assim que sai do
+    # computador de quem baixou, e um contrato é feito para circular.
+    topo = ""
+    if p.get("com_timbre") is not False:
+        try:
+            import base64
+            from .agentes.contratos_online import LOGO
+            dados = base64.b64encode(LOGO.read_bytes()).decode()
+            topo = ('<p style="text-align:center;margin-bottom:18pt">'
+                    f'<img src="data:image/png;base64,{dados}" '
+                    'style="width:6cm"></p>')
+        except Exception as e:
+            print(f"[balcao] logo não entrou no Word: {e}")
+
     html = (
         '<html xmlns:w="urn:schemas-microsoft-com:office:word">'
         '<head><meta charset="utf-8"><title>'
         f'{p.get("numero") or "contrato"}</title></head><body>'
         '<div style="font-family:Times New Roman,serif;font-size:12pt;'
-        'line-height:1.5;text-align:justify">' + linhas + "</div></body></html>")
+        'line-height:1.5;text-align:justify">' + topo + linhas
+        + "</div></body></html>")
 
     nome = f"{p.get('numero') or 'contrato'}.doc"
     return Response(
@@ -5572,14 +5596,22 @@ def balcao_digitando(pedido_id: str):
 class ConsultaDoAdvogado(BaseModel):
     pergunta: str
     quem: str = ""
+    # O texto que ele está editando agora, com o que ainda não salvou.
+    # Sem isto o especialista comenta um parágrafo que já não existe.
+    minuta: str = ""
+    # A conversa até aqui. "E a terceira?" só faz sentido para quem
+    # lembra das duas primeiras.
+    anteriores: list[dict] = []
 
 
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/consultar")
 def balcao_consultar(pedido_id: str, body: ConsultaDoAdvogado):
-    """O advogado pergunta ao trabalho que já foi feito neste pedido."""
+    """O especialista do caso responde ao advogado."""
     from .agentes import mesa_do_advogado
     try:
-        return mesa_do_advogado.perguntar(pedido_id, body.pergunta, body.quem)
+        return mesa_do_advogado.perguntar(
+            pedido_id, body.pergunta, body.quem,
+            minuta_na_tela=body.minuta, anteriores=body.anteriores)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

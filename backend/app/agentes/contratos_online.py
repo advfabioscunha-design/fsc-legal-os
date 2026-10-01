@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import anthropic
 
@@ -1680,11 +1681,23 @@ def restaurar(pedido_id: str, quem: str = "") -> dict:
 # com um passo a mais e uma marca de tempo para cada um.
 # ══════════════════════════════════════════════════════════════════
 
-CABECALHO = [
-    "FÁBIO SILVA CUNHA SOCIEDADE INDIVIDUAL DE ADVOCACIA",
-    "Dr. Fábio Cunha, OAB/RO 10.849",
-    "Porto Velho, RO e Florianópolis, SC",
-]
+# ── O TIMBRE É A LOGO, E SÓ ELA ────────────────────────────────
+#
+# O cabeçalho era três linhas de texto: a razão social, o nome do
+# advogado com a OAB e as cidades. Saía como qualquer parágrafo do
+# contrato, em Arial preto, e o documento abria parecendo um ofício
+# datilografado. Pior: repetia o nome do advogado no topo de um
+# contrato entre duas outras pessoas, onde o escritório não é parte.
+#
+# Papel timbrado é a marca do escritório, uma vez, no alto. Quem
+# redigiu se identifica no rodapé, com o número do pedido, e é só o que
+# precisa estar ali.
+#
+# A logo é a mesma do site, convertida para PNG porque o Word e o
+# gerador de PDF não leem SVG. Fica versionada junto com o código: logo
+# em pasta compartilhada é logo que um dia alguém troca por outra
+# versão e ninguém percebe.
+LOGO = Path(__file__).resolve().parent.parent / "modelos" / "marca" / "logo.png"
 
 
 def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
@@ -1710,12 +1723,15 @@ def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
     normal.font.size = Pt(12)
 
     if com_timbre:
-        for i, linha in enumerate(CABECALHO):
-            par = doc.add_paragraph()
-            par.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = par.add_run(linha)
-            run.bold = i == 0
-            run.font.size = Pt(11 if i == 0 else 9)
+        par = doc.add_paragraph()
+        par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        try:
+            par.add_run().add_picture(str(LOGO), width=Cm(6))
+        except Exception as e:
+            # Sem a logo o documento continua saindo. Um contrato sem
+            # marca no alto é um contrato; um contrato que não sai não
+            # é nada, e o cliente está esperando por ele.
+            print(f"[balcao] logo não entrou no documento: {e}")
         doc.add_paragraph()
 
     # O QUE ERA MARCAÇÃO VIRA FORMATAÇÃO

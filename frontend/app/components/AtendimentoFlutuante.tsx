@@ -8,45 +8,28 @@ import AtendimentoWhats from "./AtendimentoWhats";
 
    Dentro da plataforma de trabalho da equipe eles não fazem sentido: o
    advogado não abre um chat de captação para falar consigo mesmo, e os
-   dois círculos ficavam por cima do canto onde moram os botões de ação
-   das telas. Como ficavam no layout raiz, apareciam em tudo.
+   dois círculos ficam por cima do canto onde moram os botões de ação
+   das telas.
 
-   A lista abaixo é a das telas internas. Fora delas — site, portal,
-   área do cliente, assinatura de contrato — nada muda. */
-const INTERNAS = new Set([
-  "inicio", "crm", "contratos", "judicial", "recebimento", "processos",
-  "intimacoes", "agenda", "admin", "assistente", "equipe", "documento",
-  "entrar",
-  // Telas de trabalho acrescentadas depois. Toda tela nova da equipe
-  // precisa entrar aqui, senão os dois círculos voltam a aparecer por
-  // cima dos botões de ação — foi o que aconteceu com estas duas.
-  "tarefas", "pendencias",
-  // O convite é a primeira tela que um futuro colega vê. Oferecer ali
-  // o atendimento ao cliente seria oferecer a porta errada.
-  "convite", "acesso-equipe",
-  // "atendimento" tem dois sentidos: a esteira da primeira fase do caso
-  // (tela da equipe) e a sala de telepresença em /atendimento/<id>. As
-  // duas ficam de fora — na sala, dois círculos por cima do vídeo
-  // durante uma conversa gravada só atrapalham.
-  "atendimento",
-  // O BALCÃO JÁ TEM A CONVERSA DELE
-  //
-  // O pedido tem uma conversa própria, presa ao protocolo, com foto e
-  // anexo. O círculo flutuante abre uma segunda conversa, que é de
-  // captação e não sabe nada daquele pedido: a pessoa escreve ali
-  // achando que fala com quem cuida do documento dela, e ninguém do
-  // outro lado faz a ligação. Duas portas para salas diferentes com a
-  // mesma cara é pior do que uma porta só.
-  "balcao",
-  // A ÁREA DO CLIENTE TAMBÉM JÁ TEM ATENDIMENTO
-  //
-  // Ela tem a conversa própria, ligada ao caso da pessoa, com anexo e
-  // foto. Os dois círculos abriam por cima dela uma terceira porta,
-  // de captação, que não sabe nada daquele caso: quem já é cliente
-  // escrevia ali achando que falava com quem cuida do processo dele.
-  // Três portas na mesma tela, e a mais visível levando ao lugar
-  // errado.
-  "cliente",
+   A LISTA ERA AO CONTRÁRIO, E ERA O DEFEITO
+
+   Antes aqui havia a lista das telas INTERNAS, e tudo que não estivesse
+   nela ganhava os dois círculos. Isso significava que toda tela nova da
+   equipe nascia com o chat de captação por cima dos botões, e só se
+   descobria quando alguém reclamava. Aconteceu com tarefas, com
+   pendências, com o balcão, com a área do cliente, e de novo com a mesa
+   do documento.
+
+   Agora a lista é a das telas PÚBLICAS, que são poucas e mudam pouco.
+   Tela nova nasce sem os círculos, que é o certo: a plataforma tem
+   muito mais telas de trabalho do que páginas de site, e esquecer de
+   tirar é mais provável do que esquecer de pôr. */
+const PUBLICAS = new Set([
+  "",              // a página inicial do site
+  "areas",         // as áreas de atuação
+  "contrato",      // o fluxo de contrato pelo site, antes de haver conta
+  "portal",
+  "privacidade",
 ]);
 
 export default function AtendimentoFlutuante() {
@@ -54,7 +37,7 @@ export default function AtendimentoFlutuante() {
   // primeiro segmento: "/contratos/123" → "contratos"
   // (cuidado: "contrato", do site, é diferente de "contratos", da equipe)
   const raiz = pathname.split("/")[1] || "";
-  if (INTERNAS.has(raiz)) return null;
+  if (!PUBLICAS.has(raiz)) return null;
 
   /* UMA COLUNA, NÃO DOIS BOTÕES SOLTOS.
 

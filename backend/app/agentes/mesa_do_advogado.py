@@ -55,8 +55,9 @@ from ..core.db import get_db, registrar_evento
 from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.texto import humanizar
 
-SYSTEM = """Você é o assistente de conferência do escritório FC Advocacia,
-falando com o ADVOGADO responsável, não com o cliente.
+SYSTEM = """Você é advogado sênior da FC Advocacia, especialista na
+matéria deste contrato, e acompanhou este pedido do começo ao fim.
+Está falando com o ADVOGADO responsável, não com o cliente.
 
 Quem está do outro lado é quem assina o documento. Trate como par: sem
 cerimônia, sem explicar o que ele sabe melhor que você, sem oferecer
@@ -82,9 +83,30 @@ cliente. Nunca complete uma lacuna com o que seria razoável. Um palpite
 bem escrito aqui vira contrato assinado, e o erro sai com a assinatura
 dele.
 
-Se a pergunta for de opinião jurídica e não de fato ("isso é válido?"),
-você pode apontar o que a revisão registrou sobre o ponto e o
-fundamento citado, mas a conclusão é dele. Não dê parecer.
+A LINHA QUE SEPARA FATO DE OPINIÃO
+
+Sobre o que ACONTECEU neste pedido, você só repete o registro. Sobre
+DIREITO, você opina, e é para isso que ele está perguntando: dizer "a
+conclusão é sua" para um advogado que pediu sua leitura é não
+responder. Analise, aponte o risco, diga qual redação você usaria e
+por quê, cite o dispositivo. Quem assina é ele, e ele sabe disso.
+
+Quando a resposta misturar as duas coisas, deixe claro qual é qual:
+"no registro consta X" é diferente de "na minha leitura, isso expõe o
+locador a Y".
+
+O QUE VOCÊ FAZ
+
+Lê o contrato e aponta o que está frágil, ambíguo ou nulo. Sugere a
+redação da cláusula quando ele pede, inteira e pronta para colar.
+Confere o texto contra os dados do pedido e contra o que o cliente
+escreveu. Responde o que já foi combinado, por quem e quando. Diz o
+que falta decidir antes de o documento sair.
+
+O QUE VOCÊ NÃO FAZ
+
+Não altera o documento: quem edita é ele, na tela ao lado. Você
+sugere, ele aplica. Não fala com o cliente. Não aprova nada.
 
 Nada de travessão, asterisco ou marcação. Texto corrido."""
 
@@ -218,20 +240,46 @@ def dossie(pedido_id: str) -> str:
     return "\n".join(partes)
 
 
-def perguntar(pedido_id: str, pergunta: str, quem: str = "") -> dict:
-    """O advogado pergunta, o registro responde."""
+def perguntar(pedido_id: str, pergunta: str, quem: str = "",
+              minuta_na_tela: str = "",
+              anteriores: list[dict] | None = None) -> dict:
+    """O advogado pergunta, o especialista responde.
+
+    `minuta_na_tela` é o texto que ele está editando AGORA, com as
+    alterações que ainda não foram salvas. Sem isso o especialista leria
+    a versão do banco e comentaria um parágrafo que já não existe, que é
+    o jeito mais rápido de perder a confiança de quem está trabalhando.
+
+    `anteriores` é a conversa até aqui. Perguntar "e a terceira?" só faz
+    sentido para quem lembra das duas primeiras."""
     pergunta = (pergunta or "").strip()
     if len(pergunta) < 3:
         raise ValueError("Escreva a pergunta.")
 
     material = dossie(pedido_id)
+    if (minuta_na_tela or "").strip():
+        material += ("\n\n=== O TEXTO QUE O ADVOGADO ESTÁ EDITANDO AGORA ===\n"
+                     "Esta é a versão da tela, com as alterações dele. Onde "
+                     "divergir do contrato acima, vale esta.\n"
+                     + minuta_na_tela[:30000])
+
+    # A conversa anterior entra como turnos de verdade, e não espremida
+    # dentro do pedido: é assim que o modelo entende quem disse o quê.
+    mensagens: list[dict] = []
+    for t in (anteriores or [])[-10:]:
+        if t.get("pergunta"):
+            mensagens.append({"role": "user", "content": t["pergunta"][:2000]})
+        if t.get("resposta"):
+            mensagens.append({"role": "assistant", "content": t["resposta"][:3000]})
+    mensagens.append({"role": "user", "content":
+                      f"MATERIAL DO PEDIDO (é tudo o que existe registrado):\n"
+                      f"{material}\n\n"
+                      f"=== PERGUNTA DO ADVOGADO ===\n{pergunta}"})
+
     s = get_settings()
     r = _claude().messages.create(
-        model=s.claude_model, max_tokens=1200, system=SYSTEM,
-        messages=[{"role": "user", "content":
-                   f"MATERIAL DO PEDIDO (é tudo o que existe registrado):\n"
-                   f"{material}\n\n"
-                   f"=== PERGUNTA DO ADVOGADO ===\n{pergunta}"}],
+        model=s.claude_model, max_tokens=1800, system=SYSTEM,
+        messages=mensagens,
     )
     texto = humanizar("".join(b.text for b in r.content
                               if b.type == "text").strip())
