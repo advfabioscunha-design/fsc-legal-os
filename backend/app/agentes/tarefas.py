@@ -35,6 +35,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from ..core.datas import antecipar_uteis, dias_ate, util
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 
 # Atos cuja perda encerra o caso. O peso alto não é exagero: é o que
 # faz a réplica de sexta aparecer antes do despacho de quarta.
@@ -301,7 +302,7 @@ def puxar_atrasadas(para: date | None = None) -> dict:
 
     movidas, falhas = 0, 0
     for t in atrasadas:
-        h = list(t.get("historico") or [])
+        h = _dados.como_lista(t.get("historico"))
         h.append({"em": datetime.utcnow().isoformat(), "o_que": "PUXADA_PARA_HOJE",
                   "quem": "agente", "de": t.get("data"), "para": hoje.isoformat()})
         try:
@@ -384,7 +385,7 @@ def concluir(tarefa_id: str, quem: str = "", nota: str = "") -> dict:
         .eq("id", tarefa_id).limit(1).execute().data
     if not achado:
         raise ValueError("Tarefa não encontrada.")
-    hist = (achado[0].get("historico") or [])
+    hist = _dados.como_lista(achado[0].get("historico"))
     hist.append({"em": _agora(), "quem": quem, "acao": "CONCLUIDA", "nota": nota})
     db.table("tarefas").update({
         "status": "FEITA", "concluida_em": _agora(), "historico": hist,
@@ -449,7 +450,7 @@ def reagendar(tarefa_id: str, nova_data: str, quem: str = "",
         .eq("id", tarefa_id).limit(1).execute().data
     if not achado:
         raise ValueError("Tarefa não encontrada.")
-    hist = (achado[0].get("historico") or [])
+    hist = _dados.como_lista(achado[0].get("historico"))
     hist.append({"em": _agora(), "quem": quem, "acao": "REAGENDADA",
                  "de": achado[0].get("data"), "para": nova_data, "motivo": motivo})
     db.table("tarefas").update({
@@ -469,7 +470,7 @@ def atribuir(tarefa_id: str, responsavel_id: str, quem: str = "") -> dict:
     if not achado:
         raise ValueError("Tarefa não encontrada.")
     t = achado[0]
-    hist = (t.get("historico") or [])
+    hist = _dados.como_lista(t.get("historico"))
     hist.append({"em": _agora(), "quem": quem, "acao": "ATRIBUIDA",
                  "para": responsavel_id})
     db.table("tarefas").update({

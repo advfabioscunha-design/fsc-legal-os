@@ -46,6 +46,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 
 # ── As colunas, na ordem em que aparecem na tela ────────────────
 COLUNAS = [
@@ -244,7 +245,7 @@ def recalcular(caso_id: str, respeitar_manual: bool = True) -> dict:
     pubs = db.table("intimacoes").select("conteudo,data_movimento,tipo,payload") \
         .eq("caso_id", caso_id).order("data_movimento").limit(200).execute().data
     publicacoes = [{"texto": p.get("conteudo"), "tipo": p.get("tipo"),
-                    "classe": (p.get("payload") or {}).get("classe"),
+                    "classe": _dados.como_dict(p.get("payload")).get("classe"),
                     "data": (p.get("data_movimento") or "")[:10]} for p in pubs]
 
     base, motivo = classificar(publicacoes)

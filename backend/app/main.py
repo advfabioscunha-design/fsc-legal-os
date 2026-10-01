@@ -1589,7 +1589,8 @@ def transcrever_atendimento(atendimento_id: str):
 
 
 @app.post("/api/v1/atendimentos/webhook")
-async def atendimento_webhook(request: Request, tarefas: BackgroundTasks):
+async def atendimento_webhook(request: Request,
+                              em_segundo_plano: BackgroundTasks):
     """Recebe do Daily o aviso de gravação pronta.
 
     Dois cuidados que o Daily impõe e que são fáceis de errar:
@@ -1633,7 +1634,7 @@ async def atendimento_webhook(request: Request, tarefas: BackgroundTasks):
     if not tipo:
         return {"ok": True, "verificacao": True}   # ping de validação do Daily
 
-    tarefas.add_task(atendimento.processar_webhook, payload)
+    em_segundo_plano.add_task(atendimento.processar_webhook, payload)
     return {"ok": True, "recebido": tipo}
 
 
@@ -5505,7 +5506,7 @@ def balcao_meus_pedidos(authorization: str | None = Header(default=None)):
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/documentos")
 async def balcao_enviar_documentos(
     pedido_id: str,
-    tarefas: BackgroundTasks,
+    em_segundo_plano: BackgroundTasks,
     arquivos: list[UploadFile] = File(...),
     rotulo: str | None = None,
     authorization: str | None = Header(default=None),
@@ -5560,7 +5561,7 @@ async def balcao_enviar_documentos(
         # causa disso. A resposta do upload sai na hora; a leitura
         # acontece logo atrás e escreve na conversa o que entendeu.
         from .agentes import atendente
-        tarefas.add_task(atendente.ler_e_encaminhar, pedido_id, salvos)
+        em_segundo_plano.add_task(atendente.ler_e_encaminhar, pedido_id, salvos)
 
     return {"salvos": len(salvos), "documentos": salvos, "falhas": falhas}
 

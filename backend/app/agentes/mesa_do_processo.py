@@ -52,6 +52,7 @@ from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.texto import humanizar
+from ..core import dados as _dados
 
 # As travas de aplicar texto são as mesmas do contrato, e é de propósito
 # que sejam o mesmo código: duas implementações de "procurar e
@@ -522,7 +523,7 @@ def consultas(peticao_id: str, limite: int = 50) -> list[dict]:
         return []
     saida = []
     for l in linhas:
-        pay = l.get("payload") or {}
+        pay = _dados.como_dict(l.get("payload"))
         if pay.get("peticao") != peticao_id:
             continue
         quem = (pay.get("quem") or "").strip()

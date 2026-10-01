@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { baixarComToken } from "../../../lib/baixar";
+import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -483,7 +484,7 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
                 <p className="text-[10px] font-bold text-white/45">
                   Consultou antes de responder
                 </p>
-                {c.pesquisou.map((p: any, k: number) => {
+                {comoLista(c.pesquisou).map((p: any, k: number) => {
                   const d = p.dados || {};
                   const onde = p.consulta === "consultar_julgados"
                     ? "banco de precedentes"
@@ -506,7 +507,7 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
                 <p className="text-[10px] font-bold text-[#E5A44C]">
                   Pergunta enviada ao cliente
                 </p>
-                {c.ao_cliente.map((q: any, k: number) => (
+                {comoLista(c.ao_cliente).map((q: any, k: number) => (
                   <p key={k} className="mt-1 text-[10px] leading-relaxed text-white/60">
                     · {q.assunto ? <b>{q.assunto}: </b> : null}{q.pergunta}
                   </p>
@@ -532,7 +533,7 @@ function Especialista({ id, texto: naTela, aoAlterar }: {
                     ? "1 alteração proposta, esperando você"
                     : `${c.propostas.length} alterações propostas, esperando você`}
                 </p>
-                {c.propostas.map((a: any, k: number) => {
+                {comoLista(c.propostas).map((a: any, k: number) => {
                   const feito = aplicadas.has(`${i}-${k}`);
                   return (
                     <div key={k} className="rounded border border-white/10 bg-[#0A1628] p-2">

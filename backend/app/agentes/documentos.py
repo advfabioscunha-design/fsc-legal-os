@@ -38,6 +38,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 from . import honorarios
 
 MODELOS_DIR = os.getenv(
@@ -538,7 +539,7 @@ def gerar_contrato(cli: dict, dados: dict):
     # 3) honorários (item 4) — a cláusula é escrita a partir do que está
     #    combinado no caso. Sem isso, o contrato sairia sempre com o 30% e os
     #    10 salários mínimos do modelo, independentemente do que foi ajustado.
-    _aplicar_honorarios(doc, dados.get("honorarios") or {})
+    _aplicar_honorarios(doc, _dados.como_dict(dados.get("honorarios")))
 
     # 4) tópico de comunicação — canais oficiais e uso do painel do cliente
     _inserir_comunicacao(doc)
@@ -858,7 +859,7 @@ def regravar(documento_id: str, alteracoes: dict) -> dict:
         "local_data": novo.get("local_data") or local_e_data(cli),
         "foro": novo.get("foro") or comarca_do_cliente(cli),
         "tipo_acao": novo.get("tipo_acao") or "AÇÃO CÍVEL",
-        "objeto": novo.get("objeto") or {},
+        "objeto": _dados.como_dict(novo.get("objeto")),
     }
     doc = GERADORES[d["tipo"]](cli, dados)
     buf = io.BytesIO()

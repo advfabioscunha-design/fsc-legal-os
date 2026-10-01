@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import PainelLayout from "../components/PainelLayout";
 import VisualizadorProtegido from "../components/VisualizadorProtegido";
 import { baixarComToken } from "../../lib/baixar";
+import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -327,7 +328,8 @@ function PainelDoPedido({ id, fechar, recarregar }:
   }
 
   const fase = p.fase;
-  const revisao = p.revisao || null;
+  const revisao = comoObjeto(p.revisao);
+  const temRevisao = Object.keys(revisao).length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={fechar}>
@@ -718,14 +720,16 @@ function PainelDoPedido({ id, fechar, recarregar }:
 
         {aba === "minuta" && (
           <div className="space-y-3">
-            {revisao && (
+            {temRevisao && (
               <Bloco titulo="O que a revisão apontou">
                 <p className="mb-2 text-[11px] leading-relaxed text-white/70">
-                  {revisao.parecer || ""}
+                  {comoTexto(revisao.parecer)}
                 </p>
-                {(revisao.apontamentos || []).map((a: any, i: number) => (
+                {comoLista(revisao.apontamentos).map((a: any, i: number) => (
                   <p key={i} className="text-[11px] text-white/55">
-                    · {typeof a === "string" ? a : a.diz || JSON.stringify(a)}
+                    · {typeof a === "string" ? a
+                       : comoTexto(comoObjeto(a).problema || comoObjeto(a).diz)
+                         || comoTexto(a)}
                   </p>
                 ))}
               </Bloco>
@@ -733,11 +737,13 @@ function PainelDoPedido({ id, fechar, recarregar }:
             {p.revisao_2 && (
               <Bloco titulo="O que a conferência apontou">
                 <p className="mb-2 text-[11px] leading-relaxed text-white/70">
-                  {p.revisao_2.parecer || ""}
+                  {comoTexto(comoObjeto(p.revisao_2).parecer)}
                 </p>
-                {(p.revisao_2.apontamentos || []).map((a: any, i: number) => (
+                {comoLista(comoObjeto(p.revisao_2).apontamentos).map((a: any, i: number) => (
                   <p key={i} className="text-[11px] text-white/55">
-                    · {typeof a === "string" ? a : `${a.clausula}: ${a.problema}`}
+                    · {typeof a === "string" ? a
+                       : `${comoTexto(comoObjeto(a).clausula)}: `
+                         + comoTexto(comoObjeto(a).problema)}
                   </p>
                 ))}
               </Bloco>

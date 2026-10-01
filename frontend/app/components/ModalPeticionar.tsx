@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
+import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://api.fscadvocaciadigital.com.br";
 
@@ -188,7 +189,8 @@ export default function ModalPeticionar({
             <p className="mt-1 text-white/80">{parecer?.motivo}</p>
             {!!parecer?.faltando?.length && (
               <ul className="mt-2 space-y-0.5 text-white/65">
-                {parecer.faltando.map((f, i) => <li key={i}>• {f}</li>)}
+                {comoLista(parecer.faltando).map((f: any, i: number) =>
+                  <li key={i}>• {comoTexto(f)}</li>)}
               </ul>
             )}
 

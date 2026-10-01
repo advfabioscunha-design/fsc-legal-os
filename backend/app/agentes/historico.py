@@ -38,6 +38,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from ..core.db import get_db
+from ..core import dados as _dados
 
 TRABALHO, CLIENTE, SISTEMA = "TRABALHO", "CLIENTE", "SISTEMA"
 
@@ -221,7 +222,7 @@ def linha_do_tempo(caso_id: str, natureza: str | None = None,
     for e in eventos:
         tipo = e.get("tipo") or ""
         nat, rotulo = EVENTOS.get(tipo, (SISTEMA, tipo.replace("_", " ").capitalize()))
-        p = e.get("payload") or {}
+        p = _dados.como_dict(e.get("payload"))
         itens.append({
             "em": _quando(e), "natureza": nat, "titulo": rotulo,
             "detalhe": _detalhe(tipo, p), "quem": _quem(p),

@@ -25,6 +25,7 @@ import fitz  # PyMuPDF
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 
 BUCKET = "jurisprudencia"
 GRUPOS_VALIDOS = ["BANCARIO", "IMOBILIARIO", "TRIBUTARIO", "CONSUMIDOR"]
@@ -105,7 +106,8 @@ def _aplicar(dados: dict, grupo: str, fonte: str) -> dict:
         t = db.table("teses").select("*").eq("id", dados["tese_relacionada_id"]) \
               .maybe_single().execute().data
         if t:
-            vistos = {(j.get("tipo"), j.get("numero")) for j in t["jurisprudencia"]}
+            vistos = {(j.get("tipo"), j.get("numero"))
+                      for j in _dados.lista_de_dicts(t.get("jurisprudencia"))}
             novos = [j for j in dados.get("jurisprudencia_citada", [])
                      if (j.get("tipo"), j.get("numero")) not in vistos]
             db.table("teses").update({

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ModalPeticionar from "./ModalPeticionar";
+import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 const GRUPOS = ["BANCARIO", "IMOBILIARIO", "TRABALHISTA", "PREVIDENCIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"];
@@ -1069,7 +1070,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                           Reavalie o pedido antes de protocolar.
                         </p>
                       )}
-                      {(pet.relatorio.avisos || []).map((av: string, i: number) => (
+                      {comoLista(comoObjeto(pet.relatorio).avisos).map((av: string, i: number) => (
                         <p key={i} className="mb-1 rounded bg-[#E5A44C]/15 px-2 py-1 text-[#E5A44C]">
                           ⚠ {av}. Rode de novo quando a cota renovar.
                         </p>
@@ -1081,11 +1082,12 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                         )}
                       </p>
                       <ul className="mt-1 space-y-1">
-                        {(pet.relatorio.detalhe || []).map((d: any, i: number) => (
+                        {comoLista(comoObjeto(pet.relatorio).detalhe).map((d: any, i: number) => (
                           <li key={i} className={d.usado ? "text-white/65" : "text-white/40"}>
                             {d.usado ? "✓" : "—"} <b>{d.tema}</b>
                             {d.usado ? (
-                              <span> · {(d.julgados || []).map((j: any) => `${j.tribunal} ${j.numero || ""}`.trim()).join("; ")}
+                              <span> · {comoLista(d.julgados).map((j: any) =>
+                                  `${comoTexto(comoObjeto(j).tribunal)} ${comoTexto(comoObjeto(j).numero)}`.trim()).join("; ")}
                                 {d.do_tribunal_do_protocolo && <span className="text-[#1DB954]"> (tribunal do protocolo)</span>}
                               </span>
                             ) : <span> · {d.motivo}</span>}
@@ -1377,7 +1379,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                             <div className="mb-2">
                               <p className="font-bold text-white/75">Fora do cadastro</p>
                               <ul className="mt-1 space-y-0.5">
-                                {(revisao.conferencia || []).filter((c: any) => !c.ok).map((c: any, i: number) => (
+                                {comoLista(revisao.conferencia).filter((c: any) => !c?.ok).map((c: any, i: number) => (
                                   <li key={i} className="text-white/70">
                                     • <b>{c.campo}</b>: {c.achado}
                                     {c.esperado && <span className="text-white/45"> — deveria constar “{c.esperado}”</span>}
@@ -1391,7 +1393,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                             <div className="mb-2">
                               <p className="font-bold text-white/75">Diferente do combinado na conversa</p>
                               <ul className="mt-1 space-y-1">
-                                {revisao.divergencias.map((d: any, i: number) => (
+                                {comoLista(revisao.divergencias).map((d: any, i: number) => (
                                   <li key={i} className="text-white/70">
                                     <span className={d.gravidade === "ALTA" ? "text-[#E57373]" : "text-white/50"}>
                                       [{d.gravidade}]
@@ -1408,7 +1410,7 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                             <div className="mb-2">
                               <p className="font-bold text-white/75">Risco para o escritório</p>
                               <ul className="mt-1 space-y-1">
-                                {revisao.riscos.map((d: any, i: number) => (
+                                {comoLista(revisao.riscos).map((d: any, i: number) => (
                                   <li key={i} className="text-white/70">
                                     <span className={d.gravidade === "ALTA" ? "text-[#E57373]" : "text-white/50"}>
                                       [{d.gravidade}]

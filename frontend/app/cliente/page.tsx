@@ -5,7 +5,11 @@ import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 import ContratoChat from "../components/ContratoChat";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "";
+// O endereço da API do escritório. O padrão existe para o caso de a
+// variável faltar no build: endereço de exemplo ou texto vazio faziam
+// a tela chamar um host que não existe, ou o próprio site, e o erro
+// aparecia como "falha de conexão" sem dizer por quê.
+const API = process.env.NEXT_PUBLIC_API_URL || "https://api.fscadvocaciadigital.com.br";
 
 // Esteira de trabalho visível ao cliente (mapeada para os estados do caso)
 const ESTEIRA = [

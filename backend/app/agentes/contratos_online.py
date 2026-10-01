@@ -47,6 +47,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 from . import catalogo_contratos as catalogo
 
 VERSAO_TERMO = "2026-09-v1"
@@ -536,7 +537,7 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
         contexto += ["", "PONTOS QUE O CLIENTE OPTOU POR MANTER APÓS ORIENTAÇÃO "
                      "(redija como pedido e inclua cláusula de ciência):"]
         for c in optou_manter:
-            for ponto in (c.get("pontos") or []):
+            for ponto in _dados.como_lista(c.get("pontos")):
                 contexto.append(f"- {ponto.get('o_que_a_lei_diz')}")
     if p.get("com_timbre") is False:
         contexto += ["", "O cliente pediu o documento SEM o timbre do escritório."]
@@ -549,7 +550,8 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
     # aprovou em tudo menos no ponto que pediu. Mudar o que ninguém
     # pediu é a forma mais rápida de perder a confiança de quem já
     # tinha lido e concordado.
-    pedidos_mudanca = [a for a in (p.get("pedidos_alteracao") or [])
+    pedidos_mudanca = [a for a in _dados.lista_de_dicts(
+                           p.get("pedidos_alteracao"), "texto")
                        if not a.get("atendido")]
     if pedidos_mudanca:
         contexto += ["", "=" * 60,
@@ -595,7 +597,8 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
     # porquê, o redator adapta o texto e desmonta a proteção sem saber
     # que ela estava ali.
     from . import modelos_contrato
-    base = modelos_contrato.modelo_do_pedido(p["tipo"], p.get("dados") or {})
+    base = modelos_contrato.modelo_do_pedido(
+        p["tipo"], _dados.como_dict(p.get("dados")))
     if base.get("tem"):
         contexto += [
             "", "=" * 60,
@@ -650,7 +653,8 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
     s = get_settings()
 
     from . import modelos_contrato
-    base = modelos_contrato.modelo_do_pedido(p["tipo"], p.get("dados") or {})
+    base = modelos_contrato.modelo_do_pedido(
+        p["tipo"], _dados.como_dict(p.get("dados")))
 
     partes = ["=" * 60,
               "O QUE É NULO POR LEI, E NÃO É QUESTÃO DE OPINIÃO. Encontrando "
@@ -689,9 +693,22 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
                    f"CONTRATO:\n{p['minuta'][:40000]}"}],
     )
     dados = {}
+    veio_resposta = False
     for bloco in r.content:
         if bloco.type == "tool_use" and bloco.name == "revisao":
-            dados = bloco.input or {}
+            veio_resposta = True
+            dados = _dados.como_dict(bloco.input)
+
+    # A FORMA CERTA ANTES DE GRAVAR, E NÃO DEPOIS
+    #
+    # O esquema pede lista de objetos, mas quem responde é um modelo, e
+    # de vez em quando ele manda a mesma coisa como texto. Gravar assim
+    # contamina o pedido: quem for ler depois quebra, e o erro aparece
+    # numa tela que não tem nada a ver com a revisão. Arrumar aqui é
+    # arrumar uma vez só, no lugar em que o dado nasce.
+    dados["apontamentos"] = _dados.lista_de_dicts(
+        dados.get("apontamentos"), "problema")
+    dados["parecer"] = _dados.texto_de(dados.get("parecer"))
 
     # Resposta cortada no limite não é resposta. Guardar o pedaço que
     # chegou seria pior do que não guardar nada: o pedido seguiria em
@@ -716,7 +733,10 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
     # Falhar é aceitável; avançar tendo falhado, não. O pedido fica
     # onde está, e quem clicou lê o motivo em vez de descobrir o
     # problema duas fases adiante.
-    if not dados:
+    # Olha se a FERRAMENTA foi usada, e não se o dicionário tem chave:
+    # depois da normalização acima ele sempre tem, e o teste antigo
+    # deixaria passar uma revisão que nunca aconteceu.
+    if not veio_resposta:
         registrar_evento(None, "CONTRATO_REVISAO_VAZIA", {"pedido": pedido_id})
         raise ValueError("A revisão não retornou apontamentos. O pedido "
                          "continua nesta fase; tente de novo em instantes.")
@@ -757,7 +777,17 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
     #
     # Agora o ajuste chama o revisor ele mesmo, com `auto` para não
     # mexer na fase, e segue com o que ele apontar.
-    if not p.get("revisao"):
+    # REVISÃO GUARDADA COM A FORMA ERRADA CONTA COMO REVISÃO QUE FALTA
+    #
+    # Não basta a coluna estar preenchida. Um pedido antigo pode ter
+    # guardado ali uma frase em vez do objeto com os apontamentos, e
+    # nesse caso o ajuste seguia em frente achando que não havia nada a
+    # corrigir: o contrato ia para a conferência do advogado SEM as
+    # correções, e ninguém era avisado. Pular etapa em silêncio é pior
+    # do que travar, porque o erro só aparece com o cliente.
+    if not _dados.lista_de_dicts(
+            _dados.como_dict(p.get("revisao")).get("apontamentos"), "problema") \
+            and not _dados.como_dict(p.get("revisao")).get("parecer"):
         try:
             revisar(pedido_id, auto=True)
         except Exception as e:
@@ -770,7 +800,15 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
             raise ValueError("A revisão não retornou apontamentos. Tente de "
                              "novo em instantes.")
 
-    apontamentos = (p["revisao"] or {}).get("apontamentos") or []
+    # A LISTA QUE AS VEZES NAO VEM COMO LISTA
+    #
+    # O esquema da ferramenta pede uma lista de objetos, e o modelo
+    # quase sempre entrega isso. Quando entrega texto, o `for` abaixo
+    # percorria letra por letra e estourava em `a.get(...)`: o
+    # operador clicava em aplicar os apontamentos e recebia um erro de
+    # servidor, com o pedido parado na fase.
+    apontamentos = _dados.lista_de_dicts(
+        _dados.como_dict(p.get("revisao")).get("apontamentos"), "problema")
     if not apontamentos:
         db.table("pedidos_contrato").update({
             "fase": "REVISAO_ADV", "atualizado_em": _agora()}).eq("id", pedido_id).execute()
@@ -778,9 +816,19 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
                 "aviso": "A revisão não apontou correções; segue para a conferência final."}
 
     s = get_settings()
-    lista = "\n".join(
-        f"- [{a.get('gravidade')}] {a.get('clausula')}: {a.get('problema')}\n"
-        f"  Sugestão: {a.get('sugestao')}" for a in apontamentos)
+    def _linha_do_apontamento(a: dict) -> str:
+        # Campo que não veio não entra como a palavra "None": o modelo lê
+        # isso como se fosse conteúdo, e devolve cláusula com "None"
+        # escrito dentro.
+        cabeca = " ".join(x for x in [
+            f"[{_dados.texto_de(a.get('gravidade'))}]" if a.get("gravidade") else "",
+            f"{_dados.texto_de(a.get('clausula'))}:" if a.get("clausula") else "",
+            _dados.texto_de(a.get("problema") or a.get("texto")),
+        ] if x)
+        sugestao = _dados.texto_de(a.get("sugestao"))
+        return f"- {cabeca}" + (f"\n  Sugestão: {sugestao}" if sugestao else "")
+
+    lista = "\n".join(_linha_do_apontamento(a) for a in apontamentos)
     r = _claude().messages.create(
         model=s.claude_model, max_tokens=8000, system=SYSTEM_REDATOR,
         messages=[{"role": "user", "content":
@@ -926,7 +974,8 @@ def _ja_perguntado(pedido: dict, pontos: list[dict]) -> bool:
 
     O ajuste roda de novo a cada resposta do cliente, e sem isto a
     segunda passada repetiria a pergunta que ele acabou de responder."""
-    decididos = {d.get("chave") for d in (pedido.get("decisoes") or [])}
+    decididos = {d.get("chave")
+                 for d in _dados.lista_de_dicts(pedido.get("decisoes"), "chave")}
     return all(_chave_do_ponto(a) in decididos for a in pontos)
 
 
@@ -983,7 +1032,7 @@ def registrar_decisao(pedido_id: str, chave: str, escolha: str,
         raise ValueError("A escolha precisa ser MANTER ou ADEQUAR.")
 
     pendentes = list(p.get("decisoes_pendentes") or [])
-    decisoes = list(p.get("decisoes") or [])
+    decisoes = _dados.lista_de_dicts(p.get("decisoes"), "chave")
     achou = None
     for item in pendentes:
         if item.get("chave") == chave:
@@ -1043,8 +1092,9 @@ def revisar_segunda(pedido_id: str, auto: bool = False) -> dict:
     if not (p.get("minuta") or "").strip():
         raise ValueError("Não há minuta para conferir.")
 
-    anteriores = (p.get("revisao") or {}).get("apontamentos") or []
-    decisoes = p.get("decisoes") or []
+    anteriores = _dados.lista_de_dicts(
+        _dados.como_dict(p.get("revisao")).get("apontamentos"), "problema")
+    decisoes = _dados.lista_de_dicts(p.get("decisoes"), "chave")
     s = get_settings()
 
     contexto = [
@@ -1071,10 +1121,23 @@ def revisar_segunda(pedido_id: str, auto: bool = False) -> dict:
     if getattr(r, "stop_reason", "") == "max_tokens":
         raise ValueError("A conferência veio cortada. Tente de novo.")
     dados = {}
+    veio_resposta = False
     for bloco in r.content:
         if bloco.type == "tool_use" and bloco.name == "revisao":
-            dados = bloco.input or {}
-    if not dados:
+            veio_resposta = True
+            dados = _dados.como_dict(bloco.input)
+
+    # A FORMA CERTA ANTES DE GRAVAR, E NÃO DEPOIS
+    #
+    # O esquema pede lista de objetos, mas quem responde é um modelo, e
+    # de vez em quando ele manda a mesma coisa como texto. Gravar assim
+    # contamina o pedido: quem for ler depois quebra, e o erro aparece
+    # numa tela que não tem nada a ver com a revisão. Arrumar aqui é
+    # arrumar uma vez só, no lugar em que o dado nasce.
+    dados["apontamentos"] = _dados.lista_de_dicts(
+        dados.get("apontamentos"), "problema")
+    dados["parecer"] = _dados.texto_de(dados.get("parecer"))
+    if not veio_resposta:
         raise ValueError("A conferência não retornou resultado. Tente de novo.")
 
     campos = {"revisao_2": dados, "revisado_2_em": _agora(),
@@ -1151,8 +1214,9 @@ def devolver_para_ajuste(pedido_id: str, motivo: str, quem: str = "") -> dict:
         raise ValueError("Escreva o que precisa ser corrigido.")
     p = _pedido(pedido_id)
 
-    revisao = dict(p.get("revisao") or {})
-    apontamentos = list(revisao.get("apontamentos") or [])
+    revisao = _dados.como_dict(p.get("revisao"))
+    apontamentos = _dados.lista_de_dicts(
+        revisao.get("apontamentos"), "problema")
     apontamentos.append({
         "clausula": "Apontado pelo advogado na conferência final",
         "gravidade": "ALTA", "problema": motivo[:2000],
@@ -1256,7 +1320,7 @@ def pedir_alteracao(pedido_id: str, texto: str) -> dict:
         .select("pedidos_alteracao,minuta,urgente") \
         .eq("id", pedido_id).limit(1).execute().data
     p = achado[0] if achado else {}
-    anteriores = (p.get("pedidos_alteracao") or [])
+    anteriores = _dados.lista_de_dicts(p.get("pedidos_alteracao"), "texto")
     anteriores.append({"em": _agora(), "texto": texto, "atendido": False})
 
     db.table("pedidos_contrato").update({
@@ -2556,7 +2620,7 @@ def pendencias_do_pedido(pedido_id: str) -> dict:
         raise ValueError("Pedido não encontrado.")
     p = r[0]
     t = catalogo.detalhe(p["tipo"]) or {}
-    dados = p.get("dados") or {}
+    dados = _dados.como_dict(p.get("dados"))
 
     itens: list[dict] = []
 
@@ -2915,7 +2979,7 @@ def complementar_com_a_resposta(pedido_id: str, texto: str) -> dict:
     db = get_db()
     atual = db.table("pedidos_contrato").select("dados,partes") \
         .eq("id", pedido_id).limit(1).execute().data[0]
-    dados = dict(atual.get("dados") or {})
+    dados = _dados.como_dict(atual.get("dados"))
     partes = list(atual.get("partes") or [])
     por_papel = {p.get("papel"): p for p in partes}
 

@@ -36,6 +36,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from ..core.db import get_db, registrar_evento
 from ..core.config import get_settings
+from ..core import dados as _dados
 
 TIPOS = ["TAREFA", "EVENTO", "AUDIENCIA", "PERICIA", "ATENDIMENTO",
          "REUNIAO", "PRAZO"]
@@ -65,7 +66,7 @@ def _uid(item_id: str) -> str:
 
 def _anotar(item: dict, o_que: str, quem: str | None = None,
             extra: dict | None = None) -> list:
-    h = list(item.get("historico") or [])
+    h = _dados.como_lista(item.get("historico"))
     h.append({"em": _agora(), "o_que": o_que, "quem": quem or "sistema",
               **(extra or {})})
     return h[-60:]

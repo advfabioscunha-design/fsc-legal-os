@@ -26,6 +26,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 
 # Janela e teto do limite de tentativas. Números baixos de propósito:
 # quem esqueceu a senha tenta uma vez, quem está varrendo tenta cem.
@@ -53,9 +54,9 @@ def dentro_do_limite(email: str, ip: str | None) -> bool:
     except Exception:
         return True          # falha no contador não pode travar quem precisa
     por_email = sum(1 for e in recentes
-                    if (e.get("payload") or {}).get("email") == email)
+                    if _dados.como_dict(e.get("payload")).get("email") == email)
     por_ip = sum(1 for e in recentes
-                 if ip and (e.get("payload") or {}).get("ip") == ip)
+                 if ip and _dados.como_dict(e.get("payload")).get("ip") == ip)
     return por_email < MAX_POR_EMAIL and por_ip < MAX_POR_IP
 
 

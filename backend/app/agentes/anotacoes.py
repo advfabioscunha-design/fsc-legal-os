@@ -23,6 +23,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 
 
 def _agora() -> str:
@@ -98,7 +99,7 @@ def resolver(anotacao_id: str, resultado: str = "", quem: str = "") -> dict:
     if not achado:
         raise ValueError("Pendência não encontrada.")
     a = achado[0]
-    hist = (a.get("historico") or [])
+    hist = _dados.como_lista(a.get("historico"))
     hist.append({"em": _agora(), "quem": quem, "acao": "RESOLVIDA",
                  "resultado": resultado})
     db.table("anotacoes").update({
@@ -129,7 +130,7 @@ def reagendar(anotacao_id: str, nova_data: str, motivo: str = "",
         .eq("id", anotacao_id).limit(1).execute().data
     if not achado:
         raise ValueError("Pendência não encontrada.")
-    hist = (achado[0].get("historico") or [])
+    hist = _dados.como_lista(achado[0].get("historico"))
     hist.append({"em": _agora(), "quem": quem, "acao": "REAGENDADA",
                  "de": achado[0].get("data_resolver"), "para": nova_data,
                  "motivo": motivo})
@@ -153,7 +154,7 @@ def cancelar(anotacao_id: str, motivo: str = "", quem: str = "") -> dict:
         .eq("id", anotacao_id).limit(1).execute().data
     if not achado:
         raise ValueError("Pendência não encontrada.")
-    hist = (achado[0].get("historico") or [])
+    hist = _dados.como_lista(achado[0].get("historico"))
     hist.append({"em": _agora(), "quem": quem, "acao": "CANCELADA",
                  "motivo": motivo})
     db.table("anotacoes").update({

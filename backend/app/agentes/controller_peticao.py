@@ -35,6 +35,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import dados as _dados
 
 # tipos que entram pela Regra A
 INICIAIS = {"INICIAL", "PETICAO_INICIAL", "INICIAL_CUMULATIVA"}
@@ -112,7 +113,7 @@ def _parecer(system: str, conteudo: str) -> dict:
             d = bloco.input or {}
             return {"aprovado": bool(d.get("aprovado")),
                     "motivo": d.get("motivo") or "",
-                    "faltando": d.get("faltando") or [],
+                    "faltando": _dados.como_lista(d.get("faltando")),
                     "gravidade": d.get("gravidade") or "ATENCAO"}
     # a trava falhando não pode liberar por omissão
     return {"aprovado": False, "faltando": [],
@@ -340,7 +341,7 @@ def validar(caso_id: str, tipo_peticao: str, usuario_email: str = "") -> dict:
         get_db().table("validacoes_peticionamento").insert({
             "caso_id": caso_id, "tipo_peticao": tipo, "regra": r.get("regra"),
             "aprovado": r["aprovado"], "motivo": r.get("motivo"),
-            "faltando": r.get("faltando") or [],
+            "faltando": _dados.como_lista(r.get("faltando")),
             "usuario_email": usuario_email or None,
         }).execute()
     except Exception:

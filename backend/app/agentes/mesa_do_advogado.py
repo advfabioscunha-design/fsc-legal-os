@@ -54,6 +54,7 @@ from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.texto import humanizar
+from ..core import dados as _dados
 from . import consultas as _consultas
 
 SYSTEM = """Você é advogado sênior da FC Advocacia, especialista na
@@ -342,7 +343,7 @@ def dossie(pedido_id: str) -> str:
         _linha("Segunda revisão em", p.get("revisado_2_em")),
     ] if x]
 
-    if p.get("dados"):
+    if _dados.como_dict(p.get("dados")):
         partes += ["", "=== O QUE O CLIENTE INFORMOU NA COLETA ===",
                    json.dumps(p["dados"], ensure_ascii=False, indent=1)]
     if (p.get("observacoes") or "").strip():
@@ -352,7 +353,7 @@ def dossie(pedido_id: str) -> str:
         partes += ["", "=== CLÁUSULA PEDIDA PELO CLIENTE ===",
                    p["clausulas_extras"][:4000]]
 
-    rev = p.get("revisao") or {}
+    rev = _dados.como_dict(p.get("revisao"))
     if rev:
         partes += ["", "=== PRIMEIRA REVISÃO ===",
                    _linha("Parecer", rev.get("parecer"))]
@@ -366,7 +367,7 @@ def dossie(pedido_id: str) -> str:
             else:
                 partes.append(f"- {a}")
 
-    rev2 = p.get("revisao_2") or {}
+    rev2 = _dados.como_dict(p.get("revisao_2"))
     if rev2:
         partes += ["", "=== SEGUNDA REVISÃO, DEPOIS DO AJUSTE ===",
                    _linha("Parecer", rev2.get("parecer"))]
@@ -374,7 +375,7 @@ def dossie(pedido_id: str) -> str:
             partes.append(f"- {a.get('clausula')}: {a.get('problema')}"
                           if isinstance(a, dict) else f"- {a}")
 
-    for a in (p.get("decisoes") or []):
+    for a in _dados.lista_de_dicts(p.get("decisoes"), "chave"):
         partes.append(f"DECISÃO DO CLIENTE: {a.get('ponto')} -> "
                       f"{a.get('escolha')} em {a.get('em')}")
     for d in (p.get("duvidas_advogado") or []):
@@ -618,7 +619,7 @@ def consultas(pedido_id: str, limite: int = 50) -> list[dict]:
         return []
     saida = []
     for l in linhas:
-        pay = l.get("payload") or {}
+        pay = _dados.como_dict(l.get("payload"))
         if pay.get("pedido") != pedido_id:
             continue
         alt = pay.get("propostas") or pay.get("alteracoes")
