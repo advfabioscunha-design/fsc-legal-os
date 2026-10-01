@@ -564,5 +564,28 @@ def salvar_texto(peticao_id: str, texto: str, quem: str = "") -> dict:
               "editada_por": quem or "advogado", "atualizado_em": _agora()}
     if anterior and anterior != texto:
         campos["markdown_anterior"] = anterior
-    db.table("peticoes").update(campos).eq("id", peticao_id).execute()
-    return {"ok": True, "caracteres": len(texto)}
+
+    # O TEXTO DO ADVOGADO NÃO SE PERDE POR CAUSA DE UMA COLUNA
+    #
+    # As colunas de autoria e de versão anterior nascem na migração 0056.
+    # Enquanto ela não roda, a gravação inteira falhava, e o advogado
+    # perdia a correção que acabou de escrever ao fechar a aba. Isso é
+    # inaceitável: a peça é o trabalho, o resto é registro.
+    #
+    # Então tenta com tudo e, faltando a migração, grava SÓ o texto, que
+    # é o que não pode se perder, e avisa o que ficou de fora.
+    try:
+        db.table("peticoes").update(campos).eq("id", peticao_id).execute()
+        return {"ok": True, "caracteres": len(texto)}
+    except Exception as e:
+        from ..core.esquema import falta_migracao
+        aviso = falta_migracao(e)
+        if not aviso:
+            raise
+        db.table("peticoes").update(
+            {"markdown_final": texto, "atualizado_em": _agora()}
+        ).eq("id", peticao_id).execute()
+        return {"ok": True, "caracteres": len(texto),
+                "aviso": aviso + " O texto foi salvo; o que ficou de fora "
+                                 "foi só o registro de quem editou e a "
+                                 "versão anterior."}

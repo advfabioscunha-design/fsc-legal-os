@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from .core.config import get_settings
 from .core.db import get_db
+from .core import esquema
 from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
 from .integracoes import asaas, zapsign, whatsapp, avisos, email_entrada
@@ -5104,28 +5105,53 @@ def clientes_listar(busca: str = "", mes_aniversario: int = 0,
     que alguém reclama de não ter recebido parabéns."""
     _perfil_do_token(authorization)
     db = get_db()
-    campos = ("id,nome,cpf_cnpj,email,whatsapp,data_nascimento,origem,"
-              "aceita_felicitacoes,aceita_informativos,descadastrado_em,"
-              "relacionamento_nota,criado_em")
-    q = db.table("clientes").select(campos, count="exact")
 
+    # A TELA ABRE ANTES DA MIGRAÇÃO, E ISSO É DE PROPÓSITO
+    #
+    # As colunas de relacionamento nascem na migração 0060. Enquanto ela
+    # não roda, pedi-las ao banco devolve erro e a tela inteira fica
+    # vazia com um "deu erro no servidor" que não explica nada — e quem
+    # está olhando não tem como saber que o problema é uma migração.
+    #
+    # Então a consulta tenta com os campos novos e, falhando, repete com
+    # os antigos e avisa o que falta. Lista sem as caixinhas de
+    # felicitação é útil; tela em branco não é.
+    base = "id,nome,cpf_cnpj,email,whatsapp,data_nascimento,origem,criado_em"
+    novos = ("aceita_felicitacoes,aceita_informativos,descadastrado_em,"
+             "relacionamento_nota")
+    tamanho = max(min(por_pagina, 200), 1)
+    inicio = max(pagina, 0) * tamanho
     termo = (busca or "").strip()
-    if termo:
-        so_digitos = "".join(c for c in termo if c.isdigit())
-        alvos = [f"nome.ilike.%{termo}%", f"email.ilike.%{termo}%"]
-        if len(so_digitos) >= 4:
-            alvos += [f"cpf_cnpj.ilike.%{so_digitos}%",
-                      f"whatsapp.ilike.%{so_digitos}%"]
-        q = q.or_(",".join(alvos))
 
-    if sem_nascimento:
-        q = q.is_("data_nascimento", "null")
-    if descadastrados:
-        q = q.not_.is_("descadastrado_em", "null")
+    def _consultar(campos: str, com_novos: bool):
+        q = db.table("clientes").select(campos, count="exact")
+        if termo:
+            so_digitos = "".join(c for c in termo if c.isdigit())
+            alvos = [f"nome.ilike.%{termo}%", f"email.ilike.%{termo}%"]
+            if len(so_digitos) >= 4:
+                alvos += [f"cpf_cnpj.ilike.%{so_digitos}%",
+                          f"whatsapp.ilike.%{so_digitos}%"]
+            q = q.or_(",".join(alvos))
+        if sem_nascimento:
+            q = q.is_("data_nascimento", "null")
+        if descadastrados and com_novos:
+            q = q.not_.is_("descadastrado_em", "null")
+        return q.order("nome").range(inicio, inicio + tamanho - 1).execute()
 
-    inicio = max(pagina, 0) * max(min(por_pagina, 200), 1)
-    r = q.order("nome").range(inicio, inicio + max(min(por_pagina, 200), 1) - 1) \
-         .execute()
+    falta_migracao = None
+    try:
+        r = _consultar(base + "," + novos, True)
+    except Exception as e:
+        print(f"[clientes] campos de relacionamento ausentes: {e}")
+        falta_migracao = ("A migração 0060 ainda não foi aplicada no banco. "
+                          "A lista aparece, mas sem os controles de "
+                          "felicitação e informativos.")
+        try:
+            r = _consultar(base, False)
+        except Exception as e2:
+            raise HTTPException(
+                500, f"Não consegui ler a base de clientes: {e2}")
+
     linhas = r.data or []
 
     # O mês do aniversário é filtrado aqui, e não no banco: a coluna é
@@ -5138,7 +5164,7 @@ def clientes_listar(busca: str = "", mes_aniversario: int = 0,
                   == f"{int(mes_aniversario):02d}"]
 
     return {"clientes": linhas, "total": getattr(r, "count", None),
-            "pagina": pagina}
+            "pagina": pagina, "aviso": falta_migracao}
 
 
 class ClienteNovo(BaseModel):
@@ -5191,7 +5217,28 @@ def clientes_criar(body: ClienteNovo,
              "relacionamento_nota": (body.relacionamento_nota or "").strip() or None,
              "origem_consentimento": f"cadastrado por {quem.get('email') or 'equipe'}",
              "consentimento_em": datetime.now(_tz.utc).isoformat()}
-    criado = db.table("clientes").insert(linha).execute().data
+    try:
+        criado = db.table("clientes").insert(linha).execute().data
+    except Exception as e:
+        aviso = esquema.falta_migracao(e)
+        if not aviso:
+            raise HTTPException(500, esquema.erro_amigavel(e, "cadastrar"))
+        # CADASTRAR É MAIS IMPORTANTE QUE REGISTRAR O CONSENTIMENTO
+        #
+        # Os campos de relacionamento nascem na 0060. Sem ela, o cadastro
+        # inteiro falhava por causa de duas colunas de registro, e o
+        # escritório não conseguia cadastrar cliente nenhum pela tela.
+        # Agora o cliente entra, e o que fica para depois é o selo de
+        # consentimento, que a varredura preenche quando a migração rodar.
+        for k in ("relacionamento_nota", "origem_consentimento",
+                  "consentimento_em"):
+            linha.pop(k, None)
+        criado = db.table("clientes").insert(linha).execute().data
+        registrar_evento(None, "CLIENTE_CADASTRADO_NA_BASE",
+                         {"nome": nome, "por": quem.get("email"),
+                          "sem_relacionamento": True})
+        return {"ok": True, "cliente": (criado or [{}])[0], "aviso": aviso}
+
     registrar_evento(None, "CLIENTE_CADASTRADO_NA_BASE",
                      {"nome": nome, "por": quem.get("email")})
     return {"ok": True, "cliente": (criado or [{}])[0]}
@@ -5230,7 +5277,13 @@ def relacionamento_aniversariantes(
     mensagem sair, e não depois."""
     _perfil_do_token(authorization)
     from .agentes import relacionamento
-    return {"aniversariantes": relacionamento.aniversariantes_de_hoje()}
+    try:
+        return {"aniversariantes": relacionamento.aniversariantes_de_hoje()}
+    except Exception as e:
+        # Mesma razão da lista: sem a migração, esta consulta falha, e
+        # falhar aqui derrubava o carregamento da tela inteira.
+        print(f"[aniversariantes] não consegui montar: {e}")
+        return {"aniversariantes": [], "aviso": str(e)[:200]}
 
 
 class MudarRelacionamento(BaseModel):
@@ -5248,7 +5301,11 @@ def cliente_relacionamento(cliente_id: str, body: MudarRelacionamento,
     _perfil_do_token(authorization)
     from .agentes import relacionamento
     if body.descadastrar:
-        return relacionamento.descadastrar(cliente_id, body.motivo)
+        try:
+            return relacionamento.descadastrar(cliente_id, body.motivo)
+        except Exception as e:
+            raise HTTPException(503, esquema.erro_amigavel(
+                e, "registrar o descadastro"))
 
     campos: dict = {"atualizado_em": datetime.now(_tz.utc).isoformat()}
     if body.aceita_felicitacoes is not None:
@@ -5267,7 +5324,11 @@ def cliente_relacionamento(cliente_id: str, body: MudarRelacionamento,
         campos["descadastrado_em"] = None
         campos["descadastro_motivo"] = None
 
-    get_db().table("clientes").update(campos).eq("id", cliente_id).execute()
+    try:
+        get_db().table("clientes").update(campos).eq("id", cliente_id).execute()
+    except Exception as e:
+        raise HTTPException(503, esquema.erro_amigavel(
+            e, "mudar o relacionamento deste cliente"))
     return {"ok": True}
 
 
@@ -5289,13 +5350,20 @@ def contatos_whatsapp_listar(caso_id: str | None = None,
                              cliente_id: str | None = None,
                              authorization: str | None = Header(default=None)):
     _perfil_do_token(authorization)
-    q = get_db().table("contatos_whatsapp").select("*")
-    if caso_id:
-        q = q.eq("caso_id", caso_id)
-    if cliente_id:
-        q = q.eq("cliente_id", cliente_id)
-    return {"contatos": q.order("criado_em", desc=True).limit(50)
-            .execute().data or []}
+    try:
+        q = get_db().table("contatos_whatsapp").select("*")
+        if caso_id:
+            q = q.eq("caso_id", caso_id)
+        if cliente_id:
+            q = q.eq("cliente_id", cliente_id)
+        return {"contatos": q.order("criado_em", desc=True).limit(50)
+                .execute().data or []}
+    except Exception as e:
+        # Lista vazia com aviso em vez de 500: o bloco aparece dentro da
+        # ficha do caso, e um 500 ali faz parecer que a ficha quebrou.
+        print(f"[contatos] não listados: {e}")
+        return {"contatos": [], "aviso": esquema.erro_amigavel(
+            e, "ler a agenda de contatos")}
 
 
 @app.post("/api/v1/contatos-whatsapp")
@@ -5319,8 +5387,11 @@ def contatos_whatsapp_salvar(body: ContatoSalvo,
              "observacao": (body.observacao or "").strip() or None,
              "criado_por": quem.get("email") or quem.get("papel") or "",
              "atualizado_em": datetime.now(_tz.utc).isoformat()}
-    get_db().table("contatos_whatsapp").upsert(
-        linha, on_conflict="numero").execute()
+    try:
+        get_db().table("contatos_whatsapp").upsert(
+            linha, on_conflict="numero").execute()
+    except Exception as e:
+        raise HTTPException(503, esquema.erro_amigavel(e, "salvar o contato"))
     registrar_evento(body.caso_id, "CONTATO_WHATSAPP_SALVO",
                      {"numero": numero[-4:], "caso": body.caso_id})
     return {"ok": True, "numero": numero}
@@ -5331,8 +5402,11 @@ def contatos_whatsapp_apagar(numero: str,
                              authorization: str | None = Header(default=None)):
     _perfil_do_token(authorization)
     so_digitos = "".join(c for c in numero if c.isdigit())
-    get_db().table("contatos_whatsapp").delete() \
-        .eq("numero", so_digitos).execute()
+    try:
+        get_db().table("contatos_whatsapp").delete() \
+            .eq("numero", so_digitos).execute()
+    except Exception as e:
+        raise HTTPException(503, esquema.erro_amigavel(e, "remover o contato"))
     return {"ok": True}
 
 

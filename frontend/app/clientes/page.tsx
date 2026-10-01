@@ -30,6 +30,7 @@ export default function Clientes() {
   const [pagina, setPagina] = useState(0);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
 
   const [hoje, setHoje] = useState<any[]>([]);
   const [novo, setNovo] = useState<any>(null);
@@ -45,8 +46,20 @@ export default function Clientes() {
       });
       const r = await fetch(`${API}/api/v1/clientes?${q}`);
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) setErro(j?.detail || "Não consegui carregar a base.");
-      else { setLista(comoLista(j?.clientes)); setTotal(j?.total ?? null); }
+      if (!r.ok) {
+        // O DETALHE TÉCNICO VAI PARA A TELA
+        //
+        // "Deu erro no servidor" não diz a quem está olhando se o
+        // problema é uma migração que falta, uma permissão ou a rede.
+        // O servidor manda o detalhe para quem é da equipe; esconder
+        // isso só obriga a abrir o log para descobrir o óbvio.
+        setErro([j?.detail || "Não consegui carregar a base.", j?.tecnico]
+          .filter(Boolean).join("  —  "));
+      } else {
+        setLista(comoLista(j?.clientes));
+        setTotal(j?.total ?? null);
+        setAviso(comoTexto(j?.aviso));
+      }
     } catch { setErro("Falha de conexão."); }
     setCarregando(false);
   }, [busca, pagina, mes, semNascimento, descadastrados]);
@@ -149,7 +162,15 @@ export default function Clientes() {
         )}
 
         {erro && (
-          <p className="rounded-lg bg-[#E57373]/10 px-3 py-2 text-[12px] text-[#E57373]">{erro}</p>
+          <p className="rounded-lg bg-[#E57373]/10 px-3 py-2 text-[12px] leading-relaxed text-[#E57373]">
+            {erro}
+          </p>
+        )}
+
+        {aviso && (
+          <p className="rounded-lg border border-[#E5A44C]/30 bg-[#E5A44C]/5 px-3 py-2 text-[12px] leading-relaxed text-[#E5A44C]">
+            {aviso}
+          </p>
         )}
 
         {carregando ? (

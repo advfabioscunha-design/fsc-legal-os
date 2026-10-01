@@ -91,9 +91,20 @@ def convite(codigo: str) -> dict:
     codigo = (codigo or "").strip().upper()
     if len(codigo) < 6:
         return {"valido": False, "motivo": "Código inválido."}
-    r = get_db().table("clientes") \
-        .select("id,nome,auth_user_id,codigo_usado_em") \
-        .eq("codigo_acesso", codigo).limit(1).execute().data
+    try:
+        r = get_db().table("clientes") \
+            .select("id,nome,auth_user_id,codigo_usado_em") \
+            .eq("codigo_acesso", codigo).limit(1).execute().data
+    except Exception as e:
+        # Sem a migração 0058 a página do convite dava erro 500 na cara
+        # do CLIENTE, que não tem o que fazer com isso. Agora ela explica
+        # e manda falar com o escritório.
+        from ..core.esquema import falta_migracao
+        print(f"[acesso] convite não conferido: {e}")
+        return {"valido": False, "motivo":
+                (falta_migracao(e) or
+                 "Não consegui conferir o convite agora. Fale com o "
+                 "escritório pelo WhatsApp.")}
     if not r:
         return {"valido": False, "motivo":
                 "Este convite não existe mais. Peça um novo pelo WhatsApp."}
@@ -121,8 +132,14 @@ def vincular(codigo: str, auth_user_id: str, email: str) -> dict:
         raise ValueError("Convite ou login ausente.")
 
     db = get_db()
-    r = db.table("clientes").select("id,nome,email,auth_user_id,codigo_usado_em") \
-        .eq("codigo_acesso", codigo).limit(1).execute().data
+    try:
+        r = db.table("clientes") \
+            .select("id,nome,email,auth_user_id,codigo_usado_em") \
+            .eq("codigo_acesso", codigo).limit(1).execute().data
+    except Exception as e:
+        from ..core.esquema import falta_migracao
+        raise ValueError(falta_migracao(e)
+                         or f"Não consegui conferir o convite: {e}")
     if not r:
         raise ValueError("Este convite não existe mais. Peça um novo pelo "
                          "WhatsApp.")
@@ -140,7 +157,12 @@ def vincular(codigo: str, auth_user_id: str, email: str) -> dict:
     if email and not (c.get("email") or "").strip():
         campos["email"] = email.strip().lower()
 
-    db.table("clientes").update(campos).eq("id", c["id"]).execute()
+    try:
+        db.table("clientes").update(campos).eq("id", c["id"]).execute()
+    except Exception as e:
+        from ..core.esquema import falta_migracao
+        raise ValueError(falta_migracao(e)
+                         or f"Não consegui ligar o seu acesso ao cadastro: {e}")
     try:
         db.table("perfis").update({"cliente_id": c["id"]}) \
           .eq("id", auth_user_id).execute()
