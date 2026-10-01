@@ -33,14 +33,22 @@ _ORIGENS = [o.strip() for o in
     "https://fscadvocaciadigital.com.br",
     "http://localhost:3000",
 ]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_ORIGENS,
-    allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
-)
-
-
+# A ORDEM AQUI É O QUE FAZ A TELA SABER O MOTIVO
+#
+# O Starlette aplica os middlewares na ordem inversa do cadastro: o
+# último registrado é o mais externo. Com o CORS cadastrado primeiro, o
+# porteiro ficava por fora dele, e toda recusa (401 de sessão vencida,
+# 403 de área da equipe, 503 de banco fora do ar) voltava ao navegador
+# SEM os cabeçalhos de CORS.
+#
+# O efeito disso não é cosmético. O navegador que recebe resposta sem
+# CORS não entrega o corpo nem o código ao JavaScript: entrega um erro
+# de rede. A tela então dizia "Falha de conexão" para uma sessão
+# vencida, e a pessoa ficava clicando num botão que nunca ia funcionar,
+# procurando defeito na internet, quando bastava entrar de novo.
+#
+# O CORS é cadastrado DEPOIS do porteiro para ficar por fora dele. A
+# recusa continua sendo recusa, e agora chega legível.
 @app.middleware("http")
 async def _porteiro(request: Request, call_next):
     """Ninguém entra sem dizer quem é, salvo a lista curta de rotas
@@ -49,7 +57,7 @@ async def _porteiro(request: Request, call_next):
     Fica aqui, e não rota por rota, porque rota nova precisa nascer
     fechada. Marcar uma a uma faria a próxima nascer aberta, e a que
     alguém esquecesse ficaria aberta para sempre."""
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse  # usado também no 500 abaixo
     from .core import seguranca
     try:
         usuario = seguranca.checar(request)
@@ -60,7 +68,33 @@ async def _porteiro(request: Request, call_next):
         return JSONResponse({"detail": "Não foi possível validar o acesso."},
                             status_code=503)
     request.state.usuario = usuario
-    return await call_next(request)
+
+    # Erro não previsto também precisa chegar legível. Sem isto, a
+    # exceção sobe até o tratador padrão, que responde por fora do CORS,
+    # e a tela recebe "Falha de conexão" para um defeito do servidor.
+    # Quem clicou fica sem saber se o problema é dele ou nosso. O texto
+    # do erro vai para o log; para a tela vai o aviso de que falhou aqui
+    # dentro, que é o que a pessoa precisa saber para parar de tentar.
+    try:
+        return await call_next(request)
+    except Exception as e:
+        print(f"[erro] {request.method} {request.url.path}: {e!r}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            {"detail": "Deu erro aqui no servidor ao executar esta ação. "
+                       "O escritório já tem o registro do que houve."},
+            status_code=500)
+
+
+# Registrado depois do porteiro, de propósito: assim fica por fora dele
+# e põe os cabeçalhos de CORS também nas respostas de recusa.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ORIGENS,
+    allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
+)
 
 
 @app.on_event("startup")

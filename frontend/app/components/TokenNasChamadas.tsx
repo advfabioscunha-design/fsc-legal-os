@@ -61,7 +61,26 @@ export default function TokenNasChamadas() {
         if (!headers.has("Authorization")) {
           headers.set("Authorization", `Bearer ${token}`);
         }
-        return original(entrada, { ...(init || {}), headers });
+        const resposta = await original(entrada, { ...(init || {}), headers });
+
+        /* SESSÃO VENCIDA TEM DE DIZER QUE VENCEU
+         *
+         * Mandamos um token e a API respondeu 401: o token não vale
+         * mais. Sem tratar aqui, cada tela mostrava a mensagem genérica
+         * dela, quase sempre algum "não deu certo", e a pessoa ficava
+         * clicando num botão que nunca ia funcionar.
+         *
+         * Encerramos a sessão morta e levamos para a entrada, com o
+         * aviso e o endereço de volta. Depois de entrar, a pessoa cai
+         * na mesma tela em que estava. */
+        if (resposta.status === 401 && !w.__fscSessaoVencida) {
+          w.__fscSessaoVencida = true;
+          try { await supabase.auth.signOut(); } catch {}
+          const volta = encodeURIComponent(
+            window.location.pathname + window.location.search);
+          window.location.href = `/entrar?expirou=1&next=${volta}`;
+        }
+        return resposta;
       } catch {
         // Sessão indisponível não pode derrubar a chamada: a tela
         // pública tem de continuar funcionando.

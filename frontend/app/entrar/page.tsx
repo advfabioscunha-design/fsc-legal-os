@@ -26,6 +26,14 @@ export default function Entrar() {
     if (p.get("senha") === "nova") {
       setMsg("Senha alterada. Entre com a sua nova senha.");
     }
+    // Sessão vencida no meio do trabalho. Dizer isso é o que evita a
+    // pessoa continuar clicando num botão que não vai mais funcionar,
+    // procurando defeito na internet. Depois de entrar ela volta para a
+    // tela onde estava, pelo `next`.
+    if (p.get("expirou") === "1") {
+      setMsg("Sua sessão expirou por inatividade. Entre de novo para "
+             + "continuar de onde parou.");
+    }
 
     /* QUEM CHEGA PELO LINK DO E-MAIL
      *
