@@ -306,7 +306,8 @@ export default function MesaDaMinuta() {
             className="min-h-[70vh] flex-1 resize-y rounded-lg border border-white/10 bg-[#F7F5EF] p-10 font-serif text-[15px] leading-[1.8] text-[#1A1A1A] outline-none focus:border-[#C9A24D]"
             style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
           />
-          <Especialista id={id} minuta={texto} />
+          <Especialista id={id} minuta={texto}
+            aoAlterar={(novo) => digitou(novo)} />
         </div>
 
         <p className="mt-3 text-[11px] leading-relaxed text-white/35">
@@ -341,7 +342,14 @@ export default function MesaDaMinuta() {
  * e nenhuma confiável. Além disso a conferência final é ato dele: o que
  * vai para o cliente precisa ter passado pela mão de quem assina.
  */
-function Especialista({ id, minuta }: { id: string; minuta: string }) {
+function Especialista({ id, minuta, aoAlterar }: {
+  id: string; minuta: string; aoAlterar: (novo: string) => void;
+}) {
+  // O texto de antes de cada alteração, para o desfazer. Guardar só o
+  // último é de propósito: quem quer voltar várias etapas tem o
+  // histórico de versões do servidor, e uma pilha aqui daria a ilusão
+  // de um desfazer completo que esta tela não tem.
+  const [antes, setAntes] = useState<string | null>(null);
   const [conversa, setConversa] = useState<any[]>([]);
   const [pergunta, setPergunta] = useState("");
   const [pensando, setPensando] = useState(false);
@@ -388,7 +396,23 @@ function Especialista({ id, minuta }: { id: string; minuta: string }) {
                   .filter(Boolean).join("  —  "));
         return;
       }
-      setConversa([...antes, { pergunta: q, resposta: j.resposta }]);
+      setConversa([...antes, { pergunta: q, resposta: j.resposta,
+                               alteracoes: j.alteracoes }]);
+
+      /* ELE MEXEU NO TEXTO
+       *
+       * A alteração vem pronta do servidor, já conferida contra o
+       * texto que estava na tela: ou o trecho existia exatamente, ou
+       * nem foi aplicada. Aqui ela entra no documento pelo mesmo
+       * caminho de quem digita, então o autossalvamento cuida do
+       * resto e o estado da barra avisa que há coisa por salvar.
+       *
+       * O texto anterior fica guardado para o desfazer: o advogado
+       * precisa poder discordar sem perder o que tinha. */
+      if (j.minuta) {
+        setAntes(minuta);
+        aoAlterar(j.minuta);
+      }
     } catch { setConversa(antes); setErro("Falha de conexão."); }
     finally { setPensando(false); }
   }
@@ -401,6 +425,10 @@ function Especialista({ id, minuta }: { id: string; minuta: string }) {
     ["O que falta decidir",
      "O que ainda precisa de decisão antes de este documento sair, e o "
      + "que depende do cliente?"],
+    ["Corrigir o que estiver errado",
+     "Corrija no texto o que estiver tecnicamente errado ou nulo. "
+     + "Aplique as alterações e me diga, em uma linha cada, o que mudou "
+     + "e por quê. Não mexa no que eu não pedi."],
     ["Confere com o que foi pedido",
      "Compare o contrato com os dados do pedido e com o que o cliente "
      + "escreveu. Tem algo divergente, faltando ou inventado?"],
@@ -447,6 +475,29 @@ function Especialista({ id, minuta }: { id: string; minuta: string }) {
               </p>
             ) : (
               <p className="px-3 text-[11px] italic text-white/35">lendo o caso…</p>
+            )}
+            {/* O que ele mexeu no documento, dito com todas as letras.
+                Alteração que acontece sem aviso é alteração que ninguém
+                confere, e quem assina é o advogado. */}
+            {(c.alteracoes || []).length > 0 && (
+              <div className="rounded-lg border border-[#1DB954]/30 bg-[#1DB954]/5 px-3 py-2">
+                <p className="text-[10px] font-bold text-[#1DB954]">
+                  {c.alteracoes.length === 1
+                    ? "1 alteração aplicada no documento"
+                    : `${c.alteracoes.length} alterações aplicadas no documento`}
+                </p>
+                {c.alteracoes.map((a: any, k: number) => (
+                  <p key={k} className="mt-1 text-[10px] leading-relaxed text-white/55">
+                    · {a.motivo}
+                  </p>
+                ))}
+                {i === conversa.length - 1 && antes !== null && (
+                  <button onClick={() => { aoAlterar(antes); setAntes(null); }}
+                    className="mt-1.5 text-[10px] text-white/45 underline decoration-dotted hover:text-white">
+                    desfazer e voltar o texto de antes
+                  </button>
+                )}
+              </div>
             )}
           </div>
         ))}

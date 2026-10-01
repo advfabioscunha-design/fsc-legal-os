@@ -103,12 +103,119 @@ Confere o texto contra os dados do pedido e contra o que o cliente
 escreveu. Responde o que já foi combinado, por quem e quando. Diz o
 que falta decidir antes de o documento sair.
 
+QUANDO ELE MANDA ALTERAR
+
+Aí você mexe no texto, com a ferramenta `alterar_texto`. Só quando ele
+pedir: "corrija", "ajuste", "troque", "reescreva essa cláusula". Em
+pergunta, você responde; em ordem, você executa.
+
+Como usar sem estragar o contrato:
+
+`procurar` tem de ser um trecho LITERAL do texto que está na tela,
+copiado caractere por caractere, com a pontuação e os acentos como
+estão. Se errar uma vírgula, a alteração é recusada e nada acontece,
+o que é melhor do que acertar o trecho errado.
+
+Pegue o menor trecho que identifique o lugar sem ambiguidade. Trocar
+uma cláusula inteira quando o problema é uma palavra apaga o trabalho
+que já estava certo. Mas se o trecho curto aparecer mais de uma vez no
+documento, inclua o que estiver em volta até ficar único.
+
+`substituir` é o texto final, pronto, sem marcação e sem comentário.
+Nada de colchete explicando o que você fez.
+
+Pode mandar várias alterações de uma vez quando ele pedir várias. E
+diga, na resposta, o que mudou e por quê, em uma linha por alteração:
+ele vai conferir antes de aprovar, e precisa saber onde olhar.
+
 O QUE VOCÊ NÃO FAZ
 
-Não altera o documento: quem edita é ele, na tela ao lado. Você
-sugere, ele aplica. Não fala com o cliente. Não aprova nada.
+Não fala com o cliente. Não aprova nada. Não altera sem ordem, nem
+"aproveita" para corrigir de passagem o que ele não pediu: quem assina
+é ele, e documento que muda sozinho é documento em que ninguém confia.
 
 Nada de travessão, asterisco ou marcação. Texto corrido."""
+
+
+# A ferramenta é deliberadamente burra: procurar e substituir, literal.
+#
+# A alternativa seria pedir o contrato inteiro reescrito, e ela é pior
+# por dois motivos. O documento tem vinte mil caracteres: devolvê-lo
+# inteiro a cada ajuste de vírgula gasta tempo e dinheiro, e cada
+# reescrita é uma chance nova de o texto correto mudar sozinho.
+# Segundo, com trecho literal dá para CONFERIR antes de aplicar: ou o
+# pedaço existe exatamente como veio, ou a alteração é recusada.
+# Reescrita completa não tem como ser conferida: só comparando tudo.
+FERRAMENTA_ALTERAR = {
+    "name": "alterar_texto",
+    "description": ("Aplica alterações no contrato que está na tela do "
+                    "advogado. Use só quando ele pedir para corrigir, "
+                    "ajustar, trocar ou reescrever algo."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "alteracoes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "procurar": {
+                            "type": "string",
+                            "description": ("Trecho literal do texto atual, "
+                                            "copiado exatamente. Precisa ser "
+                                            "único no documento."),
+                        },
+                        "substituir": {
+                            "type": "string",
+                            "description": "O texto que entra no lugar.",
+                        },
+                        "motivo": {
+                            "type": "string",
+                            "description": "Em uma linha, por que mudou.",
+                        },
+                    },
+                    "required": ["procurar", "substituir", "motivo"],
+                },
+            },
+        },
+        "required": ["alteracoes"],
+    },
+}
+
+
+def _aplicar(minuta: str, alteracoes: list[dict]) -> tuple[str, list, list]:
+    """Aplica as trocas no texto, uma a uma, conferindo cada uma.
+
+    Devolve (texto novo, as que entraram, as que foram recusadas).
+
+    A conferência é literal e sem perdão: o trecho tem de existir
+    exatamente como veio, e uma vez só. Casar "mais ou menos" num
+    contrato é como assinar "mais ou menos": o trecho parecido pode ser
+    outra cláusula, e a troca silenciosa só apareceria depois da
+    assinatura."""
+    feitas: list[dict] = []
+    recusadas: list[dict] = []
+    texto = minuta
+
+    for a in alteracoes or []:
+        procurar = (a.get("procurar") or "")
+        substituir = a.get("substituir") or ""
+        if not procurar.strip():
+            recusadas.append({**a, "porque": "veio sem o trecho a procurar"})
+            continue
+        quantas = texto.count(procurar)
+        if quantas == 0:
+            recusadas.append({**a, "porque": "não achei esse trecho no texto"})
+            continue
+        if quantas > 1:
+            recusadas.append({
+                **a, "porque": f"esse trecho aparece {quantas} vezes; "
+                               "seria impossível saber qual trocar"})
+            continue
+        texto = texto.replace(procurar, substituir, 1)
+        feitas.append(a)
+
+    return texto, feitas, recusadas
 
 
 def _agora() -> str:
@@ -277,22 +384,76 @@ def perguntar(pedido_id: str, pergunta: str, quem: str = "",
                       f"=== PERGUNTA DO ADVOGADO ===\n{pergunta}"})
 
     s = get_settings()
-    r = _claude().messages.create(
-        model=s.claude_model, max_tokens=1800, system=SYSTEM,
-        messages=mensagens,
-    )
-    texto = humanizar("".join(b.text for b in r.content
-                              if b.type == "text").strip())
+    cliente = _claude()
+    base = minuta_na_tela or ""
+    feitas: list[dict] = []
+    recusadas: list[dict] = []
+    texto = ""
+
+    # Duas voltas, não mais. A primeira é o modelo responder, e talvez
+    # pedir alterações; a segunda é ele comentar o que foi aplicado e o
+    # que foi recusado. Mais do que isso só serviria para ele insistir
+    # num trecho que não existe, gastando o tempo de quem está esperando
+    # com a tela aberta.
+    for volta in range(2):
+        r = cliente.messages.create(
+            model=s.claude_model, max_tokens=2500, system=SYSTEM,
+            tools=[FERRAMENTA_ALTERAR], messages=mensagens,
+        )
+        texto = "".join(b.text for b in r.content if b.type == "text").strip()
+        usos = [b for b in r.content if getattr(b, "type", "") == "tool_use"]
+        if not usos:
+            break
+
+        mensagens.append({"role": "assistant", "content": r.content})
+        resultados = []
+        for u in usos:
+            pedidas = (u.input or {}).get("alteracoes") or []
+            base, ok, nao = _aplicar(base, pedidas)
+            feitas += ok
+            recusadas += nao
+            resultados.append({
+                "type": "tool_result", "tool_use_id": u.id,
+                "content": json.dumps({
+                    "aplicadas": len(ok),
+                    "recusadas": [{"procurar": x.get("procurar", "")[:120],
+                                   "porque": x.get("porque")} for x in nao],
+                }, ensure_ascii=False)})
+        mensagens.append({"role": "user", "content": resultados})
+
+    texto = humanizar(texto)
     if not texto:
         texto = ("Não consegui montar a resposta agora. Tente de novo em "
                  "instantes.")
 
-    # Fica registrado. A conferência final é ato do advogado, e o que
-    # ele consultou antes de aprovar faz parte do que foi conferido.
+    # O que foi recusado tem de aparecer para o advogado, e não só no
+    # log. Alteração que o modelo achou que fez e não fez é pior do que
+    # alteração nenhuma: ele aprovaria o documento confiando num ajuste
+    # que não está lá.
+    if recusadas:
+        texto += ("\n\nNão consegui aplicar "
+                  + ("1 alteração" if len(recusadas) == 1
+                     else f"{len(recusadas)} alterações")
+                  + ": " + "; ".join(
+                      f"{x.get('porque')}" for x in recusadas)
+                  + ". O trecho pode ter mudado depois que eu li. Peça de "
+                    "novo que eu tento com o texto atual.")
+
     registrar_evento(None, "ADVOGADO_CONSULTOU", {
         "pedido": pedido_id, "quem": quem,
-        "pergunta": pergunta[:500], "resposta": texto[:1000]})
-    return {"pergunta": pergunta, "resposta": texto, "em": _agora()}
+        "pergunta": pergunta[:500], "resposta": texto[:1000],
+        "alteracoes": len(feitas), "recusadas": len(recusadas)})
+
+    saida = {"pergunta": pergunta, "resposta": texto, "em": _agora(),
+             "alteracoes": [{"procurar": a.get("procurar", "")[:200],
+                             "substituir": a.get("substituir", "")[:200],
+                             "motivo": a.get("motivo", "")} for a in feitas]}
+    # O texto novo só volta se alguma coisa mudou de fato. Devolver o
+    # mesmo texto faria a tela marcar alterações pendentes à toa e pedir
+    # confirmação ao sair de uma página onde nada foi alterado.
+    if feitas:
+        saida["minuta"] = base
+    return saida
 
 
 def consultas(pedido_id: str, limite: int = 50) -> list[dict]:
