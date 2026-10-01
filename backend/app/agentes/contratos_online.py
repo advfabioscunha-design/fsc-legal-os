@@ -239,6 +239,24 @@ def _agora() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _agora_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _quando(iso) -> datetime | None:
+    """Lê o carimbo do banco. Devolve None em vez de explodir: data
+    ilegível não pode derrubar a tela que só queria saber a hora."""
+    if not iso:
+        return None
+    if isinstance(iso, datetime):
+        return iso if iso.tzinfo else iso.replace(tzinfo=timezone.utc)
+    try:
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 # ── Termo de ciência ────────────────────────────────────────────
 def termo_de_ciencia(tipo: str, regras_violadas: list[str],
                      dados: dict | None = None) -> dict:
@@ -1583,11 +1601,27 @@ def recado(pedido_id: str, texto: str, canais: list[str] | None = None,
         "falha": "; ".join(falhas)[:500] or None,
     }).execute().data
 
+    # ESCREVER É ASSUMIR, MAS SÓ NOS CANAIS QUE SÃO CONVERSA
+    #
+    # Quem do escritório fala com o cliente pelo chat ou pelo WhatsApp
+    # está numa conversa: o cliente está do outro lado, agora, e vai
+    # responder em seguida. Aí o agente precisa calar, ou os dois
+    # escrevem por cima um do outro.
+    #
+    # E-mail é outra coisa. Ele tem o ritmo dele — manda-se e espera-se
+    # o dia seguinte. Calar o agente por causa de um e-mail enviado de
+    # manhã deixaria o cliente que abre o chat à tarde sem ninguém para
+    # responder, por uma troca que nem era ao vivo.
+    if autor == "ESCRITORIO" and ("PLATAFORMA" in pedidos
+                                  or "WHATSAPP" in pedidos):
+        assumir_conversa(pedido_id, quem=assunto or "escritório")
+
     registrar_evento(None, "BALCAO_RECADO",
                      {"pedido_id": pedido_id, "canais": pedidos,
                       "falhas": falhas})
     return {"ok": True, "canais": pedidos, "falhas": falhas,
-            "mensagem": linha[0] if linha else None}
+            "mensagem": linha[0] if linha else None,
+            "atendimento": quem_atende(pedido_id)}
 
 
 def excluir(pedido_id: str, quem: str = "", motivo: str = "") -> dict:
@@ -2880,6 +2914,99 @@ def complementar_com_a_resposta(pedido_id: str, texto: str) -> dict:
             "pendencias": estado}
 
 
+# ── QUEM ESTÁ FALANDO COM O CLIENTE AGORA ──────────────────────
+#
+# Cinco minutos. Curto o bastante para o cliente não ficar esperando
+# quando quem assumiu saiu para uma audiência e esqueceu; longo o
+# bastante para caber uma resposta pensada, com consulta ao processo no
+# meio. Quem continuar atendendo renova o prazo a cada mensagem, sem
+# precisar saber que existe prazo.
+SILENCIO_DO_AGENTE_MIN = 5
+
+
+def _humano_no_comando(pedido_id: str) -> bool:
+    """Alguém do escritório falou com este cliente nos últimos minutos?"""
+    try:
+        r = get_db().table("pedidos_contrato").select("humano_em") \
+            .eq("id", pedido_id).limit(1).execute().data
+    except Exception as e:                     # coluna ainda não migrada
+        print(f"[balcao] não consegui ver quem está no comando: {e}")
+        return False
+    quando = _quando(r[0].get("humano_em")) if r else None
+    if not quando:
+        return False
+    return (_agora_dt() - quando).total_seconds() < SILENCIO_DO_AGENTE_MIN * 60
+
+
+def quem_atende(pedido_id: str) -> dict:
+    """Para a tela: quem está no comando e quanto falta para o agente voltar.
+
+    Devolve sempre, inclusive quando ninguém assumiu, porque é isso que
+    a tela precisa saber para mostrar a faixa certa."""
+    try:
+        r = get_db().table("pedidos_contrato") \
+            .select("humano_em,humano_quem,cliente_digitando_em") \
+            .eq("id", pedido_id).limit(1).execute().data
+    except Exception:
+        return {"quem": "AGENTE"}
+    if not r:
+        return {"quem": "AGENTE"}
+    p = r[0]
+    agora = _agora_dt()
+
+    humano = _quando(p.get("humano_em"))
+    faltam = 0
+    if humano:
+        passou = (agora - humano).total_seconds()
+        faltam = max(0, int(SILENCIO_DO_AGENTE_MIN * 60 - passou))
+
+    digit = _quando(p.get("cliente_digitando_em"))
+    # Oito segundos: o sinal é renovado a cada poucos segundos enquanto
+    # a pessoa digita, então mais do que isso significa que ela parou.
+    digitando = bool(digit and (agora - digit).total_seconds() < 8)
+
+    return {"quem": "HUMANO" if faltam > 0 else "AGENTE",
+            "humano_quem": p.get("humano_quem") if faltam > 0 else None,
+            "humano_em": p.get("humano_em"),
+            "segundos_para_o_agente_voltar": faltam,
+            "cliente_digitando": digitando}
+
+
+def assumir_conversa(pedido_id: str, quem: str = "") -> dict:
+    """Carimba que o escritório está no comando. Chamado pelo próprio
+    envio da mensagem, e também pelo botão de quem quer calar o agente
+    antes de escrever."""
+    try:
+        get_db().table("pedidos_contrato").update({
+            "humano_em": _agora(), "humano_quem": (quem or "escritório")[:120],
+        }).eq("id", pedido_id).execute()
+    except Exception as e:
+        print(f"[balcao] não consegui registrar quem assumiu: {e}")
+    return quem_atende(pedido_id)
+
+
+def devolver_ao_agente(pedido_id: str) -> dict:
+    """Devolve a conversa antes dos cinco minutos, para quem terminou e
+    não quer deixar o cliente esperando o relógio."""
+    try:
+        get_db().table("pedidos_contrato").update({"humano_em": None}) \
+            .eq("id", pedido_id).execute()
+    except Exception as e:
+        print(f"[balcao] não consegui devolver ao agente: {e}")
+    return quem_atende(pedido_id)
+
+
+def cliente_digitando(pedido_id: str) -> dict:
+    """A tela do cliente avisa que ele está escrevendo."""
+    try:
+        get_db().table("pedidos_contrato") \
+            .update({"cliente_digitando_em": _agora()}) \
+            .eq("id", pedido_id).execute()
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
                         anexos: list[str] | None = None,
                         responder: bool = True) -> dict:
@@ -2922,6 +3049,21 @@ def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
     #
     # A resposta é gerada depois do preenchimento de propósito: assim
     # ela já conta o que mudou com a mensagem que acabou de chegar.
+    # SALVO QUANDO TEM GENTE NA CONVERSA
+    #
+    # Alguém do escritório assumiu há pouco: o agente cala. Os dois
+    # escrevendo ao mesmo tempo produzem o pior efeito que um
+    # atendimento pode ter — a pessoa explica o caso com cuidado e,
+    # logo abaixo, o agente responde outra coisa. O cliente vê dois
+    # atendentes que não se falam, e passa a não confiar em nenhum.
+    #
+    # Quem manda é o carimbo no servidor, e não um botão: quem está com
+    # pressa de responder, responde, e não clica em "assumir". O ato de
+    # escrever é que assume.
+    if responder and texto.strip() and _humano_no_comando(pedido_id):
+        saida["com_humano"] = True
+        responder = False
+
     if responder and texto.strip():
         try:
             from . import atendente

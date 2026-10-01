@@ -797,6 +797,24 @@ function Conversa({ pedidoId, aoMudar }: {
     if (c) c.scrollTop = c.scrollHeight;
   }, [falas]);
 
+  /* AVISAR QUE ESTÁ ESCREVENDO
+   *
+   * Quem acompanha do outro lado precisa saber que a frase está vindo:
+   * sem isso, responde por cima de uma pergunta que ainda não terminou,
+   * ou assume que o cliente sumiu e fecha a tela.
+   *
+   * Um sinal a cada três segundos, e só enquanto a pessoa digita. É
+   * pouco de propósito: avisar a cada tecla seria uma chamada por
+   * letra, e o que o outro lado precisa saber não muda nesse intervalo. */
+   const ultimoAviso = useRef(0);
+   function avisarQueEstouDigitando() {
+     const agora = Date.now();
+     if (agora - ultimoAviso.current < 3000) return;
+     ultimoAviso.current = agora;
+     fetch(`${API}/api/v1/contratos/pedidos/${pedidoId}/digitando`,
+           { method: "POST" }).catch(() => {});
+   }
+
   async function mandarTexto(msg?: string) {
     const conteudo = (msg ?? texto).trim();
     if (!conteudo) return;
@@ -904,7 +922,11 @@ function Conversa({ pedidoId, aoMudar }: {
 
       <div className="mt-3 flex gap-2">
         <textarea value={texto}
-          onChange={(e) => { setTexto(e.target.value); ultimaTecla.current = Date.now(); }}
+          onChange={(e) => {
+            setTexto(e.target.value);
+            ultimaTecla.current = Date.now();
+            avisarQueEstouDigitando();
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mandarTexto(); }
           }}

@@ -74,6 +74,11 @@ PUBLICO = [
     # A urgência: o cliente orça e avisa que pagou. Confirmar, não:
     # essa fica atrás do porteiro, porque é ela que muda o prazo.
     r"^/api/v1/contratos/pedidos/[^/]+/urgencia$",
+    # O sinal de "estou digitando", mandado pela página do cliente. Quem
+    # tem o id do pedido é quem está com a página aberta, e o pior uso
+    # possível disto é fazer o escritório achar que alguém está
+    # escrevendo. O carimbo vence em segundos.
+    r"^/api/v1/contratos/pedidos/[^/]+/digitando$",
     # O retrato do cadastro conhecido é lido com o token do cliente,
     # dentro da própria rota. Aberto aqui só para não exigir papel de
     # equipe; sem token ele devolve "não conhecido" e nada mais.

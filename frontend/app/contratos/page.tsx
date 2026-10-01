@@ -161,12 +161,15 @@ function PainelDoPedido({ id, fechar, recarregar }:
   const [p, setP] = useState<any>(null);
   const [docs, setDocs] = useState<any[]>([]);
   const [conversa, setConversa] = useState<any[]>([]);
-  const [aba, setAba] = useState<"pedido" | "minuta" | "conversa">("pedido");
+  const [aba, setAba] = useState<
+    "pedido" | "minuta" | "conversa" | "consultar">("pedido");
   const [msg, setMsg] = useState("");
   const [porEmail, setPorEmail] = useState(true);
   const [porWhats, setPorWhats] = useState(false);
   const [ocupado, setOcupado] = useState("");
   const [erro, setErro] = useState("");
+
+  const [atendimento, setAtendimento] = useState<any>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -180,6 +183,38 @@ function PainelDoPedido({ id, fechar, recarregar }:
     } catch { setErro("Não consegui abrir o pedido."); }
   }, [id]);
   useEffect(() => { carregar(); }, [carregar]);
+
+  /* A CONVERSA AO VIVO, E SÓ ELA
+   *
+   * Enquanto a aba da conversa está aberta, a tela relê a cada quatro
+   * segundos: o que o cliente escreve aparece sozinho, e quem está
+   * acompanhando vê a conversa acontecer em vez de descobrir depois.
+   *
+   * Chat e WhatsApp são conversa de verdade, com alguém do outro lado
+   * esperando. E-mail não é: ele tem o ritmo dele, e ninguém fica
+   * olhando a tela esperando um e-mail chegar. Por isso a batida só
+   * roda nesta aba, e para quando ela fecha. Pesquisar o servidor a
+   * cada quatro segundos o dia inteiro, por causa de uma caixa que
+   * ninguém está olhando, é desperdício que se paga em conta.
+   */
+  useEffect(() => {
+    if (aba !== "conversa") return;
+    let vivo = true;
+    async function bater() {
+      try {
+        const [c, s] = await Promise.all([
+          fetch(`${API}/api/v1/contratos/pedidos/${id}/conversa`).then((r) => r.json()),
+          fetch(`${API}/api/v1/contratos/pedidos/${id}/atendimento`).then((r) => r.json()),
+        ]);
+        if (!vivo) return;
+        if (Array.isArray(c)) setConversa(c);
+        setAtendimento(s);
+      } catch { /* uma batida perdida não é erro: a próxima vem em 4s */ }
+    }
+    bater();
+    const t = setInterval(bater, 4000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [aba, id]);
 
   async function acao(caminho: string, corpo: any = {}, rotulo = "") {
     setOcupado(rotulo || caminho); setErro("");
@@ -444,9 +479,26 @@ function PainelDoPedido({ id, fechar, recarregar }:
           {fase === "REVISAO_ADV" && (
             <div>
               <p className="mb-2 text-[11px] leading-relaxed text-white/60">
-                Leia a minuta na aba ao lado. Nada chega ao cliente sem esta leitura.
+                Leia no Word, corrija na aba Minuta. Nada chega ao cliente sem esta leitura.
               </p>
               <div className="flex flex-wrap items-center gap-2">
+                {/* LER NO WORD, CONFERIR NO PDF
+
+                    Eram coisas diferentes tratadas como uma só. Ler um
+                    contrato de vinte mil caracteres rolando um PDF é
+                    pedir leitura ruim: no Word o advogado busca,
+                    compara, anota ao lado. O PDF continua, mas para o
+                    que ele serve de verdade, que é ver a página exata
+                    que o cliente vai receber, com timbre e quebras.
+
+                    A correção não é feita em nenhum dos dois: é na aba
+                    Minuta, que salva sozinha. Documento editado em dois
+                    lugares vira duas versões, e a que chega ao cliente
+                    é sempre a errada. */}
+                <a href={`${API}/api/v1/contratos/pedidos/${id}/documento.doc`}
+                  className="rounded-lg border border-[#2D7DD2]/60 px-4 py-2 text-xs font-semibold text-[#2D7DD2] hover:bg-[#2D7DD2]/10">
+                  Abrir no Word para ler
+                </a>
                 <a href={`${API}/api/v1/contratos/pedidos/${id}/pdf`}
                   target="_blank" rel="noreferrer"
                   onClick={() => {
@@ -454,7 +506,7 @@ function PainelDoPedido({ id, fechar, recarregar }:
                       { method: "POST" }).then(carregar);
                   }}
                   className="rounded-lg border border-white/20 px-4 py-2 text-xs font-semibold text-white/85 hover:border-white/45">
-                  Abrir o PDF e conferir o layout
+                  Ver o PDF como o cliente recebe
                 </a>
                 <Botao rotulo="Aprovar e enviar ao cliente" ocupado={ocupado === "liberar"}
                   onClick={() => acao("/liberar?quem=advogado", {}, "liberar")} />
@@ -517,11 +569,14 @@ function PainelDoPedido({ id, fechar, recarregar }:
           )}
         </div>
 
-        <div className="mb-3 flex gap-2">
-          {(["pedido", "minuta", "conversa"] as const).map((a) => (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {(["pedido", "minuta", "conversa", "consultar"] as const).map((a) => (
             <button key={a} onClick={() => setAba(a)}
               className={`${btn} ${aba === a ? "bg-[#C9A24D] text-[#0A1628]" : "border border-white/15 text-white/60"}`}>
-              {a === "pedido" ? "Pedido" : a === "minuta" ? "Minuta" : `Conversa (${conversa.length})`}
+              {a === "pedido" ? "Pedido"
+                : a === "minuta" ? "Minuta"
+                : a === "conversa" ? `Conversa (${conversa.length})`
+                : "Perguntar"}
             </button>
           ))}
         </div>
@@ -621,6 +676,8 @@ function PainelDoPedido({ id, fechar, recarregar }:
 
         {aba === "conversa" && (
           <div className="space-y-2">
+            <FaixaDoAtendimento id={id} estado={atendimento}
+              aoMudar={(novo) => setAtendimento(novo)} />
             {conversa.map((m) => (
               <div key={m.id}
                 className={`rounded-lg px-3 py-2 text-[11px] leading-relaxed ${m.autor === "CLIENTE"
@@ -628,6 +685,20 @@ function PainelDoPedido({ id, fechar, recarregar }:
                   : "bg-[#2D7DD2]/15 text-white/80"}`}>
                 <p className="mb-0.5 text-[10px] font-bold text-white/40">
                   {m.autor === "CLIENTE" ? "Cliente" : m.autor === "AGENTE" ? "Agente" : "Escritório"}
+                  {/* DIA E HORA EM TODA MENSAGEM
+
+                      Sem isso não há controle de prazo de resposta:
+                      "demorou para responder" vira discussão de
+                      memória, e memória de quem estava com pressa não
+                      serve de prova. Com o carimbo, a conversa é o
+                      próprio registro de quanto se levou. */}
+                  {m.criado_em && (
+                    <span className="ml-2 font-normal text-white/30">
+                      {new Date(m.criado_em).toLocaleString("pt-BR", {
+                        day: "2-digit", month: "2-digit",
+                        hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  )}
                   {/* Por onde saiu. É isto que responde ao "ninguém me
                       avisou", e não a memória de quem atendeu. */}
                   {m.autor !== "CLIENTE" && (m.canais || []).length > 0 && (
@@ -644,6 +715,15 @@ function PainelDoPedido({ id, fechar, recarregar }:
             ))}
             {conversa.length === 0 && (
               <p className="text-xs text-white/40">Sem conversa ainda.</p>
+            )}
+
+            {/* O cliente está escrevendo agora. Vale mais do que parece:
+                quem vê isso espera a frase inteira em vez de responder
+                por cima de uma pergunta que ainda não terminou. */}
+            {atendimento?.cliente_digitando && (
+              <p className="px-3 text-[11px] italic text-[#1DB954]">
+                o cliente está digitando…
+              </p>
             )}
 
             {/* POR ONDE MANDAR
@@ -691,6 +771,198 @@ function PainelDoPedido({ id, fechar, recarregar }:
             </div>
           </div>
         )}
+
+        {aba === "consultar" && <Consultar id={id} />}
+      </div>
+    </div>
+  );
+}
+
+/* QUEM ESTÁ FALANDO COM O CLIENTE AGORA
+ *
+ * O agente responde em segundos, o que é bom quase sempre e é péssimo
+ * na hora em que alguém do escritório decide assumir. Os dois
+ * escrevendo ao mesmo tempo produzem o efeito mais constrangedor que
+ * um atendimento pode ter: a pessoa explica o caso com cuidado e, logo
+ * abaixo, o agente responde outra coisa.
+ *
+ * Quem escreve, assume. Não há botão obrigatório, porque quem está com
+ * pressa de responder responde, e não clica em "assumir" antes. O
+ * botão existe para o outro caso: quando se quer pensar a resposta sem
+ * correr o risco de ser atropelado no meio.
+ *
+ * E devolve sozinho em cinco minutos, porque ninguém lembra de
+ * devolver. Quem sai para uma audiência deixaria o cliente sem
+ * resposta até alguém notar.
+ */
+function FaixaDoAtendimento({ id, estado, aoMudar }: {
+  id: string; estado: any; aoMudar: (n: any) => void;
+}) {
+  const [ocupado, setOcupado] = useState(false);
+  if (!estado) return null;
+  const comHumano = estado.quem === "HUMANO";
+  const faltam = Number(estado.segundos_para_o_agente_voltar || 0);
+
+  async function trocar(rota: string, corpo: any = {}) {
+    setOcupado(true);
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}${rota}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+      aoMudar(await r.json().catch(() => estado));
+    } catch { /* a próxima batida corrige */ }
+    finally { setOcupado(false); }
+  }
+
+  return (
+    <div className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-[11px] ${
+      comHumano ? "bg-[#C9A24D]/10 text-[#C9A24D]" : "bg-white/5 text-white/50"}`}>
+      {comHumano ? (
+        <>
+          <b>Você assumiu esta conversa.</b>
+          <span className="text-white/45">
+            O agente não responde. Ele volta sozinho em{" "}
+            {Math.ceil(faltam / 60)} min, ou a cada mensagem sua o relógio
+            recomeça.
+          </span>
+          <button onClick={() => trocar("/devolver-ao-agente")} disabled={ocupado}
+            className="ml-auto underline decoration-dotted hover:text-white">
+            devolver ao agente agora
+          </button>
+        </>
+      ) : (
+        <>
+          <span>O agente está respondendo este cliente.</span>
+          <button onClick={() => trocar("/assumir", { quem: "escritório" })}
+            disabled={ocupado}
+            className="ml-auto underline decoration-dotted hover:text-white">
+            assumir a conversa
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* PERGUNTAR AO TRABALHO QUE JÁ FOI FEITO
+ *
+ * Na conferência final o advogado encontra o contrato pronto, os
+ * apontamentos das duas revisões e a segunda revisão. O que ele não
+ * encontra é o porquê: de onde saiu este prazo, se o cliente chegou a
+ * pedir outra coisa, se a revisão viu aquele ponto da fiança.
+ *
+ * Até aqui a resposta exigia ler tudo — a conversa inteira, os dois
+ * pareceres, os dados da coleta. Quinze minutos de leitura para uma
+ * dúvida de uma linha, e quem tem pressa não lê: assina confiando, que
+ * é o contrário do que a conferência existe para fazer.
+ *
+ * Aqui ele pergunta em português. Do outro lado responde um agente com
+ * o registro inteiro do pedido na frente, que diz o que foi feito, por
+ * quem e quando, e que diz "não encontrei" quando o registro não diz.
+ *
+ * Pergunta e resposta ficam gravadas. A conferência final é ato do
+ * advogado, e o que ele consultou antes de aprovar faz parte do que
+ * foi conferido. */
+function Consultar({ id }: { id: string }) {
+  const [historico, setHistorico] = useState<any[]>([]);
+  const [pergunta, setPergunta] = useState("");
+  const [pensando, setPensando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/consultas`);
+      const d = await r.json();
+      setHistorico(Array.isArray(d) ? d : []);
+    } catch { /* o histórico é conforto, não pode travar a pergunta */ }
+  }, [id]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  async function perguntar() {
+    const texto = pergunta.trim();
+    if (!texto || pensando) return;
+    setPensando(true); setErro("");
+    // A pergunta some da caixa e aparece na lista na hora: esperar
+    // trinta segundos olhando a própria pergunta parada dá a impressão
+    // de que o clique não pegou.
+    setHistorico((h) => [...h, { pergunta: texto, resposta: "", em: "agora" }]);
+    setPergunta("");
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/consultar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pergunta: texto, quem: "advogado" }),
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (!r.ok) {
+        setErro([j?.detail || "Não consegui responder.", j?.tecnico]
+                  .filter(Boolean).join("  —  "));
+        return;
+      }
+      await carregar();
+    } catch { setErro("Falha de conexão."); }
+    finally { setPensando(false); }
+  }
+
+  const sugestoes = [
+    "De onde saiu o prazo deste contrato?",
+    "O cliente pediu alguma coisa que a lei não permite?",
+    "O que a revisão apontou de mais grave?",
+    "Como foi fechado o valor?",
+  ];
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] leading-relaxed text-white/55">
+        Pergunte sobre este pedido. Responde quem tem o registro inteiro na
+        frente: a coleta, a conversa com o cliente, as duas revisões, as
+        decisões dele e o contrato. O que não estiver registrado, a resposta
+        diz que não está, em vez de supor.
+      </p>
+
+      {erro && (
+        <p className="rounded-lg bg-[#C0392B]/20 px-3 py-2 text-[11px] text-[#ffb3aa]">
+          {erro}
+        </p>
+      )}
+
+      <div className="space-y-3">
+        {historico.map((c, i) => (
+          <div key={i} className="space-y-1.5">
+            <p className="rounded-lg bg-white/5 px-3 py-2 text-[11px] text-white/80">
+              {c.pergunta}
+            </p>
+            {c.resposta ? (
+              <p className="whitespace-pre-line rounded-lg bg-[#2D7DD2]/10 px-3 py-2 text-[11px] leading-relaxed text-white/85">
+                {c.resposta}
+              </p>
+            ) : (
+              <p className="px-3 text-[11px] text-white/35">conferindo os registros…</p>
+            )}
+          </div>
+        ))}
+        {historico.length === 0 && (
+          <div className="flex flex-wrap gap-2">
+            {sugestoes.map((s) => (
+              <button key={s} onClick={() => setPergunta(s)}
+                className="rounded-full border border-white/15 px-3 py-1.5 text-[11px] text-white/55 hover:border-white/40 hover:text-white/80">
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <input value={pergunta} onChange={(e) => setPergunta(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") perguntar(); }}
+          placeholder="o que você quer saber sobre este pedido…"
+          className={inp} />
+        <button onClick={perguntar} disabled={pensando || !pergunta.trim()}
+          className={`${btn} shrink-0 bg-[#C9A24D] text-[#0A1628] disabled:opacity-40`}>
+          {pensando ? "Conferindo…" : "Perguntar"}
+        </button>
       </div>
     </div>
   );

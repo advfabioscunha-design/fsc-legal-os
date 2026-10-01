@@ -5484,6 +5484,71 @@ def balcao_pdf(pedido_id: str):
         headers={"Content-Disposition": f'inline; filename="{nome}"'})
 
 
+class QuemAssume(BaseModel):
+    quem: str = ""
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/atendimento")
+def balcao_atendimento(pedido_id: str):
+    """Quem está falando com o cliente agora, e se ele está digitando.
+
+    É o que a tela pergunta de poucos em poucos segundos enquanto a
+    conversa está aberta. A resposta é pequena de propósito: ela roda
+    muitas vezes por minuto, e carregar a conversa inteira a cada
+    batida seria pagar caro por uma informação de duas linhas."""
+    from .agentes import contratos_online
+    return contratos_online.quem_atende(pedido_id)
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/assumir")
+def balcao_assumir(pedido_id: str, body: QuemAssume):
+    """Cala o agente antes de escrever, para quem quer pensar a resposta
+    sem ser atropelado no meio."""
+    from .agentes import contratos_online
+    return contratos_online.assumir_conversa(pedido_id, body.quem)
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/devolver-ao-agente")
+def balcao_devolver_agente(pedido_id: str):
+    """Devolve antes dos cinco minutos, para quem terminou e não quer
+    deixar o cliente esperando o relógio."""
+    from .agentes import contratos_online
+    return contratos_online.devolver_ao_agente(pedido_id)
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/digitando")
+def balcao_digitando(pedido_id: str):
+    """A tela do cliente avisa que ele está escrevendo.
+
+    Pública, como o resto da página do cliente: quem tem o id do pedido
+    é quem está com a página aberta. O pior uso possível disto é fazer o
+    escritório achar que um cliente está digitando, e o carimbo vence em
+    segundos."""
+    from .agentes import contratos_online
+    return contratos_online.cliente_digitando(pedido_id)
+
+
+class ConsultaDoAdvogado(BaseModel):
+    pergunta: str
+    quem: str = ""
+
+
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/consultar")
+def balcao_consultar(pedido_id: str, body: ConsultaDoAdvogado):
+    """O advogado pergunta ao trabalho que já foi feito neste pedido."""
+    from .agentes import mesa_do_advogado
+    try:
+        return mesa_do_advogado.perguntar(pedido_id, body.pergunta, body.quem)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/contratos/pedidos/{pedido_id}/consultas")
+def balcao_consultas(pedido_id: str):
+    from .agentes import mesa_do_advogado
+    return mesa_do_advogado.consultas(pedido_id)
+
+
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/layout-conferido")
 def balcao_layout_conferido(pedido_id: str, quem: str = ""):
     from .agentes import contratos_online
