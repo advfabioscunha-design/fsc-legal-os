@@ -114,6 +114,33 @@ export default function MesaDaMinuta() {
     return () => window.removeEventListener("keydown", atalho);
   }, [texto, salvar]);
 
+  /* O PAPEL, DECIDIDO NA HORA DE CONFERIR
+   *
+   * A escolha é do cliente e é feita na coleta, antes de ele ver
+   * qualquer coisa. É aqui, lendo o documento pronto, que se descobre
+   * que ela não serve: contrato que vai a cartório ou é juntado a um
+   * processo costuma pedir folha branca, e quem percebe isso é o
+   * advogado.
+   *
+   * Sem este botão ele teria de devolver o pedido para a coleta por
+   * causa de um cabeçalho, perdendo o lugar na esteira. Fica marcado o
+   * que o cliente escolheu, e a troca fica registrada em nome de quem
+   * trocou. */
+  async function trocarTimbre(comTimbre: boolean) {
+    const antes = p.com_timbre;
+    setP((x: any) => ({ ...x, com_timbre: comTimbre }));   // responde na hora
+    try {
+      const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}/timbre`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ com_timbre: comTimbre, quem: "advogado" }),
+      });
+      if (!r.ok) throw new Error();
+    } catch {
+      setP((x: any) => ({ ...x, com_timbre: antes }));     // desfaz se falhou
+      setErro("Não consegui mudar o papel agora.");
+    }
+  }
+
   async function verOPdf() {
     // Salva antes: PDF gerado do texto antigo faria o advogado conferir
     // uma versão que já não existe, e aprovar achando que conferiu.

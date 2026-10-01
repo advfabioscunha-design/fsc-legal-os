@@ -4184,6 +4184,44 @@ class MinutaEditada(BaseModel):
     quem: str = ""
 
 
+class EscolhaDoTimbre(BaseModel):
+    com_timbre: bool
+    quem: str = ""
+
+
+@app.patch("/api/v1/contratos/pedidos/{pedido_id}/timbre")
+def balcao_timbre(pedido_id: str, body: EscolhaDoTimbre):
+    """Papel timbrado ou folha branca, decidido na conferência final.
+
+    A escolha é do cliente e é feita na coleta, e continua sendo dele.
+    Mas é na hora de conferir o documento que se descobre que ela não
+    serve: contrato que vai ser levado a cartório ou juntado a um
+    processo costuma pedir folha branca, e quem percebe isso é o
+    advogado, lendo, e não o cliente, escolhendo antes de ver.
+
+    Sem este ajuste ele teria de devolver o pedido para a coleta por
+    causa de um cabeçalho, perdendo o lugar na esteira. Fica registrado
+    quem mudou: a escolha era do cliente, e trocá-la é ato de quem
+    trocou."""
+    db = get_db()
+    r = db.table("pedidos_contrato").select("com_timbre") \
+        .eq("id", pedido_id).limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Pedido não encontrado.")
+    antes = r[0].get("com_timbre")
+    db.table("pedidos_contrato").update({
+        "com_timbre": body.com_timbre,
+        "atualizado_em": datetime.utcnow().isoformat(),
+    }).eq("id", pedido_id).execute()
+
+    if bool(antes) != bool(body.com_timbre):
+        from .core.db import registrar_evento
+        registrar_evento(None, "BALCAO_TIMBRE_ALTERADO", {
+            "pedido_id": pedido_id, "de": antes, "para": body.com_timbre,
+            "quem": body.quem or "advogado"})
+    return {"ok": True, "com_timbre": body.com_timbre}
+
+
 @app.put("/api/v1/contratos/pedidos/{pedido_id}/minuta")
 def salvar_minuta(pedido_id: str, body: MinutaEditada):
     """Grava o texto que o advogado está editando.
