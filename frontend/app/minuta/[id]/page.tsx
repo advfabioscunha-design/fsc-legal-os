@@ -268,6 +268,33 @@ export default function MesaDaMinuta() {
           </details>
         ) : null}
 
+        {/* O PAPEL EM QUE ISSO VAI SAIR
+            Fica junto do documento, e não escondido num menu: é
+            decisão que se toma olhando o texto, e que muda o que o
+            cliente recebe. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-white/40">Sai em</span>
+          {([[true, "Papel timbrado", "Com a identificação do escritório."],
+             [false, "Folha branca", "Sem nenhuma identificação."]] as const)
+            .map(([valor, titulo, nota]) => {
+              const ativo = (p.com_timbre !== false) === valor;
+              return (
+                <button key={String(valor)} onClick={() => trocarTimbre(valor)}
+                  className={`rounded-xl border px-3 py-2 text-left text-[11px] transition ${ativo
+                    ? "border-[#C9A24D] bg-[#C9A24D]/10"
+                    : "border-white/15 hover:border-white/35"}`}>
+                  <b className="block text-white/90">{titulo}</b>
+                  <span className="text-white/45">{nota}</span>
+                </button>
+              );
+            })}
+          <span className="text-[11px] text-white/30">
+            {p.com_timbre === false
+              ? "Foi o que o cliente escolheu, salvo se você tiver mudado agora."
+              : "Escolha do cliente na coleta. Você pode trocar antes de aprovar."}
+          </span>
+        </div>
+
         {/* A folha. Fundo claro, serifa e largura de página: o olho lê
             contrato assim, e o contraste do painel escuro cansa em dois
             parágrafos. */}
