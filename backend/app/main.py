@@ -134,7 +134,7 @@ def _agendar_radar():
             )
         except Exception as e:
             print(f"[agenda] espelho do balcão não agendado: {e}")
-        # A INTIMAÇÃO TEM DE CHEGAR NA AGENDA ANTES DO DIA COMEÇAR
+        # A INTIMAÇÃO TEM DE CHEGAR NA AGENDA NO DIA EM QUE CHEGA
         #
         # O espelho das intimações só acontecia no fechamento das 18h, e
         # era tarde: a publicação lida de manhã só existia na agenda à
@@ -142,16 +142,18 @@ def _agendar_radar():
         # realizado não tinha o que fechar na página de intimações,
         # porque o vínculo entre as duas telas é justamente este espelho.
         #
-        # Às 9h, de segunda a sexta, e não de hora em hora: o trabalho é
-        # de banco de dados, sem nenhuma chamada de IA, mas uma passada
-        # por dia já põe a intimação na agenda antes de a equipe sentar,
-        # que é para o que ela serve. Fora de hora, o botão "Trazer
-        # prazos e intimações" na Agenda faz a mesma coisa na hora.
+        # De hora em hora, no minuto 25 para não disputar a vez com o
+        # espelho do balcão (10 e 40) nem com a régua (5 e 35). Custa
+        # pouco: é leitura e escrita no banco, sem nenhuma chamada de IA,
+        # e a função não duplica nada porque confere o que já está lá
+        # antes de criar. Em troca, a publicação lida às 9h40 está na
+        # agenda às 9h25 do ciclo seguinte, e não à noite.
         #
-        # Feriado não roda. Usamos só fim de semana e feriado, e não o
-        # `util()` inteiro, porque ele também exclui o recesso forense de
-        # 20/12 a 20/01: prazo fica suspenso no recesso, mas publicação
-        # continua chegando e o escritório continua trabalhando.
+        # Feriado e fim de semana não rodam. A checagem usa só isso, e
+        # não o `util()` inteiro, porque ele também exclui o recesso
+        # forense de 20/12 a 20/01: prazo fica suspenso no recesso, mas
+        # publicação continua chegando e o escritório continua
+        # trabalhando.
         try:
             from .agentes import agenda as _ag2
             from .core.datas import feriados as _feriados
@@ -165,7 +167,7 @@ def _agendar_radar():
 
             sched.add_job(
                 espelho_das_intimacoes,
-                CronTrigger(day_of_week="mon-fri", hour=9, minute=0),
+                CronTrigger(day_of_week="mon-fri", minute=25),
                 id="espelho_intimacoes", replace_existing=True, max_instances=1,
             )
         except Exception as e:

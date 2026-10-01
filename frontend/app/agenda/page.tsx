@@ -220,9 +220,9 @@ export default function AgendaPage() {
    muda aqui aparece lá sem ninguém reenviar nada. */
 /* TRAZER PRAZOS E INTIMAÇÕES PARA A AGENDA
  *
- * Sozinho isso acontece às 9h dos dias úteis e no fechamento das 18h. O
- * botão existe para o intervalo entre as duas: a publicação chegou
- * agora e o ato é para hoje.
+ * Sozinho isso acontece de hora em hora nos dias úteis e no fechamento
+ * das 18h. O botão existe para quando não se pode esperar a hora cheia:
+ * a publicação chegou agora e o ato é para hoje.
  *
  * O espelho é o que liga as duas telas. É por ele que marcar realizado
  * aqui fecha a intimação lá, e por isso vale puxar na mão quando se
