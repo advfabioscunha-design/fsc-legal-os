@@ -32,16 +32,114 @@ from datetime import datetime, timedelta, timezone
 
 from ..core.db import get_db, registrar_evento
 
-# Horário de Rondônia e Santa Catarina em termos práticos: o escritório
-# atende nos dois, e o aniversário é do dia de quem recebe, não do UTC.
-# Sem isto, quem faz aniversário dia 10 recebia o parabéns dia 9 às 21h.
-_FUSO = timezone(timedelta(hours=-4))
+# Brasília. É o relógio que o escritório usa, e o aniversário é do dia de
+# quem recebe, não do UTC: sem isto, quem faz aniversário dia 10 recebia
+# o parabéns dia 9 à noite.
+_FUSO = timezone(timedelta(hours=-3))
 
-MSG_ANIVERSARIO = (
-    "Feliz aniversário, {nome}! Toda a equipe da FC Advocacia deseja um "
-    "dia muito bom para você, com saúde e tranquilidade. É uma satisfação "
-    "cuidar dos seus direitos.\n\nDr. Fábio Cunha e equipe"
-)
+# O expediente. Felicitação é cortesia, e cortesia fora de hora vira
+# incômodo: mensagem do escritório às 6h da manhã ou às 22h assusta em
+# vez de agradar, e quem está com processo em curso pensa logo no pior.
+HORA_ABRE, HORA_FECHA = 8, 18
+
+
+def dentro_do_expediente() -> bool:
+    agora = _hoje()
+    # Sábado e domingo não. O escritório não trabalha, e mensagem
+    # automática no fim de semana denuncia a máquina na hora.
+    if agora.weekday() >= 5:
+        return False
+    return HORA_ABRE <= agora.hour < HORA_FECHA
+
+# A mensagem de reserva. Só sai quando o modelo não responde, e é
+# escrita de um jeito que não envergonhe: melhor uma frase correta e
+# simples do que silêncio no aniversário de um cliente.
+MSG_RESERVA = (
+    "Feliz aniversário, {nome}! É uma honra ter você como cliente, e a FC "
+    "Advocacia não deixaria esta data passar sem desejar um dia muito bom "
+    "para você e para quem está perto.\n\nDr. Fábio Cunha e equipe")
+
+
+def _regua() -> str:
+    """A calibração de como o escritório felicita, do arquivo da skill."""
+    from pathlib import Path
+    try:
+        return (Path(__file__).parent / "skills" /
+                "felicitacao_do_escritorio.md").read_text(encoding="utf-8")
+    except Exception:
+        return ("Escreva uma felicitação de aniversário curta e calorosa em "
+                "nome da FC Advocacia. Diga que é uma honra tê-lo como "
+                "cliente e que o escritório não deixaria a data passar em "
+                "branco. Nada sobre o processo, nada de oferta, nada de "
+                "promessa de resultado.")
+
+
+def _ja_disse_a_esta_pessoa(cliente_id: str) -> list[str]:
+    """As mensagens que ESTA pessoa já recebeu, para não repetir nenhuma."""
+    try:
+        r = get_db().table("relacionamento_envios").select("texto") \
+            .eq("cliente_id", cliente_id).eq("tipo", "ANIVERSARIO") \
+            .order("enviado_em", desc=True).limit(8).execute().data or []
+        return [str(x.get("texto") or "") for x in r if x.get("texto")]
+    except Exception:
+        return []
+
+
+def escrever_felicitacao(cliente_id: str, nome: str) -> str:
+    """A mensagem daquela pessoa, diferente de todas que ela já recebeu.
+
+    O histórico dela vai no pedido com todas as letras. É o que impede o
+    terceiro ano seguido de "desejamos saúde, paz e realizações": quem
+    recebe a mesma frase duas vezes percebe o molde, e o que era carinho
+    vira correspondência de banco."""
+    primeiro = (nome or "").strip().split(" ")[0] or "tudo bem"
+    anteriores = _ja_disse_a_esta_pessoa(cliente_id)
+
+    try:
+        import anthropic
+        from ..core.config import get_settings
+        from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+        s = get_settings()
+        if not s.claude_api_key:
+            return MSG_RESERVA.format(nome=primeiro)
+
+        pedido = [f"Escreva a felicitação de aniversário para {primeiro}."]
+        if anteriores:
+            pedido.append(
+                "ESTA PESSOA JÁ RECEBEU AS MENSAGENS ABAIXO. Nenhuma delas "
+                "pode voltar, nem parecida. Mude a estrutura, não o "
+                "sinônimo:\n\n"
+                + "\n\n---\n\n".join(anteriores))
+        else:
+            pedido.append("É a primeira felicitação que esta pessoa recebe "
+                          "do escritório.")
+
+        r = anthropic.Anthropic(api_key=s.claude_api_key,
+                                timeout=TEMPO_LIMITE,
+                                max_retries=TENTATIVAS).messages.create(
+            model=s.claude_model, max_tokens=400, system=_regua(),
+            messages=[{"role": "user", "content": "\n\n".join(pedido)}])
+        texto = "".join(b.text for b in r.content
+                        if getattr(b, "type", "") == "text").strip()
+    except Exception as e:
+        print(f"[relacionamento] felicitação não escrita pelo agente: {e}")
+        texto = ""
+
+    from ..core.texto import humanizar
+    texto = humanizar(texto).strip().strip('"')
+    if len(texto) < 40:
+        return MSG_RESERVA.format(nome=primeiro)
+
+    # A ÚLTIMA CONFERÊNCIA, FEITA POR CÓDIGO
+    #
+    # O modelo foi instruído a não repetir, e quase sempre não repete.
+    # "Quase sempre" não serve para uma mensagem que sai sozinha: aqui se
+    # compara com o que ela já recebeu, e a repetição cai para a reserva.
+    normal = " ".join(texto.lower().split())
+    for velha in anteriores:
+        if normal == " ".join(str(velha).lower().split()):
+            return MSG_RESERVA.format(nome=primeiro)
+    return texto
 
 
 def _hoje() -> datetime:
@@ -125,6 +223,14 @@ def aniversariantes_de_hoje() -> list[dict]:
 
 def parabenizar_aniversariantes() -> dict:
     """A rotina das 9h. Idempotente: rodar de novo não manda de novo."""
+    if not dentro_do_expediente():
+        # Não é falha: é a rotina sabendo que não é hora. Quem faz
+        # aniversário hoje continua na lista e recebe na próxima passada
+        # dentro do expediente.
+        return {"enviados": 0, "adiado": "fora do expediente",
+                "agora": _hoje().strftime("%H:%M"),
+                "janela": f"{HORA_ABRE}h às {HORA_FECHA}h de Brasília, dias úteis"}
+
     ano = _hoje().strftime("%Y")
     lista = aniversariantes_de_hoje()
     from ..integracoes.whatsapp import _enviar
@@ -134,8 +240,7 @@ def parabenizar_aniversariantes() -> dict:
         if not a["vai_receber"]:
             pulados.append({"nome": a["nome"], "motivo": a["motivo"]})
             continue
-        primeiro = (a["nome"] or "").strip().split(" ")[0] or "tudo bem"
-        texto = MSG_ANIVERSARIO.format(nome=primeiro)
+        texto = escrever_felicitacao(a["id"], a["nome"])
         # O registro vem ANTES do envio. Falhando o envio, fica a linha
         # com o erro e o cliente não recebe duas tentativas; falhando o
         # registro depois do envio, ele receberia de novo amanhã.

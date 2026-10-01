@@ -152,16 +152,35 @@ def _agendar_radar():
             CronTrigger(day_of_week=s.radar_dia_semana, hour=s.radar_hora, minute=0),
             id="radar_semanal", replace_existing=True, max_instances=1,
         )
-        # Relacionamento: parabéns de aniversário, 9h
+        # ── O CADASTRADOR, DUAS VEZES POR DIA ──────────────────
+        #
+        # Varre a base, arruma o que está torto, traz para o cadastro o
+        # que já existe espalhado pelo sistema, e manda os parabéns do
+        # dia. Varredura ANTES da felicitação de propósito: é ela que
+        # traz a data de nascimento guardada no pedido de contrato, e é
+        # justamente essa gente que a felicitação não encontrava.
+        #
+        # 9h e 15h, e não 8h: às 9h de Brasília são 8h em Rondônia, e o
+        # escritório atende nos dois fusos. Às 8h de Brasília metade dos
+        # clientes receberia às 7h, antes de o dia começar.
+        #
+        # A segunda passada pega quem foi cadastrado durante a manhã e
+        # quem teve a data preenchida hoje. A trava de uma mensagem por
+        # pessoa por ano garante que ninguém receba duas vezes.
         try:
-            from .agentes import relacionamento
+            from .agentes import cadastrador
             sched.add_job(
-                relacionamento.parabenizar_aniversariantes,
-                CronTrigger(hour=9, minute=0),
-                id="aniversarios", replace_existing=True, max_instances=1,
+                cadastrador.rotina_da_manha,
+                CronTrigger(day_of_week="mon-fri", hour=9, minute=0),
+                id="cadastrador_manha", replace_existing=True, max_instances=1,
+            )
+            sched.add_job(
+                cadastrador.rotina_da_tarde,
+                CronTrigger(day_of_week="mon-fri", hour=15, minute=0),
+                id="cadastrador_tarde", replace_existing=True, max_instances=1,
             )
         except Exception as e:
-            print(f"[aniversarios] job não agendado: {e}")
+            print(f"[cadastrador] jobs não agendados: {e}")
         # Lembretes: reenvia avisos que o cliente ainda não deu ciência
         try:
             sched.add_job(
@@ -5176,6 +5195,29 @@ def clientes_criar(body: ClienteNovo,
     registrar_evento(None, "CLIENTE_CADASTRADO_NA_BASE",
                      {"nome": nome, "por": quem.get("email")})
     return {"ok": True, "cliente": (criado or [{}])[0]}
+
+
+@app.post("/api/v1/clientes/varrer")
+def clientes_varrer(aplicar: bool = True,
+                    authorization: str | None = Header(default=None)):
+    """Roda a varredura da base à mão.
+
+    Com `aplicar=false` devolve o mesmo relatório SEM gravar nada: é como
+    se confere o que o agente faria antes de deixá-lo fazer."""
+    _perfil_do_token(authorization)
+    from .agentes import cadastrador
+    return cadastrador.varrer(aplicar=aplicar)
+
+
+@app.post("/api/v1/relacionamento/rodar")
+def relacionamento_rodar(authorization: str | None = Header(default=None)):
+    """Varre a base e manda os parabéns do dia, na hora.
+
+    Respeita o expediente e a trava de uma mensagem por pessoa por ano:
+    clicar duas vezes não manda duas vezes."""
+    _perfil_do_token(authorization)
+    from .agentes import cadastrador
+    return cadastrador.rodar(com_felicitacoes=True)
 
 
 @app.get("/api/v1/relacionamento/aniversariantes")
