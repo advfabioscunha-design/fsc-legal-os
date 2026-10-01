@@ -189,7 +189,14 @@ function PainelDoPedido({ id, fechar, recarregar }:
         body: JSON.stringify(corpo),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) { setErro(j?.detail || "Não deu certo."); return; }
+      if (!r.ok) {
+        // O motivo técnico só vem para quem é da equipe, e vem junto
+        // porque sem ele a pessoa não sabe se tenta de novo ou se
+        // avisa alguém.
+        setErro([j?.detail || "Não deu certo.", j?.tecnico]
+                  .filter(Boolean).join("  —  "));
+        return;
+      }
       await carregar(); recarregar();
     } catch { setErro("Falha de conexão."); }
     finally { setOcupado(""); }

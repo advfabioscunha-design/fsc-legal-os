@@ -81,10 +81,23 @@ async def _porteiro(request: Request, call_next):
         print(f"[erro] {request.method} {request.url.path}: {e!r}")
         import traceback
         traceback.print_exc()
-        return JSONResponse(
-            {"detail": "Deu erro aqui no servidor ao executar esta ação. "
-                       "O escritório já tem o registro do que houve."},
-            status_code=500)
+        # PARA A EQUIPE, O MOTIVO TÉCNICO VAI JUNTO
+        #
+        # "Deu erro no servidor" é honesto e é inútil: quem está no
+        # painel não tem como saber se tenta de novo, se avisa alguém ou
+        # se o caso travou. Ler o log exige entrar no servidor, e nem
+        # sempre há quem entre.
+        #
+        # Só para quem é da equipe, e nunca para o cliente: a tela do
+        # cliente não ganha nada com o nome de uma exceção, e o que
+        # vier junto dela pode ser interno demais para sair daqui.
+        de_dentro = getattr(getattr(request.state, "usuario", None) or {},
+                            "get", lambda *_: None)("papel")
+        corpo = {"detail": "Deu erro aqui no servidor ao executar esta ação. "
+                           "O escritório já tem o registro do que houve."}
+        if de_dentro in ("OPERADOR", "ADMIN"):
+            corpo["tecnico"] = f"{type(e).__name__}: {e}"[:600]
+        return JSONResponse(corpo, status_code=500)
 
 
 # Registrado depois do porteiro, de propósito: assim fica por fora dele
