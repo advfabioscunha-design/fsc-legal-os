@@ -31,6 +31,8 @@ from datetime import date, datetime, timezone as _tz
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 
@@ -93,7 +95,9 @@ FERRAMENTA = {
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key)
+    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
 
 
 def _parecer(system: str, conteudo: str) -> dict:

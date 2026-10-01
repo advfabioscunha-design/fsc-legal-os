@@ -10,6 +10,8 @@ e — com aprovação do cliente — enviado por WhatsApp ou e-mail.
 Persiste a conversa na tabela 'mensagens' (reaproveita a estrutura de casos).
 """
 import anthropic
+
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 
@@ -17,7 +19,9 @@ _client = None
 def _claude():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=get_settings().claude_api_key)
+        _client = anthropic.Anthropic(api_key=get_settings().claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
     return _client
 
 # Marcador que o frontend usa para abrir o documento no visualizador protegido

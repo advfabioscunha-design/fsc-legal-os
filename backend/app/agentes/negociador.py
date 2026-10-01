@@ -51,6 +51,8 @@ from datetime import datetime, timezone
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core.texto import REGRA_DE_ESCRITA, humanizar
@@ -273,7 +275,9 @@ def _claude():
     s = get_settings()
     if not s.claude_api_key:
         raise ValueError("Chave da Claude não configurada no servidor.")
-    return anthropic.Anthropic(api_key=s.claude_api_key)
+    return anthropic.Anthropic(api_key=s.claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
 
 
 def _pedido(pedido_id: str) -> dict:
@@ -693,12 +697,34 @@ def conversar(pedido_id: str, mensagem: str,
     resposta_final, conta_final, fechou = "", None, False
     proposta = False
 
+    # O QUE JÁ FOI FECHADO NÃO PODE SUMIR PORQUE A FRASE FALHOU
+    #
+    # O laço chama o modelo até quatro vezes, e no meio dele as
+    # ferramentas ESCREVEM no banco: `fechar` trava o preço, cancela a
+    # proposta pendente, muda a fase e começa a contar o prazo. Se a
+    # chamada seguinte falhasse, a exceção subia inteira e a mensagem
+    # nunca era guardada.
+    #
+    # O resultado era o pior desencontro possível: o pedido fechado no
+    # banco, com relógio correndo, e o cliente vendo erro na tela, sem
+    # PIX e sem nada na conversa. Ele tentava de novo, e o agente
+    # trabalhava em cima de um pedido que já estava fechado.
+    #
+    # Agora a falha interrompe o laço e segue para o fecho da função: o
+    # que foi gravado continua gravado, o cliente recebe o PIX se fechou,
+    # e a frase que falta é substituída por uma honesta.
+    falhou = False
     for _ in range(4):                    # trava contra laço infinito
-        r = cliente.messages.create(
-            model=get_settings().claude_model, max_tokens=900,
-            system=SYSTEM + "\n\n" + contexto,
-            tools=FERRAMENTAS, messages=mensagens,
-        )
+        try:
+            r = cliente.messages.create(
+                model=get_settings().claude_model, max_tokens=900,
+                system=SYSTEM + "\n\n" + contexto,
+                tools=FERRAMENTAS, messages=mensagens,
+            )
+        except Exception as e:
+            print(f"[negociador] parei no meio da conversa: {e}")
+            falhou = True
+            break
         usos = [b for b in r.content if getattr(b, "type", "") == "tool_use"]
         texto = "".join(getattr(b, "text", "") for b in r.content
                         if getattr(b, "type", "") == "text").strip()
@@ -726,8 +752,20 @@ def conversar(pedido_id: str, mensagem: str,
         resposta_final = texto or resposta_final
 
     if not resposta_final:
-        resposta_final = ("Me diga o que você achou do valor, quero entender "
-                          "o que está te segurando.")
+        # Fechou e a frase não saiu: o cliente precisa saber que fechou,
+        # porque o PIX vai junto e o prazo já começou a contar.
+        if fechou:
+            resposta_final = ("Fechado. Já registrei aqui e o seu pedido "
+                              "entrou na fila. O PIX está logo abaixo, e "
+                              "assim que o pagamento cair eu sigo com você.")
+        elif falhou:
+            resposta_final = ("Recebi a sua mensagem e ela está guardada. "
+                              "Tive um problema para responder agora; me "
+                              "mande de novo em um minuto, ou siga pelo "
+                              "botão aqui ao lado, que funciona igual.")
+        else:
+            resposta_final = ("Me diga o que você achou do valor, quero "
+                              "entender o que está te segurando.")
 
     # A peneira antes de sair. O modelo insiste em travessão e em
     # asterisco de negrito, e a caixa de conversa mostra os dois como

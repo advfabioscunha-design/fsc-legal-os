@@ -9,6 +9,8 @@ NÃO faz CRM, petição nem pagamento. A resposta é uma IA básica (ou simulada
 """
 import httpx
 import anthropic
+
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db
 
@@ -18,7 +20,9 @@ _cli = None
 def _claude():
     global _cli
     if _cli is None:
-        _cli = anthropic.Anthropic(api_key=get_settings().claude_api_key)
+        _cli = anthropic.Anthropic(api_key=get_settings().claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
     return _cli
 
 

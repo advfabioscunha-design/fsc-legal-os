@@ -55,6 +55,8 @@ from datetime import datetime, timedelta, timezone
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core.texto import REGRA_DE_ESCRITA, humanizar
@@ -311,7 +313,9 @@ def _claude():
     s = get_settings()
     if not s.claude_api_key:
         raise ValueError("Chave da Claude não configurada no servidor.")
-    return anthropic.Anthropic(api_key=s.claude_api_key)
+    return anthropic.Anthropic(api_key=s.claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
 
 
 def _agora() -> datetime:

@@ -31,6 +31,8 @@ from datetime import datetime, timezone as _tz
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..integracoes import jurisprudencia_api
@@ -231,7 +233,9 @@ def _resolver_tema(tema: str, contexto: str, tribunal: str | None,
 
     lista = "\n\n".join(_rotulo(p) for p in candidatos)
 
-    cliente = anthropic.Anthropic(api_key=s.claude_api_key)
+    cliente = anthropic.Anthropic(api_key=s.claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
     r = cliente.messages.create(
         model=s.claude_model, max_tokens=2500, system=INSTRUCAO,
         tools=[FERRAMENTA],

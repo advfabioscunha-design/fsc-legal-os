@@ -6,13 +6,17 @@ que o agente pergunte se o colaborador já tentou alinhar a dúvida com os coleg
 imediatos ou com o líder (cultura de autonomia e cadeia de comando).
 """
 import anthropic
+
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 
 _client = None
 def _claude():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=get_settings().claude_api_key)
+        _client = anthropic.Anthropic(api_key=get_settings().claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
     return _client
 
 SYSTEM_CEO = """

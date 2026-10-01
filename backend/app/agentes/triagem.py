@@ -5,6 +5,8 @@ Usa o modelo rápido (barato) — a triagem é curta.
 """
 import json
 import anthropic
+
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from .orquestrador import mudar_estado
@@ -28,7 +30,9 @@ DESCRICAO_NICHOS = """
 
 def identificar_grupo(relato: str) -> dict:
     s = get_settings()
-    client = anthropic.Anthropic(api_key=s.claude_api_key)
+    client = anthropic.Anthropic(api_key=s.claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
     resposta = client.messages.create(
         model=s.claude_model_rapido,
         max_tokens=300,
@@ -42,7 +46,16 @@ def identificar_grupo(relato: str) -> dict:
     texto = resposta.content[0].text.strip()
     if texto.startswith("```"):
         texto = "\n".join(texto.split("\n")[1:-1])
-    dados = json.loads(texto)
+    # Resposta em prosa em vez de JSON acontece, e não pode derrubar a
+    # entrada do lead. OUTROS é a fila da conferência humana: é o lugar
+    # certo para o que a máquina não soube ler.
+    try:
+        dados = json.loads(texto)
+    except (ValueError, TypeError):
+        print(f"[triagem] resposta fora do formato: {texto[:200]}")
+        return {"grupo": "OUTROS", "confianca": 0, "resumo": texto[:300]}
+    if not isinstance(dados, dict):
+        return {"grupo": "OUTROS", "confianca": 0, "resumo": texto[:300]}
     if dados.get("grupo") not in GRUPOS:
         dados["grupo"] = "OUTROS"
     return dados
@@ -149,13 +162,34 @@ def criar_caso(nome: str, contato: str, relato: str,
                 "continuado": True,
                 "primeira_resposta": resposta.get("resposta")}
 
+    # CLASSIFICAR ANTES DE GRAVAR, E NUNCA PERDER O LEAD
+    #
+    # O caso era gravado primeiro e classificado depois. Falhando a
+    # classificação (conta sem saldo, modelo respondendo em prosa em vez
+    # de JSON, rede), a exceção subia e o caso ficava no banco em LEAD,
+    # sem grupo e sem título. As telas do escritório filtram por esses
+    # campos, então o caso existia e não aparecia em lugar nenhum: o
+    # cliente escrevia, via erro, desistia, e ninguém no escritório
+    # ficava sabendo que ele existiu.
+    #
+    # Agora a classificação vem antes, e falhar nela não impede o lead
+    # de entrar: ele cai em OUTROS, que é a fila da conferência humana.
+    # Perder a classificação custa um minuto de alguém; perder o cliente
+    # custa o cliente.
+    try:
+        clas = identificar_grupo(relato)
+    except Exception as e:
+        print(f"[triagem] não classifiquei, o lead entra como OUTROS: {e}")
+        clas = {"grupo": "OUTROS", "confianca": 0,
+                "resumo": "Não foi possível classificar automaticamente. "
+                          "Confira o relato e defina o grupo."}
+
     caso = db.table("casos").insert({
         "cliente_id": cliente["id"],
         "relato_inicial": relato,
         "estado": "LEAD",
     }).execute().data[0]
 
-    clas = identificar_grupo(relato)
     NOMES = {
         "BANCARIO": "Direito Bancário", "IMOBILIARIO": "Distrato Imobiliário",
         "TRIBUTARIO": "Execução Fiscal", "CONSUMIDOR": "Recuperação de Consumo",

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 
@@ -104,7 +106,9 @@ TESES DO ESCRITÓRIO PARA ESTA MATÉRIA (diretriz interna, não são citações)
     if instrucao:
         contexto += f"\nORIENTAÇÃO DO ADVOGADO: {instrucao}\n"
 
-    cliente = anthropic.Anthropic(api_key=s.claude_api_key)
+    cliente = anthropic.Anthropic(api_key=s.claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
     r = cliente.messages.create(
         model=s.claude_model, max_tokens=8000, system=INSTRUCAO,
         messages=[{"role": "user", "content": contexto}],

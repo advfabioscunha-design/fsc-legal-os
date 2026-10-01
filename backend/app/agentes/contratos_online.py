@@ -42,6 +42,8 @@ from datetime import datetime, timezone
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from . import catalogo_contratos as catalogo
@@ -465,7 +467,9 @@ FERRAMENTA_REVISAO = {
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key)
+    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
 
 
 def redigir(pedido_id: str, auto: bool = False) -> dict:
@@ -761,6 +765,32 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
                    f"APONTAMENTOS:\n{lista}\n\nCONTRATO ATUAL:\n{p['minuta'][:40000]}"}],
     )
     texto = "".join(b.text for b in r.content if b.type == "text").strip()
+
+    # AS DUAS TRAVAS QUE A REVISÃO JÁ TINHA, E O AJUSTE NÃO
+    #
+    # Aqui o contrato inteiro é SUBSTITUÍDO pelo que voltou do modelo.
+    # Resposta vazia gravava `minuta = ""` e empurrava o pedido para a
+    # segunda revisão, que recusa minuta vazia logo na primeira linha. O
+    # pedido ficava preso numa fase sem saída, com o relógio andando e o
+    # prazo prometido ao cliente vencendo — e o contrato bom, que
+    # existia um instante antes, sobrescrito por nada.
+    #
+    # Resposta cortada no limite é pior ainda: grava um contrato que
+    # termina no meio de uma cláusula e tem cara de documento pronto.
+    #
+    # Falhar aqui é barato: o pedido fica onde está, com o texto que já
+    # tinha, e quem clicou tenta de novo.
+    if getattr(r, "stop_reason", "") == "max_tokens":
+        registrar_evento(None, "CONTRATO_AJUSTE_CORTADO", {"pedido": pedido_id})
+        raise ValueError("O contrato ajustado veio cortado no limite de "
+                         "tamanho. O texto anterior foi mantido; tente de "
+                         "novo, e se repetir o contrato precisa ser "
+                         "ajustado em partes.")
+    if len(texto) < 500:
+        registrar_evento(None, "CONTRATO_AJUSTE_VAZIO",
+                         {"pedido": pedido_id, "caracteres": len(texto)})
+        raise ValueError("O ajuste não devolveu o contrato. O texto anterior "
+                         "foi mantido; tente de novo em instantes.")
 
     campos = {"minuta": texto, "minuta_anterior": p["minuta"],
               "ajustado_em": _agora(), "atualizado_em": _agora()}

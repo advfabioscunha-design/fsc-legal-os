@@ -25,6 +25,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..integracoes import datajud, whatsapp
@@ -39,7 +41,9 @@ def _segunda_da_semana() -> date:
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key)
+    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
 
 
 def _leitura_estrategica(grupo: str, agg: dict) -> str:

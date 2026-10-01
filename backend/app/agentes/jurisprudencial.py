@@ -19,6 +19,8 @@ import uuid
 from datetime import datetime, timezone
 
 import anthropic
+
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 import fitz  # PyMuPDF
 
 from ..core.config import get_settings
@@ -44,7 +46,9 @@ REGRAS ABSOLUTAS:
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key)
+    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
 
 
 def _resumo_banco(grupo: str) -> list:

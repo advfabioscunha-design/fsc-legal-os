@@ -23,6 +23,8 @@ from datetime import datetime, timezone as _tz
 
 import anthropic
 
+from ..core.ia import TEMPO_LIMITE, TENTATIVAS
+
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 
@@ -385,7 +387,9 @@ def ler_da_conversa(caso_id: str) -> dict:
                                     "hon_valor_fixo,honorarios_valor") \
              .eq("id", caso_id).single().execute().data or {}
 
-    cliente = anthropic.Anthropic(api_key=s.claude_api_key)
+    cliente = anthropic.Anthropic(api_key=s.claude_api_key,
+                               timeout=TEMPO_LIMITE,
+                               max_retries=TENTATIVAS)
     r = cliente.messages.create(
         model=s.claude_model,
         max_tokens=1200,
