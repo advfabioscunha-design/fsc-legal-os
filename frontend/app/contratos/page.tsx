@@ -708,8 +708,6 @@ function PainelDoPedido({ id, fechar, recarregar }:
 
         {aba === "conversa" && (
           <div className="space-y-2">
-            <FaixaDoAtendimento id={id} estado={atendimento}
-              aoMudar={(novo) => setAtendimento(novo)} />
             {conversa.map((m) => (
               <div key={m.id}
                 className={`rounded-lg px-3 py-2 text-[11px] leading-relaxed ${m.autor === "CLIENTE"
@@ -766,6 +764,16 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 WhatsApp ainda não está ligado; quando o número for
                 aprovado, esta caixa passa a funcionar sozinha. */}
             <div className="space-y-2 pt-3">
+              {/* QUEM ESTÁ NO COMANDO FICA ONDE SE ESCREVE
+
+                  Estava no alto da aba, longe da caixa de texto. Numa
+                  conversa de cinquenta mensagens, isso significa fora
+                  da tela: a pessoa rola até o fim para responder e já
+                  não vê o aviso, nem o botão. A decisão de assumir se
+                  toma no instante de escrever, e é aqui que ela tem de
+                  estar. */}
+              <FaixaDoAtendimento id={id} estado={atendimento}
+                aoMudar={(novo) => setAtendimento(novo)} />
               <div className="flex flex-wrap items-center gap-4 text-[11px] text-white/55">
                 <span className="text-white/35">Vai pelo chat e também por</span>
                 <label className="flex cursor-pointer items-center gap-1.5">
