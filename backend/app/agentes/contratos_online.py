@@ -1733,15 +1733,19 @@ TIMBRE_PE = _timbre.PE
 
 
 def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
-    """Monta o .docx da minuta, com ou sem a identificação do escritório.
+    """Monta o .docx da minuta no padrão de contrato do escritório.
 
-    Sem modelo pronto de propósito: contrato de balcão não tem a
-    estrutura fixa das peças do escritório, e forçar um modelo aqui daria
-    margem esquisita em metade dos tipos."""
+    A régua tipográfica e o reconhecimento da estrutura estão em
+    `core/formato`: é lá que se decide o que é título de cláusula, o que
+    é quadro resumo e o que é campo de assinatura. Aqui fica só a folha
+    (margem, timbre, numeração de página), porque é a folha que muda
+    entre o contrato timbrado e a versão sem marca."""
     import io
     from docx import Document
     from docx.shared import Pt, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    from ..core import formato
 
     doc = Document()
     for sec in doc.sections:
@@ -1760,61 +1764,39 @@ def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
             sec.top_margin = Cm(3)
             sec.bottom_margin = Cm(2.5)
 
-    normal = doc.styles["Normal"]
-    normal.font.name = "Arial"
-    normal.font.size = Pt(12)
-
-
     # O QUE ERA MARCAÇÃO VIRA FORMATAÇÃO
     #
     # Os modelos do escritório são arquivos markdown e o redator escreve
     # como eles. Jogar essas linhas cruas no documento fazia o contrato
-    # chegar ao cliente com `## CAPÍTULO I` e `**Cláusula 2ª**` à mostra,
-    # como se ninguém tivesse lido antes de mandar.
+    # chegar ao cliente com o quadro resumo em barras verticais e o
+    # título da cláusula do mesmo tamanho do texto corrido.
     #
-    # A leitura acontece em `core/texto`, uma vez só, e serve também ao
-    # arquivo que abre no Word: os dois formatos saem do mesmo
-    # entendimento do que é título, item e negrito.
-    from ..core.texto import linhas_do_documento
+    # Quem decide o que é cada linha é `core/formato`, e o arquivo que
+    # abre no Word sai do mesmo entendimento: o advogado confere num e o
+    # cliente recebe no outro, então os dois têm de ser a mesma página.
+    formato.no_docx(doc, texto)
 
-    for l in linhas_do_documento(texto):
-        if l["tipo"] == "vazio":
-            doc.add_paragraph()
-            continue
+    # A NUMERAÇÃO DE FOLHA
+    #
+    # Num contrato ela não é detalhe de impressão: é o que impede que uma
+    # folha seja trocada depois da assinatura sem ninguém notar. Vai no
+    # rodapé, miúda, abaixo da tarja de contatos quando há timbre.
+    for sec in doc.sections:
+        try:
+            formato._numero_de_pagina(sec.footer)
+        except Exception as e:
+            print(f"[formato] numeração de folha não entrou: {e}")
 
-        par = doc.add_paragraph()
-        par.paragraph_format.space_after = Pt(6)
-
-        if l["tipo"] == "titulo":
-            par.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            par.paragraph_format.first_line_indent = None
-            run = par.add_run("".join(t for t, _ in l["pedacos"]))
-            run.bold = True
-            continue
-
-        if l["tipo"] == "item":
-            par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            par.paragraph_format.left_indent = Cm(1.25)
-            par.paragraph_format.first_line_indent = Cm(-0.5)
-            par.add_run("• ")
-        else:
-            par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            par.paragraph_format.first_line_indent = Cm(1.25)
-
-        for trecho, negrito in l["pedacos"]:
-            run = par.add_run(trecho)
-            run.bold = negrito
-
-    # O número do pedido fecha o documento. Fica no corpo, no fim, e não
-    # no rodapé de página: o rodapé agora é a tarja de contatos do
-    # timbre, e dois textos ali brigariam. Aqui ele aparece uma vez, na
-    # última folha, que é onde alguém procura quando precisa citar o
-    # documento numa conversa.
+    # O número do pedido fecha o documento, no corpo e na última folha,
+    # que é onde alguém procura quando precisa citar o documento numa
+    # conversa.
     if numero:
         rodape = doc.add_paragraph()
         rodape.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        rodape.paragraph_format.space_before = Pt(18)
         r = rodape.add_run(f"Documento elaborado pelo escritório. Pedido {numero}.")
         r.font.size = Pt(8)
+        r.font.name = formato.FONTE
 
     buf = io.BytesIO()
     doc.save(buf)

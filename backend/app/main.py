@@ -1807,7 +1807,7 @@ def peca_em_word(peticao_id: str):
     texto, nome = _peca_para_documento(peticao_id)
     html = ('<html xmlns:w="urn:schemas-microsoft-com:office:word">'
             '<head><meta charset="utf-8"><title>' + nome + '</title></head>'
-            '<body><div style="font-family:Times New Roman,serif;'
+            '<body><div style="font-family:Calibri Light,Calibri,sans-serif;'
             'font-size:12pt;line-height:1.5;text-align:justify">'
             + documento_em_html(texto) + "</div></body></html>")
     return Response(
@@ -4478,9 +4478,12 @@ def baixar_documento_word(pedido_id: str):
         '<html xmlns:w="urn:schemas-microsoft-com:office:word">'
         '<head><meta charset="utf-8"><title>'
         f'{p.get("numero") or "contrato"}</title></head><body>'
-        '<div style="font-family:Times New Roman,serif;font-size:12pt;'
-        'line-height:1.5;text-align:justify">' + topo + linhas + pe
-        + "</div></body></html>")
+        # A mesma fonte do padrão do escritório. Se este arquivo abrir
+        # com uma letra e o PDF do cliente sair com outra, o advogado
+        # aprova uma página e manda outra.
+        '<div style="font-family:Calibri Light,Calibri,sans-serif;'
+        'font-size:12pt;line-height:1.5;text-align:justify">'
+        + topo + linhas + pe + "</div></body></html>")
 
     nome = f"{p.get('numero') or 'contrato'}.doc"
     return Response(

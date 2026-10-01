@@ -190,7 +190,24 @@ def linhas_do_documento(texto: str) -> list[dict]:
 
 
 def documento_em_html(texto: str) -> str:
-    """O corpo do documento em HTML, para o arquivo que abre no Word."""
+    """O corpo do documento em HTML, para o arquivo que abre no Word.
+
+    Quem monta é `core/formato`, que é onde está o padrão do escritório:
+    quadro resumo em tabela, cláusula com título que não se separa do
+    texto, assinatura em bloco. Esta função continua existindo com o
+    nome antigo porque as rotas a chamam assim, e porque o fallback
+    abaixo é o que mantém o documento saindo se o padrão quebrar."""
+    try:
+        from . import formato
+        return formato.em_html(texto)
+    except Exception as e:
+        print(f"[formato] caí no formato simples: {e!r}")
+    return _html_simples(texto)
+
+
+def _html_simples(texto: str) -> str:
+    """O formato antigo, sem tabela e sem hierarquia. Rede de proteção:
+    documento feio sai; documento que não sai deixa o cliente esperando."""
     def escapar(s: str) -> str:
         return (s.replace("&", "&amp;").replace("<", "&lt;")
                  .replace(">", "&gt;"))

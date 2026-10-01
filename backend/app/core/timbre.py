@@ -45,7 +45,11 @@ PE_CM = 6.5
 # quem acrescentar um gerador novo não precise descobrir de novo que a
 # margem superior tem de ser maior que a faixa.
 MARGEM_TOPO_CM = 4.2
-MARGEM_PE_CM = 2.4
+# A margem de pé cabe a tarja de contatos MAIS a linha "fl. X de Y". Com
+# 2,4 cm, que era a medida de antes da numeração, o último bloco de
+# assinatura da folha era impresso por cima da tarja: o nome do cliente
+# atravessado pelo telefone do escritório, e isso só aparece no PDF.
+MARGEM_PE_CM = 3.1
 DISTANCIA_CABECALHO_CM = 0.4
 DISTANCIA_RODAPE_CM = 0.8
 
