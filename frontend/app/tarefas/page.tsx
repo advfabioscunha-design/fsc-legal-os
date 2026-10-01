@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import PainelLayout from "../components/PainelLayout";
+import CaixaArquivada from "../components/CaixaArquivada";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -30,8 +31,24 @@ function diaDaSemana(iso: string) {
   return nomes[new Date(iso + "T12:00").getDay()];
 }
 
+/* Fora do componente: a caixa de arquivo recarrega quando a função de
+   busca muda de identidade, e uma função redefinida a cada render
+   recarregaria sem parar. */
+async function buscarTarefasFeitas() {
+  const r = await fetch(`${API}/api/v1/tarefas?status=FEITA`);
+  const d = await r.json();
+  return (Array.isArray(d) ? d : []).map((t: any) => ({
+    id: t.id,
+    titulo: t.titulo,
+    detalhe: [t.casos?.clientes?.nome, t.casos?.numero_processo]
+      .filter(Boolean).join(" · "),
+    quando: dataBr(t.data),
+    resultado: t.nota || "",
+  }));
+}
+
 export default function Tarefas() {
-  const [aba, setAba] = useState<"hoje" | "semana" | "todas">("hoje");
+  const [aba, setAba] = useState<"hoje" | "semana" | "todas" | "arquivo">("hoje");
   const [tarefas, setTarefas] = useState<any[]>([]);
   const [membros, setMembros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,7 +121,8 @@ export default function Tarefas() {
         </section>
 
         <div className="flex flex-wrap items-center gap-2">
-          {([["hoje", "Hoje"], ["semana", "Próximos 7 dias"], ["todas", "Todas"]] as const)
+          {([["hoje", "Hoje"], ["semana", "Próximos 7 dias"], ["todas", "Todas"],
+             ["arquivo", "Arquivo (feitas)"]] as const)
             .map(([k, l]) => (
               <button key={k} onClick={() => setAba(k)}
                 className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
@@ -132,7 +150,13 @@ export default function Tarefas() {
           <p className="rounded-lg border border-[#2D7DD2]/40 bg-[#2D7DD2]/10 px-3 py-2 text-xs text-white/80">{aviso}</p>
         )}
 
-        {loading ? (
+        {aba === "arquivo" ? (
+          /* O que já foi feito sai da frente mas continua no arquivo, que
+             é o que sustenta a prestação de contas. Apagar é escolha sua,
+             item a item. */
+          <CaixaArquivada caixa="tarefas" titulo="Tarefas concluídas"
+            buscar={buscarTarefasFeitas} aoLimpar={load} />
+        ) : loading ? (
           <p className="text-sm text-[#8899AA]">Carregando…</p>
         ) : dias.length === 0 ? (
           <p className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/40">

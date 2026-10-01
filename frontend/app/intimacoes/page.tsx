@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import PainelLayout from "../components/PainelLayout";
+import CaixaArquivada from "../components/CaixaArquivada";
 import { porOab, FonteOcupada } from "../../lib/cnj";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
@@ -54,8 +55,38 @@ function dataBr(iso?: string | null) {
   return `${d}/${m}/${a}`;
 }
 
+/* Fora do componente de propósito: a caixa de arquivo recarrega quando a
+   função de busca muda de identidade, e uma função redefinida a cada
+   render recarregaria para sempre. */
+async function buscarIntimacoesResolvidas() {
+  const r = await fetch(`${API}/api/v1/intimacoes?status=RESOLVIDO&limite=200`);
+  const d = await r.json();
+  return (Array.isArray(d) ? d : []).map((i: any) => ({
+    id: i.id,
+    titulo: `${i.tribunal || "—"} · ${i.numero_processo || "sem número"}`,
+    detalhe: i.tipo || i.orgao || "",
+    quando: dataBr(i.data_movimento),
+    resultado: (i.conteudo || "").slice(0, 180),
+  }));
+}
+
+async function buscarPrazosCumpridos() {
+  /* A listagem de prazos não filtra por status, então filtramos aqui. */
+  const r = await fetch(`${API}/api/v1/prazos`);
+  const d = await r.json();
+  return (Array.isArray(d) ? d : [])
+    .filter((p: any) => p.status === "CONCLUIDO")
+    .map((p: any) => ({
+      id: p.id,
+      titulo: p.titulo || p.descricao || "prazo",
+      detalhe: [p.numero_processo, p.especialidade].filter(Boolean).join(" · "),
+      quando: dataBr(p.data),
+    }));
+}
+
 export default function Intimacoes() {
-  const [aba, setAba] = useState<"prazos" | "semana" | "conformidade" | "intimacoes">("prazos");
+  const [aba, setAba] = useState<
+    "prazos" | "semana" | "conformidade" | "intimacoes" | "arquivo">("prazos");
   const [plano, setPlano] = useState<any>(null);   // a semana pela frente
   const [auditoria, setAuditoria] = useState<any>(null);
   const [prazos, setPrazos] = useState<any[]>([]);
@@ -69,7 +100,9 @@ export default function Intimacoes() {
     setLoading(true);
     Promise.all([
       fetch(`${API}/api/v1/controladoria/fila?dias=120`).then((r) => r.json()).catch(() => []),
-      fetch(`${API}/api/v1/intimacoes?limite=200`).then((r) => r.json()).catch(() => []),
+      /* Só o que está em aberto: o resolvido vive na aba Arquivo. */
+      fetch(`${API}/api/v1/intimacoes?status=A_RESOLVER&limite=200`)
+        .then((r) => r.json()).catch(() => []),
       fetch(`${API}/api/v1/controladoria/semana`).then((r) => r.json()).catch(() => null),
       fetch(`${API}/api/v1/controladoria/auditoria`).then((r) => r.json()).catch(() => null),
     ]).then(([f, i, s, a]) => {
@@ -158,7 +191,7 @@ export default function Intimacoes() {
             { r: "Passaram da data de trabalho", v: vencidos, c: "#C0392B" },
             { r: "Vencem em 7 dias", v: semana, c: "#E5A44C" },
             { r: "Dependem do cliente", v: doCliente, c: "#2D7DD2" },
-            { r: "Intimações registradas", v: intimacoes.length, c: "#1DB954" },
+            { r: "Intimações a resolver", v: intimacoes.length, c: "#1DB954" },
           ].map((k) => (
             <div key={k.r} className="rounded-xl border border-white/10 bg-[#0B1F3B] p-4">
               <p className="text-2xl font-bold" style={{ color: k.c }}>{k.v}</p>
@@ -169,7 +202,8 @@ export default function Intimacoes() {
 
         <div className="flex flex-wrap items-center gap-2">
           {([["prazos", "Prazos (fila do dia)"], ["semana", "Minha semana"],
-             ["conformidade", "Conformidade"], ["intimacoes", "Publicações do Diário"]] as const)
+             ["conformidade", "Conformidade"], ["intimacoes", "Publicações do Diário"],
+             ["arquivo", "Arquivo (resolvidos)"]] as const)
             .map(([k, l]) => (
               <button key={k} onClick={() => setAba(k)}
                 className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
@@ -302,6 +336,17 @@ export default function Intimacoes() {
                 );
               })}
             </div>
+          </section>
+        ) : aba === "arquivo" ? (
+          /* O resolvido continua existindo, só sai da frente. Apagar é
+             outra decisão, item a item, e o servidor confere de novo. */
+          <section className="space-y-6">
+            <CaixaArquivada
+              caixa="prazos" titulo="Prazos cumpridos"
+              buscar={buscarPrazosCumpridos} aoLimpar={load} />
+            <CaixaArquivada
+              caixa="intimacoes" titulo="Intimações resolvidas"
+              buscar={buscarIntimacoesResolvidas} aoLimpar={load} />
           </section>
         ) : aba === "conformidade" ? (
           /* O que está quebrado e precisa da mão de alguém — não é

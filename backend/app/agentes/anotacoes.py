@@ -106,6 +106,14 @@ def resolver(anotacao_id: str, resultado: str = "", quem: str = "") -> dict:
         "resultado": resultado or None, "historico": hist,
     }).eq("id", anotacao_id).execute()
 
+    # O compromisso que espelha esta pendência na agenda fecha junto: sem
+    # isso a agenda cobraria amanhã o que acabou de ser resolvido aqui.
+    try:
+        from . import agenda
+        agenda.fechar_espelho(anotacao_id=anotacao_id)
+    except Exception as e:
+        print(f"[anotacoes] espelho não fechado: {e}")
+
     if a.get("caso_id"):
         registrar_evento(a["caso_id"], "PENDENCIA_RESOLVIDA", {
             "anotacao": anotacao_id, "texto": (a.get("texto") or "")[:300],

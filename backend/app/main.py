@@ -2055,6 +2055,12 @@ def atualizar_intimacao(intimacao_id: str, body: StatusIntimacao):
     if body.status not in ("A_RESOLVER", "RESOLVIDO", "PERDA_PRAZO"):
         raise HTTPException(400, "status inválido")
     get_db().table("intimacoes").update({"status": body.status, "lida": True}).eq("id", intimacao_id).execute()
+    # O compromisso que espelha esta intimação na agenda fecha junto. Sem
+    # isto a agenda continuaria cobrando um ato já resolvido, e as duas
+    # telas passam a discordar sobre o mesmo fato.
+    if body.status in ("RESOLVIDO", "PERDA_PRAZO"):
+        from .agentes import agenda
+        agenda.fechar_espelho(intimacao_id=intimacao_id)
     return {"ok": True}
 
 
@@ -2458,6 +2464,11 @@ def criar_prazo(body: Prazo):
 @app.patch("/api/v1/prazos/{prazo_id}")
 def concluir_prazo(prazo_id: str, status: str = "CONCLUIDO"):
     get_db().table("prazos").update({"status": status}).eq("id", prazo_id).execute()
+    # Fecha o compromisso que espelha este prazo na agenda, para a agenda
+    # não cobrar amanhã um ato dado como cumprido hoje.
+    if status == "CONCLUIDO":
+        from .agentes import agenda
+        agenda.fechar_espelho(prazo_id=prazo_id)
     return {"ok": True}
 
 
@@ -4472,6 +4483,65 @@ class TarefaAcao(BaseModel):
     nova_data: str | None = None
     motivo: str = ""
     responsavel_id: str | None = None
+
+
+# ── LIMPAR O QUE JÁ FOI RESOLVIDO ──────────────────────────────
+#
+# As caixas de tarefa, pendência e intimação acumulam: o que foi
+# resolvido continua ali, e depois de alguns meses a tela de trabalho
+# vira um arquivo morto com um punhado de itens vivos no meio. Quem
+# abre para ver o que falta fazer gasta o tempo filtrando com os olhos.
+#
+# Duas travas, e as duas importam:
+#
+# SÓ APAGA O QUE ESTÁ RESOLVIDO. Um item aberto pode ser um prazo, e
+# prazo apagado por engano não deixa rastro de que existia. A conferência
+# é feita aqui no servidor, não na tela: a tela some, o servidor fica.
+#
+# SÓ APAGA O QUE FOI ESCOLHIDO. Nada de "limpar tudo" sem lista: quem
+# clica em limpar sempre acha que sabe o que vai embora, e às vezes não
+# sabe. A lista vem marcada da tela, item a item.
+
+_CAIXAS = {
+    "tarefas": ("tarefas", ("FEITA", "CANCELADA")),
+    "anotacoes": ("anotacoes", ("RESOLVIDA", "CANCELADA")),
+    "intimacoes": ("intimacoes", ("RESOLVIDO", "PERDA_PRAZO")),
+    "prazos": ("prazos", ("CONCLUIDO",)),
+}
+
+
+class LimpezaDaCaixa(BaseModel):
+    ids: list[str]
+
+
+@app.post("/api/v1/caixas/{caixa}/limpar")
+def limpar_caixa(caixa: str, body: LimpezaDaCaixa):
+    """Apaga os itens marcados, desde que já estejam resolvidos."""
+    alvo = _CAIXAS.get(caixa)
+    if not alvo:
+        raise HTTPException(404, "Caixa desconhecida.")
+    tabela, resolvidos = alvo
+    ids = [i for i in (body.ids or []) if i][:200]
+    if not ids:
+        return {"apagados": 0}
+
+    db = get_db()
+    linhas = db.table(tabela).select("id,status").in_("id", ids) \
+        .limit(300).execute().data or []
+    podem = [l["id"] for l in linhas if l.get("status") in resolvidos]
+    recusados = [l["id"] for l in linhas if l.get("status") not in resolvidos]
+
+    for i in podem:
+        try:
+            db.table(tabela).delete().eq("id", i).execute()
+        except Exception as e:
+            print(f"[caixa] {tabela} {i} não apagado: {e}")
+    registrar_evento(None, "CAIXA_LIMPA",
+                     {"caixa": caixa, "apagados": len(podem),
+                      "recusados": len(recusados)})
+    return {"apagados": len(podem), "recusados": len(recusados),
+            "aviso": ("Alguns itens não foram apagados porque ainda estão "
+                      "abertos." if recusados else "")}
 
 
 @app.get("/api/v1/tarefas")

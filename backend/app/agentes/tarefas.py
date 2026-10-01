@@ -408,7 +408,7 @@ def concluir(tarefa_id: str, quem: str = "", nota: str = "") -> dict:
                 pass
     if achado[0].get("intimacao_id"):
         try:
-            db.table("intimacoes").update({"status": "RESOLVIDA"}) \
+            db.table("intimacoes").update({"status": "RESOLVIDO", "lida": True}) \
                 .eq("id", achado[0]["intimacao_id"]).execute()
             fechados.append("intimação")
         except Exception as e:

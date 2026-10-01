@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import PainelLayout from "../components/PainelLayout";
+import CaixaArquivada from "../components/CaixaArquivada";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -23,6 +24,22 @@ function dataBr(iso?: string | null) {
   if (!iso) return "sem data";
   const [a, m, d] = iso.slice(0, 10).split("-");
   return `${d}/${m}/${a}`;
+}
+
+/* Fora do componente: a caixa de arquivo recarrega quando a função de
+   busca muda de identidade. */
+async function buscarPendenciasResolvidas() {
+  const r = await fetch(`${API}/api/v1/anotacoes?status=RESOLVIDA`);
+  const d = await r.json();
+  return (Array.isArray(d) ? d : []).map((a: any) => ({
+    id: a.id,
+    titulo: a.texto,
+    detalhe: [a.casos?.clientes?.nome,
+              a.numero_processo || a.casos?.numero_processo,
+              a.membros_equipe?.nome].filter(Boolean).join(" · "),
+    quando: dataBr(a.data_resolver),
+    resultado: a.resultado ? `✓ ${a.resultado}` : "",
+  }));
 }
 
 export default function Pendencias() {
@@ -49,8 +66,11 @@ export default function Pendencias() {
 
   function load() {
     setLoading(true);
+    /* No arquivo a lista vem da própria caixa; aqui só os membros, que o
+       formulário de anotar usa. */
+    const lista = status === "ARQUIVO" ? "ABERTA" : status;
     Promise.all([
-      fetch(`${API}/api/v1/anotacoes?status=${status}`).then((r) => r.json()).catch(() => []),
+      fetch(`${API}/api/v1/anotacoes?status=${lista}`).then((r) => r.json()).catch(() => []),
       fetch(`${API}/api/v1/membros`).then((r) => r.json()).catch(() => []),
     ]).then(([a, m]) => {
       setItens(Array.isArray(a) ? a : []);
@@ -196,7 +216,8 @@ export default function Pendencias() {
         {/* Lista */}
         <div className="flex flex-wrap items-center gap-2">
           {([["ABERTA", "Abertas"], ["RESOLVIDA", "Resolvidas"],
-             ["CANCELADA", "Canceladas"], ["TODAS", "Todas"]] as const).map(([k, l]) => (
+             ["CANCELADA", "Canceladas"], ["TODAS", "Todas"],
+             ["ARQUIVO", "Arquivo (resolvidas)"]] as const).map(([k, l]) => (
             <button key={k} onClick={() => setStatus(k)}
               className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
                 status === k ? "bg-[#C9A84C] text-[#0A1628]" : "bg-white/5 text-[#8899AA] hover:text-white"}`}>
@@ -210,7 +231,12 @@ export default function Pendencias() {
           </span>
         </div>
 
-        {loading ? (
+        {status === "ARQUIVO" ? (
+          /* Resolvida continua valendo como histórico do caso. Sai da
+             frente, e apagar é decisão sua, item a item. */
+          <CaixaArquivada caixa="anotacoes" titulo="Pendências resolvidas"
+            buscar={buscarPendenciasResolvidas} aoLimpar={load} />
+        ) : loading ? (
           <p className="text-sm text-[#8899AA]">Carregando…</p>
         ) : itens.length === 0 ? (
           <p className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/40">
