@@ -289,8 +289,15 @@ def relatorio_docx(caso_id: str, so_trabalho: bool = True) -> tuple[bytes, str]:
     itens = linha_do_tempo(caso_id, natureza=TRABALHO if so_trabalho else None)
 
     doc = Document()
+    # O relatório vai para o cliente, e às vezes para o juízo junto com
+    # a prestação de contas. Sair em folha branca, sem nada que diga de
+    # onde veio, é a diferença entre documento do escritório e papel
+    # impresso por alguém.
+    from ..core import timbre
     for s in doc.sections:
         s.left_margin = s.right_margin = Cm(2.5)
+        if timbre.disponivel():
+            timbre.aplicar(s)
     normal = doc.styles["Normal"]
     normal.font.name = "Calibri"
     normal.font.size = Pt(11)

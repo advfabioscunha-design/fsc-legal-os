@@ -4310,24 +4310,29 @@ def baixar_documento_word(pedido_id: str):
     # A logo vai embutida no próprio arquivo, em base64: documento com
     # imagem apontando para um endereço quebra assim que sai do
     # computador de quem baixou, e um contrato é feito para circular.
-    topo = ""
+    topo = pe = ""
     if p.get("com_timbre") is not False:
         try:
             import base64
-            from .agentes.contratos_online import LOGO
-            dados = base64.b64encode(LOGO.read_bytes()).decode()
-            topo = ('<p style="text-align:center;margin-bottom:18pt">'
-                    f'<img src="data:image/png;base64,{dados}" '
-                    'style="width:6cm"></p>')
+            from .agentes.contratos_online import TIMBRE_TOPO, TIMBRE_PE
+
+            def embutir(caminho, largura, estilo=""):
+                dados = base64.b64encode(caminho.read_bytes()).decode()
+                return (f'<p style="{estilo}"><img src="data:image/png;'
+                        f'base64,{dados}" style="width:{largura}"></p>')
+
+            topo = embutir(TIMBRE_TOPO, "17cm", "margin:0 0 16pt")
+            pe = embutir(TIMBRE_PE, "6.5cm",
+                         "text-align:center;margin:24pt 0 0")
         except Exception as e:
-            print(f"[balcao] logo não entrou no Word: {e}")
+            print(f"[balcao] timbre não entrou no Word: {e}")
 
     html = (
         '<html xmlns:w="urn:schemas-microsoft-com:office:word">'
         '<head><meta charset="utf-8"><title>'
         f'{p.get("numero") or "contrato"}</title></head><body>'
         '<div style="font-family:Times New Roman,serif;font-size:12pt;'
-        'line-height:1.5;text-align:justify">' + topo + linhas
+        'line-height:1.5;text-align:justify">' + topo + linhas + pe
         + "</div></body></html>")
 
     nome = f"{p.get('numero') or 'contrato'}.doc"

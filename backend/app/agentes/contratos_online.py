@@ -1693,11 +1693,14 @@ def restaurar(pedido_id: str, quem: str = "") -> dict:
 # redigiu se identifica no rodapé, com o número do pedido, e é só o que
 # precisa estar ali.
 #
-# A logo é a mesma do site, convertida para PNG porque o Word e o
-# gerador de PDF não leem SVG. Fica versionada junto com o código: logo
-# em pasta compartilhada é logo que um dia alguém troca por outra
-# versão e ninguém percebe.
-LOGO = Path(__file__).resolve().parent.parent / "modelos" / "marca" / "logo.png"
+# O papel timbrado mora em core/timbre, porque não é só do balcão: o
+# relatório do caso e tudo o mais que sai em nome do escritório usam
+# o mesmo. Duas cópias da mesma faixa divergem no dia em que uma for
+# atualizada.
+from ..core import timbre as _timbre
+
+TIMBRE_TOPO = _timbre.TOPO
+TIMBRE_PE = _timbre.PE
 
 
 def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
@@ -1713,26 +1716,25 @@ def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
 
     doc = Document()
     for sec in doc.sections:
-        sec.top_margin = Cm(2.5 if com_timbre else 3)
-        sec.bottom_margin = Cm(2.5)
-        sec.left_margin = Cm(3)
+        # Com timbre, as margens são as do papel do escritório: a faixa
+        # ocupa o alto e o texto começa abaixo dela. Sem timbre, a
+        # margem superior maior é o que dá ao documento o respiro que a
+        # faixa daria.
+        sec.left_margin = Cm(2.5 if com_timbre else 3)
         sec.right_margin = Cm(2)
+        if com_timbre:
+            # `aplicar` também acerta as margens: a faixa tem 3,3 cm de
+            # altura, e margem superior curta faz o primeiro parágrafo
+            # nascer por cima do brasão.
+            _timbre.aplicar(sec)
+        else:
+            sec.top_margin = Cm(3)
+            sec.bottom_margin = Cm(2.5)
 
     normal = doc.styles["Normal"]
     normal.font.name = "Arial"
     normal.font.size = Pt(12)
 
-    if com_timbre:
-        par = doc.add_paragraph()
-        par.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        try:
-            par.add_run().add_picture(str(LOGO), width=Cm(6))
-        except Exception as e:
-            # Sem a logo o documento continua saindo. Um contrato sem
-            # marca no alto é um contrato; um contrato que não sai não
-            # é nada, e o cliente está esperando por ele.
-            print(f"[balcao] logo não entrou no documento: {e}")
-        doc.add_paragraph()
 
     # O QUE ERA MARCAÇÃO VIRA FORMATAÇÃO
     #
@@ -1774,7 +1776,12 @@ def _docx_da_minuta(texto: str, com_timbre: bool, numero: str = "") -> bytes:
             run = par.add_run(trecho)
             run.bold = negrito
 
-    if com_timbre and numero:
+    # O número do pedido fecha o documento. Fica no corpo, no fim, e não
+    # no rodapé de página: o rodapé agora é a tarja de contatos do
+    # timbre, e dois textos ali brigariam. Aqui ele aparece uma vez, na
+    # última folha, que é onde alguém procura quando precisa citar o
+    # documento numa conversa.
+    if numero:
         rodape = doc.add_paragraph()
         rodape.alignment = WD_ALIGN_PARAGRAPH.CENTER
         r = rodape.add_run(f"Documento elaborado pelo escritório. Pedido {numero}.")
