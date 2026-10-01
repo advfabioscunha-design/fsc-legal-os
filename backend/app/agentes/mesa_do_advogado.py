@@ -587,3 +587,172 @@ def consultas(pedido_id: str, limite: int = 50) -> list[dict]:
                       "ao_cliente": pay.get("ao_cliente") or [],
                       "em": l.get("criado_em")})
     return saida[-limite:]
+
+
+# ══════════════════════════════════════════════════════════════════
+# O CLIENTE RESPONDEU — E O TEXTO NÃO ESPERA O ADVOGADO VOLTAR
+#
+# O advogado mandou perguntar e fechou a tela: foi para uma audiência,
+# para outro caso, para casa. A resposta do cliente chega meia hora
+# depois e, até aqui, ficava parada na conversa do pedido esperando
+# alguém abrir, ler, entender a qual ponto se referia e aplicar à mão.
+# Num pedido com entrega em seis horas, essa espera é metade do prazo.
+#
+# Agora o especialista trata a resposta na hora: lê, aplica no contrato
+# o que decorre dela, marca a dúvida como respondida e deixa o recado
+# para o advogado. Quando ele voltar, encontra feito e com o porquê.
+#
+# O QUE ELE NÃO FAZ SOZINHO
+#
+# Não aprova, não envia ao cliente, não muda de fase. O documento
+# continua parado na conferência final esperando a leitura de quem
+# assina. O que mudou foi o tempo de espera, não quem decide.
+#
+# E não inventa a decisão: se a resposta do cliente for ambígua, ele
+# não escolhe por ele. Registra o que entendeu, não mexe no texto, e
+# diz ao advogado que a resposta não fechou o ponto.
+# ══════════════════════════════════════════════════════════════════
+
+SYSTEM_RESPOSTA = """Você é o advogado especialista deste caso. O cliente
+acabou de responder a uma pergunta que o escritório fez sobre o
+contrato, e você vai tratar isso antes de o advogado voltar à tela.
+
+O QUE FAZER
+
+Leia a resposta do cliente e decida o que ela significa para o texto.
+
+Se ela resolve o ponto, aplique a alteração no contrato com
+`alterar_texto` e explique, em duas ou três linhas, o que mudou e por
+quê. Quem vai ler é o advogado, ao reabrir o documento.
+
+Se for ciência ou autorização, e o cliente autorizou manter como estava,
+não mexa na cláusula: registre que a autorização veio e que o texto
+segue como pedido por ele.
+
+Se a resposta for ambígua, ou não responder o que foi perguntado, NÃO
+ADIVINHE. Não mexa no texto. Diga ao advogado o que o cliente disse, o
+que ficou faltando, e sugira a pergunta seguinte. Escolher pelo cliente
+num ponto que é dele é o pior erro possível aqui.
+
+COMO ESCREVER
+
+Você está deixando um recado para quem vai voltar e precisa se situar
+em dez segundos. Comece dizendo o que o cliente respondeu. Depois o que
+você fez, ou por que não fez nada.
+
+Sem saudação, sem fechamento, sem travessão, sem asterisco."""
+
+
+def tratar_resposta_do_cliente(pedido_id: str, resposta: str) -> dict:
+    """Chamado quando o cliente responde e há pergunta do escritório aberta."""
+    db = get_db()
+    r = db.table("pedidos_contrato") \
+        .select("minuta,duvidas_advogado,fase,numero").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not r:
+        return {"tratou": False}
+    p = r[0]
+
+    abertas = [d for d in (p.get("duvidas_advogado") or [])
+               if not d.get("respondida_em")]
+    if not abertas:
+        return {"tratou": False}
+
+    minuta = (p.get("minuta") or "")
+    if not minuta.strip():
+        return {"tratou": False}
+
+    perguntas = "\n".join(f"- {d.get('pergunta')}" for d in abertas)
+    s = get_settings()
+    cliente = _claude()
+    mensagens = [{"role": "user", "content":
+                  f"{dossie(pedido_id)}\n\n"
+                  f"=== O QUE O ESCRITÓRIO PERGUNTOU E ESTÁ EM ABERTO ===\n"
+                  f"{perguntas}\n\n"
+                  f"=== O QUE O CLIENTE ACABOU DE RESPONDER ===\n"
+                  f"{resposta[:3000]}"}]
+
+    base, feitas, recusadas, texto = minuta, [], [], ""
+    for _ in range(2):
+        try:
+            rr = cliente.messages.create(
+                model=s.claude_model, max_tokens=2000,
+                system=SYSTEM_RESPOSTA, tools=[FERRAMENTA_ALTERAR],
+                messages=mensagens)
+        except Exception as e:
+            print(f"[mesa] não tratei a resposta do cliente: {e}")
+            return {"tratou": False, "erro": str(e)[:200]}
+
+        texto = "".join(b.text for b in rr.content if b.type == "text").strip()
+        usos = [b for b in rr.content if getattr(b, "type", "") == "tool_use"]
+        if not usos:
+            break
+        mensagens.append({"role": "assistant", "content": rr.content})
+        saidas = []
+        for u in usos:
+            base, ok, nao = _aplicar(base, (u.input or {}).get("alteracoes") or [])
+            feitas += ok
+            recusadas += nao
+            saidas.append({"type": "tool_result", "tool_use_id": u.id,
+                           "content": json.dumps(
+                               {"aplicadas": len(ok),
+                                "recusadas": [x.get("porque") for x in nao]},
+                               ensure_ascii=False)})
+        mensagens.append({"role": "user", "content": saidas})
+
+    texto = humanizar(texto) or "O cliente respondeu. Confira a conversa."
+
+    # A dúvida só é dada por respondida aqui, e não quando a mensagem
+    # chegou: mensagem do cliente pode ser sobre outra coisa, e fechar a
+    # pendência cedo demais faria o ponto sumir sem ter sido tratado.
+    agora = _agora()
+    todas = list(p.get("duvidas_advogado") or [])
+    for d in todas:
+        if not d.get("respondida_em"):
+            d["respondida_em"] = agora
+            d["resposta"] = resposta[:1000]
+
+    campos = {"duvidas_advogado": todas, "atualizado_em": agora}
+    if feitas:
+        # A versão anterior fica guardada: o advogado pode discordar do
+        # que foi aplicado na ausência dele, e precisa poder voltar.
+        campos.update({"minuta": base, "minuta_anterior": minuta})
+    try:
+        db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
+    except Exception as e:
+        print(f"[mesa] não gravei o tratamento da resposta: {e}")
+        return {"tratou": False}
+
+    # O recado entra no mesmo fio que o advogado lê ao abrir o
+    # documento, com autor próprio: ele precisa distinguir de relance o
+    # que ele mesmo perguntou do que aconteceu enquanto esteve fora.
+    registrar_evento(None, "ADVOGADO_CONSULTOU", {
+        "pedido": pedido_id, "quem": "cliente",
+        "pergunta": f"O cliente respondeu: {resposta[:400]}",
+        "resposta": texto[:1000],
+        "alteracoes": [{"motivo": a.get("motivo", "")} for a in feitas],
+        "recusadas": len(recusadas), "ao_cliente": []})
+
+    # E uma tarefa, porque recado dentro de uma tela só é visto por quem
+    # abre a tela. O pedido está parado esperando a leitura dele.
+    try:
+        from datetime import timedelta, timezone as _tz
+        hoje = (datetime.now(timezone.utc)
+                .astimezone(_tz(timedelta(hours=-4))).date().isoformat())
+        db.table("tarefas").insert({
+            "titulo": (f"O cliente respondeu no pedido "
+                       f"{p.get('numero') or ''}".strip()
+                       + (" e o texto foi ajustado" if feitas
+                          else ", conferir antes de aprovar")),
+            "descricao": (f"Resposta do cliente:\n{resposta[:800]}\n\n"
+                          f"O que o especialista fez:\n{texto[:1200]}"),
+            "origem": "CONTRATO", "pedido_id": pedido_id, "data": hoje,
+            "prioridade": "ALTA",
+            "motivo": "Pedido parado na conferência final esperando leitura.",
+            "criado_por": "ESPECIALISTA",
+        }).execute()
+    except Exception as e:
+        print(f"[mesa] tarefa de conferência não criada: {e}")
+
+    return {"tratou": True, "alteracoes": len(feitas),
+            "recusadas": len(recusadas), "recado": texto}

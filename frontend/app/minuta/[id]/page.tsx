@@ -65,6 +65,47 @@ export default function MesaDaMinuta() {
 
   useEffect(() => { carregar(); }, [carregar]);
 
+  /* O TEXTO PODE MUDAR SEM SER POR VOCÊ
+   *
+   * O cliente responde a uma pergunta do escritório e o especialista
+   * aplica o ajuste no contrato, mesmo com esta tela aberta. Sem avisar,
+   * aconteceria o pior: o advogado continuaria editando a versão
+   * antiga, salvaria por cima e o ajuste sumiria sem ninguém notar.
+   *
+   * Quando ele não tem alteração pendente, a tela se atualiza sozinha e
+   * diz o que houve. Quando tem, não toca em nada: pergunta. Escolher
+   * por ele entre o texto dele e o que chegou seria perder trabalho de
+   * um dos dois lados. */
+  const [chegouDeFora, setChegouDeFora] = useState<string | null>(null);
+  useEffect(() => {
+    async function olhar() {
+      if (document.hidden) return;
+      try {
+        const r = await fetch(`${API}/api/v1/contratos/pedidos/${id}`);
+        const d = await r.json();
+        const nova = d?.minuta || "";
+        if (!nova || nova === ultimoSalvo.current) return;
+        if (texto === ultimoSalvo.current) {
+          ultimoSalvo.current = nova;
+          setTexto(nova);
+          setP(d);
+          setChegouDeFora("O documento foi atualizado por fora desta tela. "
+                          + "Veja na conversa do especialista o que mudou.");
+        } else {
+          setChegouDeFora("O documento mudou no servidor e você tem "
+                          + "alterações não salvas. Salve as suas ou "
+                          + "recarregue a página para ver as de lá.");
+        }
+      } catch { /* a próxima volta tenta de novo */ }
+    }
+    const t = setInterval(olhar, 10000);
+    document.addEventListener("visibilitychange", olhar);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", olhar);
+    };
+  }, [id, texto]);
+
   const salvar = useCallback(async (conteudo: string) => {
     if (!conteudo.trim() || conteudo === ultimoSalvo.current) return;
     setEstado("salvando"); setErro("");
@@ -239,6 +280,15 @@ export default function MesaDaMinuta() {
         {erro && (
           <p className="bg-[#C0392B]/20 px-5 py-2 text-center text-[11px] text-[#ffb3aa]">
             {erro}
+          </p>
+        )}
+        {chegouDeFora && (
+          <p className="flex items-center justify-center gap-3 bg-[#2D7DD2]/15 px-5 py-2 text-center text-[11px] text-[#9ec8f0]">
+            {chegouDeFora}
+            <button onClick={() => setChegouDeFora(null)}
+              className="underline decoration-dotted hover:text-white">
+              entendi
+            </button>
           </p>
         )}
       </div>

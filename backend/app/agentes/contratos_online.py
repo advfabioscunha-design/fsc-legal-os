@@ -3176,6 +3176,28 @@ def resposta_do_cliente(pedido_id: str, texto: str, canal: str = "PLATAFORMA",
     #
     # A resposta é gerada depois do preenchimento de propósito: assim
     # ela já conta o que mudou com a mensagem que acabou de chegar.
+    # O CLIENTE RESPONDEU AO QUE O ESCRITÓRIO PERGUNTOU
+    #
+    # Quando há pergunta do advogado em aberto, a mensagem que chega
+    # quase sempre é a resposta dela. O especialista trata na hora: lê,
+    # aplica no contrato o que decorre dali, fecha a pendência e deixa o
+    # recado. Sem isso a resposta ficava parada esperando alguém abrir o
+    # documento, e num pedido de seis horas essa espera é metade do
+    # prazo.
+    #
+    # Fica antes da resposta do atendimento de propósito: assim a frase
+    # que o cliente recebe já sabe que o ponto foi tratado, em vez de
+    # dizer que vai encaminhar algo que já foi feito.
+    if texto.strip():
+        try:
+            from . import mesa_do_advogado
+            tratado = mesa_do_advogado.tratar_resposta_do_cliente(
+                pedido_id, texto)
+            if tratado.get("tratou"):
+                saida["duvida_tratada"] = tratado
+        except Exception as e:
+            print(f"[balcao] resposta do cliente não foi tratada: {e}")
+
     # SALVO QUANDO TEM GENTE NA CONVERSA
     #
     # Alguém do escritório assumiu há pouco: o agente cala. Os dois
