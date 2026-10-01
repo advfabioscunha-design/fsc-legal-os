@@ -53,6 +53,7 @@ const CONTROLE: Item[] = [
   { href: "/intimacoes", label: "Intimações e prazos", icone: I("M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7M10.5 20a1.8 1.8 0 0 0 3 0") },
   { href: "/processos", label: "Todos os processos", icone: I("M3 7h6l2 2h10v10H3z") },
   { href: "/agenda", label: "Agenda", icone: I("M7 3v3M17 3v3M3.5 9h17M4.5 6h15v14h-15z") },
+  { href: "/clientes", label: "Clientes", icone: I("M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M22 11h-6") },
   { href: "/equipe", label: "Equipe", icone: I("M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M22 20v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8") },
   { href: "/admin", label: "Administração", icone: I("M4 20V10M10 20V4M16 20v-7M22 20H2") },
   { href: "/assistente", label: "Assistente", icone: I("M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z") },

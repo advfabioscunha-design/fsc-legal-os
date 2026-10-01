@@ -5065,6 +5065,170 @@ async def webhook_whatsapp(req: Request):
     return whatsapp.processar_webhook(await req.json())
 
 
+# ══════════════════════════════════════════════════════════════════
+# O BANCO DE CLIENTES DO ESCRITÓRIO
+#
+# A tabela sempre existiu; o que não existia era uma porta para olhar a
+# base inteira. Quem quisesse saber quantos clientes o escritório tem,
+# ou quem faz aniversário este mês, teria de abrir caso por caso.
+# ══════════════════════════════════════════════════════════════════
+@app.get("/api/v1/clientes")
+def clientes_listar(busca: str = "", mes_aniversario: int = 0,
+                    sem_nascimento: bool = False, descadastrados: bool = False,
+                    pagina: int = 0, por_pagina: int = 50,
+                    authorization: str | None = Header(default=None)):
+    """A base de clientes, com busca e os filtros que o escritório usa.
+
+    `sem_nascimento` é o filtro mais útil da tela e o menos óbvio: é a
+    lista do que falta preencher para a felicitação funcionar. Sem ele,
+    descobre-se que metade da base não tem data de nascimento no dia em
+    que alguém reclama de não ter recebido parabéns."""
+    _perfil_do_token(authorization)
+    db = get_db()
+    campos = ("id,nome,cpf_cnpj,email,whatsapp,data_nascimento,origem,"
+              "aceita_felicitacoes,aceita_informativos,descadastrado_em,"
+              "relacionamento_nota,criado_em")
+    q = db.table("clientes").select(campos, count="exact")
+
+    termo = (busca or "").strip()
+    if termo:
+        so_digitos = "".join(c for c in termo if c.isdigit())
+        alvos = [f"nome.ilike.%{termo}%", f"email.ilike.%{termo}%"]
+        if len(so_digitos) >= 4:
+            alvos += [f"cpf_cnpj.ilike.%{so_digitos}%",
+                      f"whatsapp.ilike.%{so_digitos}%"]
+        q = q.or_(",".join(alvos))
+
+    if sem_nascimento:
+        q = q.is_("data_nascimento", "null")
+    if descadastrados:
+        q = q.not_.is_("descadastrado_em", "null")
+
+    inicio = max(pagina, 0) * max(min(por_pagina, 200), 1)
+    r = q.order("nome").range(inicio, inicio + max(min(por_pagina, 200), 1) - 1) \
+         .execute()
+    linhas = r.data or []
+
+    # O mês do aniversário é filtrado aqui, e não no banco: a coluna é
+    # `date` e o PostgREST não tem um jeito direto de pedir "mês igual a".
+    # Filtrar depois custa barato numa base deste tamanho e evita uma
+    # função no banco só para isto.
+    if mes_aniversario:
+        linhas = [c for c in linhas
+                  if str(c.get("data_nascimento") or "")[5:7]
+                  == f"{int(mes_aniversario):02d}"]
+
+    return {"clientes": linhas, "total": getattr(r, "count", None),
+            "pagina": pagina}
+
+
+class ClienteNovo(BaseModel):
+    nome: str
+    cpf_cnpj: str | None = None
+    email: str | None = None
+    whatsapp: str | None = None
+    data_nascimento: str | None = None
+    origem: str = "CADASTRO_MANUAL"
+    relacionamento_nota: str | None = None
+
+
+@app.post("/api/v1/clientes")
+def clientes_criar(body: ClienteNovo,
+                   authorization: str | None = Header(default=None)):
+    """Cadastra alguém que já é cliente mas nunca passou pela plataforma.
+
+    Confere duplicado por CPF e por WhatsApp antes de criar. Base de
+    relacionamento com a mesma pessoa em duas linhas manda dois parabéns
+    no mesmo dia, e é assim que a lista perde a credibilidade."""
+    quem = _perfil_do_token(authorization)
+    db = get_db()
+    nome = (body.nome or "").strip()
+    if len(nome) < 3:
+        raise HTTPException(400, "Escreva o nome completo do cliente.")
+
+    cpf = "".join(c for c in (body.cpf_cnpj or "") if c.isdigit())
+    zap = "".join(c for c in (body.whatsapp or "") if c.isdigit())
+    if zap and not zap.startswith("55"):
+        zap = "55" + zap
+
+    for coluna, valor in (("cpf_cnpj", cpf), ("whatsapp", zap)):
+        if not valor:
+            continue
+        try:
+            ja = db.table("clientes").select("id,nome").ilike(
+                coluna, f"%{valor}%").limit(1).execute().data
+        except Exception:
+            ja = []
+        if ja:
+            raise HTTPException(409, f"Já existe cadastro com este "
+                                     f"{'CPF' if coluna == 'cpf_cnpj' else 'WhatsApp'}: "
+                                     f"{ja[0].get('nome')}.")
+
+    linha = {"nome": nome, "origem": body.origem or "CADASTRO_MANUAL",
+             "cpf_cnpj": cpf or None,
+             "email": ((body.email or "").strip().lower() or None),
+             "whatsapp": zap or None,
+             "data_nascimento": (body.data_nascimento or None),
+             "relacionamento_nota": (body.relacionamento_nota or "").strip() or None,
+             "origem_consentimento": f"cadastrado por {quem.get('email') or 'equipe'}",
+             "consentimento_em": datetime.now(_tz.utc).isoformat()}
+    criado = db.table("clientes").insert(linha).execute().data
+    registrar_evento(None, "CLIENTE_CADASTRADO_NA_BASE",
+                     {"nome": nome, "por": quem.get("email")})
+    return {"ok": True, "cliente": (criado or [{}])[0]}
+
+
+@app.get("/api/v1/relacionamento/aniversariantes")
+def relacionamento_aniversariantes(
+        authorization: str | None = Header(default=None)):
+    """Quem faz aniversário HOJE, e quem não vai receber, com o motivo.
+
+    A lista é mostrada antes do disparo de propósito: ver quem vai
+    receber é o que permite corrigir um cadastro errado antes de a
+    mensagem sair, e não depois."""
+    _perfil_do_token(authorization)
+    from .agentes import relacionamento
+    return {"aniversariantes": relacionamento.aniversariantes_de_hoje()}
+
+
+class MudarRelacionamento(BaseModel):
+    aceita_felicitacoes: bool | None = None
+    aceita_informativos: bool | None = None
+    descadastrar: bool | None = None
+    motivo: str = ""
+    nota: str | None = None
+
+
+@app.patch("/api/v1/clientes/{cliente_id}/relacionamento")
+def cliente_relacionamento(cliente_id: str, body: MudarRelacionamento,
+                           authorization: str | None = Header(default=None)):
+    """Liga, desliga ou descadastra o cliente do relacionamento."""
+    _perfil_do_token(authorization)
+    from .agentes import relacionamento
+    if body.descadastrar:
+        return relacionamento.descadastrar(cliente_id, body.motivo)
+
+    campos: dict = {"atualizado_em": datetime.now(_tz.utc).isoformat()}
+    if body.aceita_felicitacoes is not None:
+        campos["aceita_felicitacoes"] = body.aceita_felicitacoes
+    if body.aceita_informativos is not None:
+        campos["aceita_informativos"] = body.aceita_informativos
+        # Autorização de informativo é a que mais pesa, e é a que alguém
+        # vai querer conferir depois. Fica gravado quando e por quê.
+        if body.aceita_informativos:
+            campos["origem_consentimento"] = (body.motivo
+                                              or "autorizado no cadastro")[:200]
+            campos["consentimento_em"] = campos["atualizado_em"]
+    if body.nota is not None:
+        campos["relacionamento_nota"] = body.nota.strip() or None
+    if body.descadastrar is False:
+        campos["descadastrado_em"] = None
+        campos["descadastro_motivo"] = None
+
+    get_db().table("clientes").update(campos).eq("id", cliente_id).execute()
+    return {"ok": True}
+
+
 # ── A agenda de contatos do WhatsApp ─────────────────────────────
 #
 # O escritório salva o número junto com o caso. Quando esse número
@@ -5112,8 +5276,7 @@ def contatos_whatsapp_salvar(body: ContatoSalvo,
              "nome": (body.nome or "").strip() or None,
              "observacao": (body.observacao or "").strip() or None,
              "criado_por": quem.get("email") or quem.get("papel") or "",
-             "atualizado_em": __import__("datetime").datetime.now(
-                 __import__("datetime").timezone.utc).isoformat()}
+             "atualizado_em": datetime.now(_tz.utc).isoformat()}
     get_db().table("contatos_whatsapp").upsert(
         linha, on_conflict="numero").execute()
     registrar_evento(body.caso_id, "CONTATO_WHATSAPP_SALVO",
