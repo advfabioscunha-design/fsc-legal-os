@@ -503,6 +503,82 @@ def _claude():
     return _ia.cliente(get_settings().claude_api_key)
 
 
+def ja_recebido(pedido_id: str) -> str:
+    """O que o cliente JÁ mandou, em lista curta, para não pedir de novo.
+
+    PEDIR DUAS VEZES É O QUE MAIS IRRITA QUEM JÁ MANDOU
+
+    O atendimento e a negociação recebiam a conversa e a lista do que
+    FALTA, e nunca a lista do que CHEGOU. Documento anexado não vira
+    mensagem de texto: o cliente manda a foto do RG, não escreve nada, e
+    do lado do agente não aconteceu nada. Aí ele pede o RG de novo, e a
+    pessoa que acabou de mandar entende que ninguém olhou.
+
+    Com o campo digitado é parecido: o dado entra pela tela de coleta ou
+    é colhido da conversa pelo sistema, e o agente continua lendo só o
+    histórico de falas, onde aquilo pode nunca ter sido dito em palavras.
+
+    Esta lista é curta de propósito. Ela não serve para o agente ler o
+    documento, serve para ele saber que o documento existe. Quem precisa
+    do conteúdo usa `texto_dos_anexos`."""
+    db = get_db()
+    partes: list[str] = []
+
+    try:
+        docs = db.table("pedidos_documentos") \
+            .select("nome,rotulo,criado_em,transcricao") \
+            .eq("pedido_id", pedido_id).order("criado_em") \
+            .limit(40).execute().data or []
+    except Exception as e:
+        print(f"[balcao] documentos recebidos não lidos: {e}")
+        docs = []
+    if docs:
+        partes.append("ARQUIVOS QUE O CLIENTE JÁ ENVIOU "
+                      "(NÃO PEÇA NENHUM DESTES DE NOVO):")
+        for d in docs:
+            quando = str(d.get("criado_em") or "")[:10]
+            rotulo = d.get("rotulo")
+            nome = d.get("nome") or "arquivo"
+            lido = " [lido pelo sistema]" if (d.get("transcricao") or "").strip() else ""
+            partes.append(f"  · {rotulo or nome}"
+                          + (f" (arquivo {nome})" if rotulo else "")
+                          + (f", enviado em {quando}" if quando else "")
+                          + lido)
+
+    try:
+        r = db.table("pedidos_contrato").select("dados,partes") \
+            .eq("id", pedido_id).limit(1).execute().data
+    except Exception:
+        r = []
+    p = r[0] if r else {}
+
+    dados = {k: v for k, v in _dados.como_dict(p.get("dados")).items()
+             if str(v or "").strip()}
+    if dados:
+        partes.append("")
+        partes.append("INFORMAÇÕES QUE JÁ ESTÃO NO PEDIDO "
+                      "(NÃO PERGUNTE DE NOVO):")
+        for k, v in list(dados.items())[:40]:
+            partes.append(f"  · {k}: {str(v)[:120]}")
+
+    qualificadas = []
+    for parte in _dados.lista_de_dicts(p.get("partes")):
+        papel = _como_se_chama(parte.get("papel") or "")
+        campos = [f"{c}" for c in ("nome", "cpf_cnpj", "endereco")
+                  if str(parte.get(c) or "").strip()]
+        if campos:
+            qualificadas.append(f"  · {papel or 'parte'}: já tem "
+                                + ", ".join(campos))
+    if qualificadas:
+        partes.append("")
+        partes.append("QUALIFICAÇÃO JÁ CONFERIDA:")
+        partes += qualificadas
+
+    if not partes:
+        return "O cliente ainda não enviou nenhum arquivo nem informação."
+    return "\n".join(partes)
+
+
 def texto_dos_anexos(pedido_id: str, limite_total: int = 20000) -> str:
     """O que está escrito nos arquivos que o cliente mandou.
 

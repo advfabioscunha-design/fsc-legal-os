@@ -191,6 +191,27 @@ avisar_o_escritorio.
 Se faltar alguma informação da parte do cliente, liste o que falta, na
 íntegra, sem resumir. Lista resumida faz a pessoa voltar duas vezes.
 
+NUNCA PEÇA O QUE JÁ VEIO
+
+Antes de pedir qualquer documento ou informação, leia duas coisas: a
+lista do que já chegou, que vem escrita na situação, e a conversa
+inteira.
+
+Documento anexado não aparece como mensagem. A pessoa manda a foto do
+RG e não escreve nada; do seu lado, parece que não aconteceu nada.
+Pedir o RG depois disso é dizer a quem acabou de mandar que ninguém
+olhou, e é a coisa que mais faz alguém desistir de um atendimento.
+
+O mesmo vale para o que ela digitou na tela de coleta ou contou na
+conversa: pode estar no pedido sem nunca ter virado uma frase dirigida
+a você.
+
+Na dúvida, NÃO peça de novo: pergunte se é aquele mesmo, citando o nome
+do arquivo ou o dado. "Recebi o comprovante de endereço de setembro, é
+esse que vale?" é conferência; "me manda o comprovante de endereço" é
+cobrança, e cobrança repetida é o que queima a paciência de quem está
+cooperando.
+
 QUANDO O CLIENTE MANDA PELA METADE
 
 É o caso mais comum, e tratá-lo mal custa horas de prazo. Quem mandou
@@ -310,9 +331,14 @@ nenhuma delas de novo, nem variação próxima. Diga a mesma coisa de outro
 jeito, ou não diga. Saudação e frase de fecho repetidas são o que faz a
 pessoa perceber que não tem gente do outro lado.
 
-Português do Brasil. No máximo dois parágrafos, salvo quando houver
-lista do que falta. Trate o cliente pelo primeiro nome quando ele
-constar da situação.
+Português do Brasil, falado. Três ou quatro linhas, e esse é o alvo de
+verdade: quem lê no celular rola o resto. A exceção é a lista do que
+falta, que sai inteira, uma coisa por linha.
+
+Trate o cliente pelo primeiro nome quando ele constar da situação.
+
+E diga o essencial primeiro. Se a pessoa ler só a primeira frase, e
+muita gente lê só ela, essa frase tem de conter a resposta.
 
 VOCÊ SÓ SABE O QUE A TELA DO CLIENTE MOSTRA
 
@@ -487,6 +513,22 @@ def _faz_quanto(iso) -> str:
 # devolve dicionário, permite testá-la sem gastar uma chamada de
 # modelo e permite mostrá-la na tela do operador quando for útil.
 
+def _ja_recebido_no_pedido(pedido_id) -> str:
+    """O que o cliente já mandou. Vazio se não der para saber.
+
+    Falhar aqui não pode derrubar a situação inteira: sem a lista o
+    agente volta a pedir demais, o que é ruim; sem a situação ele não
+    responde nada, o que é pior."""
+    if not pedido_id:
+        return ""
+    try:
+        from . import contratos_online
+        return contratos_online.ja_recebido(str(pedido_id))
+    except Exception as e:
+        print(f"[atendimento] não consegui ver o que já chegou: {e}")
+        return ""
+
+
 def situacao_do_pedido(pedido_id: str) -> dict:
     """Retrato do pedido do balcão neste instante."""
     db = get_db()
@@ -579,6 +621,7 @@ def situacao_do_pedido(pedido_id: str) -> dict:
         "dentro_do_prazo": dentro,
         "relogio_parado": p.get("avanca_em") is None and p.get("fase") in (
             "REDACAO", "REVISAO_IA", "AJUSTE"),
+        "ja_recebido": _ja_recebido_no_pedido(p.get("id")),
         "falta_indispensavel": falta_trava,
         "falta_complementar": falta_extra,
         "prazo_alteracao_ate": p.get("prazo_alteracao_ate"),
@@ -655,6 +698,20 @@ def _texto_da_situacao(s: dict) -> str:
         else:
             L.append("Ainda não há prazo correndo: ele começa quando o "
                      "pagamento é confirmado.")
+        # O QUE JÁ CHEGOU VEM ANTES DO QUE FALTA, E É DE PROPÓSITO
+        #
+        # A situação trazia só a lista do que FALTA. O agente lia aquilo
+        # e cobrava, sem saber que metade já estava no pedido: documento
+        # anexado não vira mensagem, e campo preenchido pela tela de
+        # coleta também não. Cobrar o que a pessoa acabou de mandar é o
+        # erro que mais faz cliente achar que ninguém olhou.
+        if s.get("ja_recebido"):
+            L.append(s["ja_recebido"])
+            L.append("ANTES DE PEDIR QUALQUER COISA, confira a lista acima e "
+                     "a conversa inteira. Nada que esteja lá se pede de "
+                     "novo. Na dúvida, pergunte se é AQUELE o documento que "
+                     "ele mandou, citando o nome, em vez de pedir outra vez.")
+
         if s["falta_indispensavel"]:
             L.append("FALTA, e sem isso o documento não se conclui: "
                      + "; ".join(s["falta_indispensavel"]) + ".")

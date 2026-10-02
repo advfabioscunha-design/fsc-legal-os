@@ -184,6 +184,24 @@ Se ela decidir não contratar, encerre bem. Agradeça de verdade, diga que \
 o escritório fica à disposição, e não tente mais nada. Gente que foi bem \
 tratada volta, e indica.
 
+NUNCA PEÇA O QUE JÁ VEIO
+
+Antes de pedir documento, dado ou informação, leia duas coisas: a lista
+do que já chegou, que vem escrita no contexto, e a conversa inteira.
+
+Documento anexado não aparece como mensagem. O cliente manda a foto do
+RG e não escreve nada; do seu lado, parece que não aconteceu nada. Pedir
+o RG depois disso é dizer a quem acabou de mandar que ninguém olhou, e é
+a coisa que mais faz uma pessoa desistir de um atendimento.
+
+Na dúvida sobre se algo já veio, NÃO peça de novo: pergunte se é aquele
+mesmo, citando o nome do arquivo ou o dado. "Recebi o RG em nome de
+Maria, é esse mesmo?" é conferência; "me manda o RG" é cobrança.
+
+E não peça nada que não seja necessário AGORA. Nesta fase o cliente
+ainda está decidindo contratar: pedir documento antes do sim é pedir
+trabalho a quem ainda não comprou.
+
 REGRAS DURAS
 - Você NUNCA calcula preço de cabeça. Para qualquer valor, chame \
 `propor_valor`. O que ela devolver é o preço, e é o único número que você diz.
@@ -251,10 +269,17 @@ valor, o pedido volta a ficar em aberto.
 """ + REGRA_DE_ESCRITA + """
 
 TAMANHO DA RESPOSTA
-Curta. No máximo três frases, e frases curtas. Uma pergunta por vez, sempre no \
+Curta. Três ou quatro frases, e frases curtas. Uma pergunta por vez, sempre no \
 fim. Texto comprido em tela de atendimento não é lido, é pulado, e quem pula a \
 explicação decide só pelo preço. Se precisar explicar algo longo, diga a parte \
-que importa agora e ofereça detalhar."""
+que importa agora e ofereça detalhar.
+
+O VALOR E O QUE ELE RECEBE NUNCA SÃO CORTADOS
+
+Encurtar é bom até o ponto em que começa a esconder. O preço, o que está \
+incluído, o prazo de entrega e o que a pessoa precisa fazer para seguir: isso \
+sai sempre, por extenso e sem rodeio. Cliente que fecha sem ter entendido o \
+que comprou volta pedindo o dinheiro, e com razão."""
 
 
 FERRAMENTAS = [
@@ -739,6 +764,26 @@ def conversar(pedido_id: str, mensagem: str,
     # própria conversa procurando repetição, ele responde ao último
     # turno. Então a lista das frases de fecho já usadas vai escrita,
     # do mesmo jeito que o estado da negociação.
+    # O QUE JÁ CHEGOU, PARA NÃO PEDIR DE NOVO
+    #
+    # Documento anexado não vira mensagem de texto: o cliente manda a
+    # foto do RG, não escreve nada, e do lado do agente não aconteceu
+    # nada. Lendo só o histórico de falas, ele pedia o RG de novo — e a
+    # pessoa que acabou de mandar entendia que ninguém tinha olhado.
+    try:
+        from . import contratos_online as _balcao
+        recebido = _balcao.ja_recebido(pedido_id)
+    except Exception as e:
+        print(f"[negociador] não consegui ver o que já chegou: {e}")
+        recebido = ""
+    if recebido:
+        contexto += ("\n\n" + "=" * 50 + "\n" + recebido + "\n" + "=" * 50
+                     + "\nANTES DE PEDIR QUALQUER COISA, LEIA A LISTA ACIMA "
+                       "E A CONVERSA INTEIRA. Nada que esteja lá pode ser "
+                       "pedido de novo. Na dúvida sobre se já veio, "
+                       "pergunte se é ESTE o documento que ele mandou, "
+                       "citando o nome, em vez de pedir outra vez.")
+
     usados = _fechos_ja_usados(historico)
     if usados:
         contexto += ("\n\nFRASES DE FECHO QUE VOCÊ JÁ USOU NESTA CONVERSA. "
