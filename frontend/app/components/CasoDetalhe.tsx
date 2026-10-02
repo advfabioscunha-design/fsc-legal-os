@@ -1783,7 +1783,7 @@ function LinhaDoTempo({ casoId, nota, setNota, addNota }: {
  */
 function ConversaDoCaso({ casoId }: { casoId: string }) {
   const [msgs, setMsgs] = useState<any[]>([]);
-  const [texto, setTexto, limparRascunho] = useRascunho(`caso-resposta-${caso.id}`);
+  const [texto, setTexto, limparRascunho] = useRascunho(`caso-resposta-${casoId}`);
   const [enviando, setEnviando] = useState(false);
   const [tambem, setTambem] = useState(true);
   const [erro, setErro] = useState("");
