@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ModalPeticionar from "./ModalPeticionar";
 import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
 import { useRascunho } from "@/lib/rascunho";
+import { supabase } from "@/lib/supabaseClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 const GRUPOS = ["BANCARIO", "IMOBILIARIO", "TRABALHISTA", "PREVIDENCIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"];
@@ -192,9 +193,33 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
       setLinkAtend(d.link_cliente);
       if (d.aviso) alert(d.aviso);
       // o advogado entra numa aba própria, em tela cheia
-      window.open(`${d.url}?t=${encodeURIComponent(d.token)}`, "_blank", "noopener");
+      // `lang=pt-BR`: a Daily abre em inglês por padrão, e a sala do
+      // advogado não tem motivo para ser diferente da do cliente.
+      window.open(`${d.url}?t=${encodeURIComponent(d.token)}&lang=pt-BR`,
+                  "_blank", "noopener");
       await carregarAtendimentos();
     } finally { setAbrindoSala(false); }
+  }
+
+  /* O ADVOGADO ACIONA, E A TELA LEMBRA O QUE DIZER
+   *
+   * A autorização passou a ser pedida em voz, no início da gravação. Isso
+   * só funciona se a frase for efetivamente dita — e no meio de uma
+   * conversa é a coisa mais fácil de esquecer. Por isso o roteiro aparece
+   * no instante do clique, antes de o advogado voltar para a sala.
+   *
+   * O registro no servidor é carimbado aqui: data, hora, quem acionou e a
+   * informação de que a autorização foi colhida verbalmente. O conteúdo
+   * dela fica no próprio áudio. */
+  async function iniciarGravacao(id: string) {
+    const r = await fetch(`${API}/api/v1/atendimentos/${id}/gravacao/iniciar`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
+    });
+    const d = await r.json().catch(() => ({} as any));
+    if (!r.ok) { alert(d.detail || "Não foi possível registrar o início da gravação."); return; }
+    alert(d.roteiro || "Gravação registrada. Avise o cliente em voz alta.");
+    carregarAtendimentos();
   }
 
   async function encerrarAtendimento(id: string) {
@@ -980,8 +1005,14 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                           {a.consentimento_em ? "✓ gravação autorizada" : "sem autorização de gravação"}
                         </span>
                         {["AGENDADO", "EM_ANDAMENTO"].includes(a.status) && (
-                          <button onClick={() => encerrarAtendimento(a.id)}
-                            className="ml-auto text-[#C0392B] hover:underline">encerrar</button>
+                          <>
+                            <button onClick={() => iniciarGravacao(a.id)}
+                              className="ml-auto rounded bg-[#C0392B]/20 px-2 py-0.5 font-semibold text-[#E57373] hover:bg-[#C0392B]/30">
+                              🔴 registrar início da gravação
+                            </button>
+                            <button onClick={() => encerrarAtendimento(a.id)}
+                              className="text-[#C0392B] hover:underline">encerrar</button>
+                          </>
                         )}
                         {a.audio_path && !a.transcricao && (
                           <button onClick={() => transcreverAtendimento(a.id)}

@@ -84,6 +84,19 @@ def criar_sala(validade_s: int = VALIDADE_PADRAO_S) -> dict:
         "start_video_off": False,
         "start_audio_off": False,
         "max_participants": 4,        # advogado, cliente e folga
+        # A SALA NASCE EM PORTUGUÊS
+        #
+        # O padrão do fornecedor é inglês: "Join meeting", "Leave",
+        # "Mute". Para quem entra pelo celular sem familiaridade com
+        # videochamada, botão em inglês é botão que não se clica — a
+        # pessoa olha a tela e não descobre por onde entrar, e quem
+        # perde o atendimento é o escritório.
+        #
+        # Definido aqui, na criação, e não só no endereço de entrada:
+        # assim vale para qualquer forma de abrir a sala, e não depende
+        # do idioma configurado no navegador do cliente, que pode estar
+        # em qualquer coisa.
+        "lang": "pt-BR",
     }
     try:
         sala = _post("/rooms", {

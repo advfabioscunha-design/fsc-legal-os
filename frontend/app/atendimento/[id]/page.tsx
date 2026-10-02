@@ -41,12 +41,6 @@ export default function Atendimento() {
   >(null);
 
   // termo
-  const [autorizando, setAutorizando] = useState(false);
-  const [autorizadoAgora, setAutorizadoAgora] = useState(false);
-  const [termoAberto, setTermoAberto] = useState(false);
-  const [chegouAoFim, setChegouAoFim] = useState(false);
-  const [aceitouTermo, setAceitouTermo] = useState(false);
-  const corpoTermo = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -80,34 +74,10 @@ export default function Atendimento() {
     })();
   }, [id]);
 
-  /* Só considera lido quando o fim do texto aparece na tela. A folga de
-     24px evita que arredondamento de pixel impeça alguém de concluir. */
-  function aoRolar() {
-    const el = corpoTermo.current;
-    if (!el) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setChegouAoFim(true);
-  }
-
-  // termo curto em tela grande pode não ter rolagem nenhuma
-  useEffect(() => {
-    if (!termoAberto) return;
-    const t = setTimeout(() => {
-      const el = corpoTermo.current;
-      if (el && el.scrollHeight <= el.clientHeight + 24) setChegouAoFim(true);
-    }, 150);
-    return () => clearTimeout(t);
-  }, [termoAberto]);
-
-  async function entrar(comGravacao: boolean) {
-    if (comGravacao && !aceitouTermo) {
-      setAviso(
-        "Para autorizar a gravação, abra o Termo de Consentimento, leia até o " +
-        "final e confirme a ciência dentro dele. É rápido — o botão de " +
-        "concordar aparece ao fim do texto."
-      );
-      setTermoAberto(true);
-      return;
-    }
+  /* ENTRAR É SÓ ENTRAR
+     Não há mais decisão sobre gravação nesta porta. A pessoa escreve
+     como quer ser chamada e entra; o resto acontece na conversa. */
+  async function entrar() {
     setEntrando(true);
     setErro(""); setAviso("");
     try {
@@ -116,8 +86,8 @@ export default function Atendimento() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nome: nome.trim() || "Cliente",
-          aceita_gravacao: comGravacao,
-          leu_termo: aceitouTermo,
+          aceita_gravacao: false,
+          leu_termo: false,
         }),
       });
       const d = await r.json();
@@ -130,69 +100,41 @@ export default function Atendimento() {
     }
   }
 
-  /* Autorização durante o atendimento: quem entrou sem autorizar pode
-     mudar de ideia depois de conversar um pouco. A exigência de ler o
-     termo é a mesma; muda só o momento. */
-  async function autorizarAgora() {
-    if (!aceitouTermo) {
-      setAviso(
-        "Abra o Termo de Consentimento e leia até o final para autorizar a " +
-        "gravação. O botão de concordar aparece ao fim do texto."
-      );
-      setTermoAberto(true);
-      return;
-    }
-    setAutorizando(true);
-    try {
-      const r = await fetch(`${API}/api/v1/atendimentos/${id}/autorizar-gravacao`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leu_termo: true }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setAviso(d.detail || "Não foi possível registrar a autorização."); return; }
-      setAutorizadoAgora(true);
-      setAviso("");
-    } catch {
-      setAviso("Falha de conexão ao registrar a autorização.");
-    } finally {
-      setAutorizando(false);
-    }
-  }
+  /* A função que pedia a autorização durante o atendimento saiu com o
+     método antigo. Quem autoriza hoje é a voz do cliente, no início da
+     gravação, e quem registra é o servidor quando o advogado aciona o
+     gravar. Tela nenhuma participa disso. */
 
   if (sala) {
-    const src = `${sala.url}?t=${encodeURIComponent(sala.token)}`;
-    const faltaAutorizar = !sala.podeGravar && !autorizadoAgora;
+    /* A SALA EM PORTUGUÊS
+       A Daily abre em inglês por padrão — "Join meeting", "Leave", "Mute".
+       Para quem está entrando pelo celular, sem familiaridade com vídeo
+       chamada, botão em inglês é botão que não se clica: a pessoa fica
+       olhando a tela sem saber por onde entrar. O parâmetro `lang` é o
+       que a Daily oferece para isso, e não depende do idioma do
+       navegador do cliente, que pode estar em qualquer coisa. */
+    const src = `${sala.url}?t=${encodeURIComponent(sala.token)}&lang=pt-BR`;
     return (
       <div className="fixed inset-0 flex flex-col bg-black">
-        {faltaAutorizar && (
-          <div className="flex flex-wrap items-center gap-3 bg-amber-50 px-4 py-2.5">
-            {/* A faixa não é cobrança. Ela existe para que, quando o
-                advogado disser "vou gravar a partir daqui, tudo bem?", a
-                pessoa tenha onde responder — e para deixar claro que,
-                até ela clicar, nada está sendo gravado. */}
-            <span className="text-sm text-amber-900">
-              Esta conversa <b>não está sendo gravada</b>. Se o advogado pedir
-              para registrar o áudio, você autoriza por aqui.
-            </span>
-            <button
-              onClick={autorizarAgora}
-              disabled={autorizando}
-              className="ml-auto rounded-lg bg-navy px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
-            >
-              {autorizando ? "Registrando…" : aceitouTermo ? "Autorizar a gravação" : "Ler o termo e autorizar"}
-            </button>
-          </div>
-        )}
-        {autorizadoAgora && (
-          <div className="bg-forest/10 px-4 py-2 text-center text-sm text-forest">
-            ✓ Gravação autorizada. O que foi conversado antes deste momento não
-            foi gravado.
-          </div>
-        )}
-        {aviso && faltaAutorizar && (
-          <div className="bg-amber-100 px-4 py-2 text-center text-xs text-amber-900">⚠ {aviso}</div>
-        )}
+        {/* O QUE O CLIENTE VÊ SOBRE A GRAVAÇÃO
+
+            Não há mais nada a clicar. A faixa existe só para informar, e
+            informar é o que a lei exige: a pessoa precisa saber que a
+            conversa pode ser gravada e com que finalidade.
+
+            A autorização em si é pedida em voz pelo advogado, no momento
+            em que ele aciona a gravação, e a resposta do cliente fica
+            dentro do próprio áudio. É consentimento melhor do que uma
+            caixa marcada: registra a pergunta, a resposta e o tom em que
+            foi dada. */}
+        <div className="flex flex-wrap items-center gap-2 bg-[#0B1F3B] px-4 py-2.5">
+          <span className="text-sm text-white/80">
+            Se for necessário <b>gravar o áudio</b> desta conversa, o advogado
+            avisa você em voz alta antes de começar e pede a sua concordância.
+            Sua imagem não é gravada em momento algum.
+          </span>
+        </div>
+
         <iframe
           src={src}
           allow="camera; microphone; fullscreen; speaker; display-capture; autoplay"
@@ -200,41 +142,6 @@ export default function Atendimento() {
           title="Atendimento por vídeo"
         />
 
-        {termoAberto && dados && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3">
-            <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white">
-              <div className="flex items-start justify-between gap-3 border-b border-charcoal/10 px-5 py-4">
-                <div>
-                  <h2 className="text-base font-bold text-navy">Termo de Consentimento</h2>
-                  <p className="text-xs text-charcoal/50">
-                    Versão {dados.versao_consentimento} · role até o final para confirmar
-                  </p>
-                </div>
-                <button onClick={() => setTermoAberto(false)} className="text-charcoal/40 hover:text-charcoal">✕</button>
-              </div>
-              <div ref={corpoTermo} onScroll={aoRolar} className="flex-1 overflow-y-auto px-5 py-4">
-                <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-charcoal/85">
-                  {dados.termo}
-                </pre>
-                <div className="h-2" />
-              </div>
-              <div className="border-t border-charcoal/10 bg-ice/40 px-5 py-4">
-                {!chegouAoFim && (
-                  <p className="mb-2 text-center text-xs text-charcoal/55">
-                    ↓ Continue rolando até o fim do termo para liberar a confirmação
-                  </p>
-                )}
-                <button
-                  onClick={() => { setAceitouTermo(true); setTermoAberto(false); setAviso(""); }}
-                  disabled={!chegouAoFim}
-                  className="w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white disabled:cursor-not-allowed disabled:bg-charcoal/25"
-                >
-                  {chegouAoFim ? "Li o termo e estou ciente — autorizo a gravação" : "Leia o termo até o final"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -289,7 +196,7 @@ export default function Atendimento() {
             )}
 
             <button
-              onClick={() => entrar(false)}
+              onClick={() => entrar()}
               disabled={entrando}
               className="mt-5 w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
             >
@@ -306,55 +213,6 @@ export default function Atendimento() {
       </div>
 
       {/* Termo em tela cheia: precisa rolar até o fim para concordar */}
-      {termoAberto && dados && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
-          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white">
-            <div className="flex items-start justify-between gap-3 border-b border-charcoal/10 px-5 py-4">
-              <div>
-                <h2 className="text-base font-bold text-navy">Termo de Consentimento</h2>
-                <p className="text-xs text-charcoal/50">
-                  Versão {dados.versao_consentimento} · role até o final para confirmar
-                </p>
-              </div>
-              <button onClick={() => setTermoAberto(false)} className="text-charcoal/40 hover:text-charcoal">✕</button>
-            </div>
-
-            <div
-              ref={corpoTermo}
-              onScroll={aoRolar}
-              className="flex-1 overflow-y-auto px-5 py-4"
-            >
-              <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-charcoal/85">
-                {dados.termo}
-              </pre>
-              <div className="h-2" />
-            </div>
-
-            <div className="border-t border-charcoal/10 bg-ice/40 px-5 py-4">
-              {!chegouAoFim && (
-                <p className="mb-2 text-center text-xs text-charcoal/55">
-                  ↓ Continue rolando até o fim do termo para liberar a confirmação
-                </p>
-              )}
-              <button
-                onClick={() => { setAceitouTermo(true); setTermoAberto(false); setAviso(""); }}
-                disabled={!chegouAoFim}
-                className="w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-charcoal/25"
-              >
-                {chegouAoFim
-                  ? "Li o termo e estou ciente — autorizo a gravação"
-                  : "Leia o termo até o final"}
-              </button>
-              <button
-                onClick={() => setTermoAberto(false)}
-                className="mt-2 w-full rounded-xl px-6 py-2 text-sm text-charcoal/55 hover:text-charcoal"
-              >
-                Fechar sem concordar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }

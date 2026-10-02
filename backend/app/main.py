@@ -1607,6 +1607,25 @@ class EncerrarAtendimento(BaseModel):
     observacao: str | None = None
 
 
+@app.post("/api/v1/atendimentos/{atendimento_id}/gravacao/iniciar")
+def iniciar_gravacao_atendimento(atendimento_id: str, request: Request,
+                                 quem: str = "",
+                                 authorization: str | None = Header(default=None)):
+    """Carimba o início da gravação e devolve o roteiro da autorização.
+
+    Protegida: quem grava é o escritório. O cliente não aciona nada."""
+    from .agentes import atendimento
+    perfil = _perfil_do_token(authorization)
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else None)
+    try:
+        return atendimento.iniciar_gravacao(
+            atendimento_id, quem or perfil.get("nome") or perfil.get("email") or "",
+            ip)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/v1/atendimentos/{atendimento_id}/audio")
 def ouvir_audio_do_atendimento(atendimento_id: str):
     """O áudio do atendimento, para ouvir ou baixar.

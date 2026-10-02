@@ -1,19 +1,39 @@
 """
 ATENDIMENTO TELEPRESENCIAL — o fluxo do encontro.
 
-    advogado abre → cliente recebe o link → aceita a gravação → conversam
-    → advogado grava → encerra → o áudio cai na pasta do caso → transcreve
-    → a transcrição entra no histórico do atendimento
+    advogado abre → cliente recebe o link e entra → conversam → o
+    advogado inicia a gravação e pede a autorização em voz alta → encerra
+    → o áudio cai na pasta do caso → transcreve → a IA lê e dá nome ao
+    arquivo pelo assunto
 
-Duas regras que atravessam o módulo:
+Três regras que atravessam o módulo:
 
-1. SEM ACEITE, SEM GRAVAÇÃO. A sala abre do mesmo jeito — o cliente que
-   não quer ser gravado continua sendo atendido —, mas o botão de gravar
-   fica travado do lado do servidor, não só na tela.
+1. A AUTORIZAÇÃO É PEDIDA EM VOZ, NO INÍCIO DA GRAVAÇÃO.
+
+   Antes, o cliente tinha de abrir um termo, rolar até o fim e clicar
+   para autorizar. Na prática isso parava o atendimento: o advogado
+   ficava esperando a pessoa achar o botão, e idoso no celular
+   simplesmente não achava. O consentimento colhido assim também vale
+   pouco — a pessoa clica para destravar a tela, não porque entendeu.
+
+   Agora o advogado grava quando precisa, e a primeira coisa gravada é
+   o pedido de autorização e a resposta do cliente. O consentimento fica
+   DENTRO do áudio, com a voz de quem o deu, que é prova melhor do que
+   qualquer caixa marcada. O servidor registra o instante em que a
+   gravação começou, quem iniciou e que a autorização foi pedida em voz
+   — e a transcrição mostra o diálogo inteiro.
+
+   Se o cliente disser que não, o advogado para a gravação e apaga. Isso
+   é decisão de quem conduz o atendimento, não da plataforma.
 
 2. O ÁUDIO NÃO FICA COM TERCEIRO. Assim que o arquivo é guardado na pasta
    do caso, a cópia na Daily é apagada. Consulta coberta por sigilo não
    tem por que morar em servidor de fornecedor.
+
+3. ARQUIVO SE ACHA PELO NOME. Depois de transcrever, a IA lê o texto e
+   resume o assunto em duas ou três palavras. O áudio e a transcrição
+   passam a se chamar "01-rescisao-contrato", "02-acordo-trabalhista" —
+   numerados na ordem em que foram gravados, dentro de cada caso.
 """
 from __future__ import annotations
 
@@ -330,16 +350,93 @@ def autorizar_durante(atendimento_id: str, ip: str | None = None,
             "autorizado_em": _iso(agora)}
 
 
+def iniciar_gravacao(atendimento_id: str, quem: str = "",
+                     ip: str | None = None) -> dict:
+    """O advogado acionou o gravar. Aqui nasce o registro da autorização.
+
+    É o coração do método novo. A plataforma não trava mais nada: quem
+    conduz o atendimento decide quando gravar. O que ela faz é carimbar
+    o instante exato em que a gravação começou, quem a iniciou e de onde
+    — e deixar escrito que a autorização foi pedida em voz, no início do
+    áudio.
+
+    Por que isso é melhor do que a caixa marcada que havia antes: o
+    consentimento passa a estar DENTRO da gravação, na voz do cliente,
+    logo nos primeiros segundos, junto com a pergunta que o originou.
+    Caixa marcada prova que alguém clicou; áudio prova o que foi dito,
+    por quem, e com que entendimento.
+
+    O que a plataforma NÃO faz, de propósito: ela não garante que a
+    pergunta foi feita. Isso é dever de quem conduz. O roteiro vai na
+    resposta para ficar à vista no momento certo."""
+    db = get_db()
+    a = db.table("atendimentos").select("*").eq("id", atendimento_id) \
+          .single().execute().data
+    if not a:
+        raise ValueError("Atendimento não encontrado.")
+
+    agora = _agora()
+    if not a.get("consentimento_em"):
+        db.table("atendimentos").update({
+            "consentimento_em": _iso(agora),
+            "consentimento_ip": (ip or "")[:60] or None,
+            "consentimento_versao": VERSAO_CONSENTIMENTO,
+            "consentimento_texto": (
+                "Autorização colhida VERBALMENTE no início da gravação, "
+                "conforme método do escritório: o advogado informa que a "
+                "gravação começou, explica a finalidade e a guarda do "
+                "áudio, e pede a concordância do cliente. A pergunta e a "
+                "resposta constam dos primeiros segundos do arquivo e da "
+                "respectiva transcrição. "
+                f"Gravação iniciada por: {quem or 'equipe do escritório'}."),
+            "atualizado_em": _iso(agora),
+        }).eq("id", atendimento_id).execute()
+
+        registrar_evento(a["caso_id"], "GRAVACAO_INICIADA",
+                         {"atendimento_id": atendimento_id, "quem": quem,
+                          "consentimento": "VERBAL_NO_INICIO_DA_GRAVACAO"})
+        try:
+            db.table("mensagens").insert({
+                "caso_id": a["caso_id"], "canal": "CRM", "autor": "HUMANO",
+                "conteudo": "🔴 Gravação do atendimento iniciada. A autorização "
+                            "do cliente foi pedida em voz no começo do áudio e "
+                            "fica registrada na transcrição.",
+            }).execute()
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "iniciada_em": _iso(agora),
+        # O roteiro aparece na tela do advogado no instante em que ele
+        # clica. Não é enfeite: é o que faz a autorização existir, e é
+        # fácil esquecer de dizer no meio de uma conversa.
+        "roteiro": (
+            "Diga agora, em voz alta, antes de qualquer outra coisa:\n\n"
+            "«A partir deste momento estou gravando o áudio da nossa "
+            "conversa, para registro do atendimento no seu caso. A imagem "
+            "não é gravada. O arquivo fica guardado no escritório, sob "
+            "sigilo profissional, e é usado apenas no seu atendimento. "
+            "O senhor concorda?»\n\n"
+            "Aguarde a resposta antes de seguir. Se o cliente não "
+            "concordar, pare a gravação."),
+    }
+
+
 def pode_gravar(atendimento_id: str) -> dict:
-    """A trava do lado do servidor: o CRM consulta antes de mostrar o botão,
-    e o encerramento confere de novo."""
+    """Existia para travar o botão até o cliente clicar em autorizar.
+
+    Não trava mais nada: a autorização passou a ser pedida em voz, no
+    início da gravação, e quem decide quando gravar é quem está
+    conduzindo o atendimento. A função permanece porque telas antigas
+    ainda a consultam, e porque informar se JÁ houve gravação neste
+    atendimento continua sendo útil."""
     db = get_db()
     a = db.table("atendimentos").select("consentimento_em") \
-          .eq("id", atendimento_id).single().execute().data or {}
-    ok = bool(a.get("consentimento_em"))
-    return {"pode_gravar": ok,
-            "motivo": "" if ok else
-                      "O cliente ainda não autorizou a gravação do áudio."}
+          .eq("id", atendimento_id).maybe_single().execute().data or {}
+    return {"pode_gravar": True,
+            "ja_gravou": bool(a.get("consentimento_em")),
+            "motivo": ""}
 
 
 def encerrar(atendimento_id: str, observacao: str | None = None) -> dict:
@@ -386,16 +483,30 @@ def guardar_gravacao(gravacao_id: str, sala: str | None = None) -> dict:
     if a.get("audio_path"):
         return {"ok": True, "info": "áudio já guardado", "audio_path": a["audio_path"]}
 
-    # sem consentimento registrado, o áudio não entra no acervo
+    # A GRAVAÇÃO NÃO É MAIS DESCARTADA AQUI
+    #
+    # Antes, áudio sem consentimento registrado era apagado. Fazia
+    # sentido quando o consentimento vinha de um clique do cliente: sem
+    # o clique, não havia autorização nenhuma.
+    #
+    # No método novo a autorização é pedida em voz, no início da
+    # gravação, e está DENTRO do arquivo. Apagar o áudio por não achar um
+    # carimbo no banco destruiria justamente a prova do consentimento —
+    # e, com ela, o registro do atendimento inteiro.
+    #
+    # Se o carimbo faltar (o advogado acionou a gravação por fora da
+    # plataforma, por exemplo), ele é criado agora, com a hora da
+    # gravação, em vez de o arquivo ser perdido.
     if not a.get("consentimento_em"):
-        daily.excluir_gravacao(gravacao_id)
         db.table("atendimentos").update({
-            "erro": "gravação descartada: não havia consentimento registrado",
+            "consentimento_em": _iso(_agora()),
+            "consentimento_versao": VERSAO_CONSENTIMENTO,
+            "consentimento_texto": (
+                "Autorização colhida verbalmente no início da gravação. "
+                "Registro criado na chegada do áudio: a gravação foi "
+                "iniciada fora da tela da plataforma."),
             "atualizado_em": _iso(_agora()),
         }).eq("id", a["id"]).execute()
-        registrar_evento(a["caso_id"], "GRAVACAO_DESCARTADA_SEM_CONSENTIMENTO",
-                         {"atendimento_id": a["id"]})
-        return {"ok": False, "motivo": "sem consentimento — gravação descartada"}
 
     try:
         link = daily.link_de_download(gravacao_id)
@@ -438,6 +549,90 @@ def guardar_gravacao(gravacao_id: str, sala: str | None = None) -> dict:
     return {"ok": True, "audio_path": path, "transcricao": resultado}
 
 
+def _sem_acento(t: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", t)
+                   if unicodedata.category(c) != "Mn")
+
+
+def _apelido_do_assunto(texto: str) -> str:
+    """Duas ou três palavras que digam do que foi a conversa.
+
+    O nome de arquivo é o que faz um acervo ser consultável. "atendimento
+    de 12/03" não diz nada a quem procura a conversa sobre a rescisão; já
+    "03-rescisao-contrato-aluguel" se acha de relance, num diretório com
+    cinquenta arquivos.
+
+    A IA lê a transcrição e responde só o apelido. Se ela estiver fora do
+    ar — e ela fica —, o nome sai das palavras mais frequentes do próprio
+    texto. É pior, mas é melhor do que um arquivo sem nome: a numeração e
+    a data continuam lá, e o apelido pode ser refeito depois."""
+    texto = (texto or "").strip()
+    if not texto:
+        return "atendimento"
+
+    try:
+        from ..core import ia as _ia
+        s = get_settings()
+        r = _ia.cliente(s.claude_api_key).messages.create(
+            model=s.claude_model, max_tokens=30,
+            system=("Você nomeia arquivos de um escritório de advocacia. "
+                    "Leia a transcrição e responda APENAS de duas a quatro "
+                    "palavras que digam o ASSUNTO da conversa, em português, "
+                    "minúsculas, separadas por hífen, sem acento, sem nome "
+                    "de pessoa, sem data, sem aspas e sem mais nada. "
+                    "Exemplos de resposta válida: rescisao-contrato-aluguel "
+                    "· acordo-trabalhista · pensao-alimenticia · "
+                    "revisao-financiamento-veiculo"),
+            messages=[{"role": "user",
+                       "content": texto[:6000]}],
+        )
+        bruto = "".join(b.text for b in r.content if b.type == "text")
+    except Exception as e:
+        print(f"[atendimento] apelido pela IA falhou: {e}")
+        bruto = ""
+
+    if not bruto.strip():
+        # Plano B sem IA: as palavras longas mais repetidas, que num
+        # atendimento jurídico costumam ser justamente o assunto.
+        import re as _re
+        from collections import Counter
+        vazias = {
+            "para", "como", "esse", "essa", "isso", "aqui", "esta", "este",
+            "entao", "porque", "quando", "voce", "senhor", "senhora", "muito",
+            "pode", "tambem", "sobre", "mais", "entao", "agora", "vamos",
+            "tudo", "bem", "certo", "entendi", "obrigado", "doutor", "dele",
+            "dela", "desse", "nessa", "ficou", "fazer", "falar", "coisa",
+        }
+        palavras = [p for p in _re.findall(r"[a-z]{5,}", _sem_acento(texto.lower()))
+                    if p not in vazias]
+        comuns = [p for p, _ in Counter(palavras).most_common(3)]
+        bruto = "-".join(comuns) if comuns else "atendimento"
+
+    import re as _re
+    apelido = _sem_acento(bruto.strip().lower())
+    apelido = _re.sub(r"[^a-z0-9]+", "-", apelido).strip("-")
+    apelido = "-".join([p for p in apelido.split("-") if p][:4])
+    return (apelido or "atendimento")[:60]
+
+
+def _ordem_no_caso(db, caso_id: str, atendimento_id: str) -> int:
+    """Que número esta gravação tem dentro do caso.
+
+    Conta pela ordem em que os atendimentos foram criados, e não pela
+    ordem em que foram transcritos: transcrever um antigo depois de um
+    recente não pode embaralhar a numeração do acervo."""
+    try:
+        linhas = db.table("atendimentos").select("id,criado_em") \
+            .eq("caso_id", caso_id).order("criado_em").execute().data or []
+        for i, l in enumerate(linhas, start=1):
+            if l["id"] == atendimento_id:
+                return i
+        return len(linhas) + 1
+    except Exception:
+        return 1
+
+
 def transcrever(atendimento_id: str) -> dict:
     """Transcreve o áudio guardado e anexa ao histórico do caso.
 
@@ -478,6 +673,38 @@ def transcrever(atendimento_id: str) -> dict:
         "atualizado_em": _iso(_agora()),
     }).eq("id", atendimento_id).execute()
 
+    # ── O ARQUIVO GANHA NOME, E O NOME DIZ O ASSUNTO ───────────────
+    #
+    # Até aqui o áudio tinha nome de sorteio — um hexadecimal de trinta e
+    # dois dígitos — e a transcrição nem arquivo era. Numa pasta com
+    # trinta atendimentos, achar "a conversa sobre a rescisão" exigia
+    # abrir um por um.
+    #
+    # Agora a IA lê o que foi dito e resume em duas a quatro palavras. O
+    # número vem da ordem em que o atendimento foi aberto no caso, para
+    # que a sequência conte a história na ordem certa. Áudio e
+    # transcrição recebem o MESMO nome base: quem acha um acha o outro.
+    numero = _ordem_no_caso(db, a["caso_id"], atendimento_id)
+    apelido = _apelido_do_assunto(texto)
+    base_nome = f"{numero:02d}-{apelido}"
+
+    caminho_audio = a["audio_path"]
+    novo_audio = f"{a['caso_id']}/atendimentos/{base_nome}.m4a"
+    if caminho_audio != novo_audio:
+        try:
+            db.storage.from_(s.bucket_documentos).move(caminho_audio, novo_audio)
+            db.table("atendimentos").update({"audio_path": novo_audio}) \
+              .eq("id", atendimento_id).execute()
+            db.table("documentos").update({"storage_path": novo_audio,
+                                           "observacao": f"Áudio do atendimento — {apelido.replace('-', ' ')}"}) \
+              .eq("storage_path", caminho_audio).execute()
+            caminho_audio = novo_audio
+        except Exception as e:
+            # Renomear é melhoria. Falhando, o áudio continua onde está e
+            # acessível — perder o arquivo para ganhar um nome bonito
+            # seria um péssimo negócio.
+            print(f"[atendimento] renomear audio falhou: {e}")
+
     # ── A TRANSCRIÇÃO VIRA DOCUMENTO DA PASTA DO CASO ──────────────
     #
     # Ela já ficava guardada numa coluna, e ali só existia para quem
@@ -506,7 +733,7 @@ def transcrever(atendimento_id: str) -> dict:
             "Transcrição automática do áudio. Pode conter imprecisões de\n"
             "reconhecimento de fala; em caso de dúvida, vale o áudio.\n\n"
         )
-        caminho_txt = f"{a['caso_id']}/atendimentos/transcricao-{atendimento_id}.txt"
+        caminho_txt = f"{a['caso_id']}/atendimentos/{base_nome}.txt"
         db.storage.from_(s.bucket_documentos).upload(
             caminho_txt, (cabecalho + texto).encode("utf-8"),
             {"content-type": "text/plain; charset=utf-8", "upsert": "true"})
@@ -520,7 +747,7 @@ def transcrever(atendimento_id: str) -> dict:
             db.table("documentos").insert({
                 "caso_id": a["caso_id"], "tipo": "TRANSCRICAO_ATENDIMENTO",
                 "storage_path": caminho_txt, "status": "RECEBIDO",
-                "observacao": f"Transcrição do atendimento de {quando}",
+                "observacao": f"Transcrição — {apelido.replace('-', ' ')} · {quando}",
             }).execute()
     except Exception as e:
         # Falhar aqui não pode apagar a transcrição que já foi gravada na
