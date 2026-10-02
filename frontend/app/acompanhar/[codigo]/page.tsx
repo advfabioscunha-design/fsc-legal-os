@@ -147,14 +147,7 @@ export default function Acompanhar() {
                 dentro. Sem isso ele entraria numa área vazia. */}
             <div className="mt-5">
               <BotaoGoogle convite={codigo} destino="/cliente"
-                rotulo="Entrar com o Google" />
-              <div className="mt-4 flex items-center gap-3">
-                <span className="h-px flex-1 bg-black/10" />
-                <span className="text-[10px] uppercase tracking-wider text-black/35">
-                  ou crie uma senha
-                </span>
-                <span className="h-px flex-1 bg-black/10" />
-              </div>
+                rotulo="Entrar com o Google" divisor="ou crie uma senha" />
             </div>
 
             <div className="mt-4 space-y-2.5">

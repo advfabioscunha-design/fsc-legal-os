@@ -116,18 +116,9 @@ export default function AcessoEquipe() {
               nunca na operação. */}
           <div className="mt-6">
             <BotaoGoogle destino="/inicio" tom="escuro"
-              rotulo="Entrar com o Google do escritório" />
-            <p className="mt-2 text-[11px] leading-relaxed text-slate/70">
-              Use a conta Google do seu e-mail de trabalho, o mesmo que recebeu
-              o convite. Conta pessoal entra como cliente.
-            </p>
-            <div className="mt-5 flex items-center gap-3">
-              <span className="h-px flex-1 bg-white/10" />
-              <span className="text-[10px] uppercase tracking-wider text-slate/60">
-                ou com e-mail e senha
-              </span>
-              <span className="h-px flex-1 bg-white/10" />
-            </div>
+              rotulo="Entrar com o Google do escritório"
+              nota="Use a conta Google do seu e-mail de trabalho, o mesmo que recebeu o convite. Conta pessoal entra como cliente."
+              divisor="ou com e-mail e senha" />
           </div>
 
           <div className="mt-5 space-y-4">

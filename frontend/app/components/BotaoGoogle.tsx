@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
+import { useGoogleLiberado } from "../../lib/entradaGoogle";
 
 /* ENTRAR COM A CONTA GOOGLE
  *
@@ -29,14 +30,19 @@ export default function BotaoGoogle({
   convite,
   rotulo = "Entrar com o Google",
   tom = "claro",
+  nota,
+  divisor,
 }: {
   destino?: string;
   convite?: string;
   rotulo?: string;
   tom?: "claro" | "escuro";
+  nota?: string;
+  divisor?: string;
 }) {
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState("");
+  const liberado = useGoogleLiberado();
 
   async function ir() {
     setErro("");
@@ -91,16 +97,40 @@ export default function BotaoGoogle({
       ? "border border-white/20 bg-white/5 text-white hover:border-white/45 hover:bg-white/10"
       : "border border-black/12 bg-white text-charcoal shadow-sm hover:bg-black/[0.03]";
 
+  /* Provedor desligado — ou ainda não sabemos: nada aparece. A nota e o
+     divisor vêm junto de propósito. Um "ou com e-mail e senha" sozinho,
+     sem nada acima dele, é pior do que não ter divisor nenhum: a pessoa
+     procura a outra opção que a frase promete e não encontra. */
+  if (liberado !== true) return null;
+
+  const risco = tom === "escuro" ? "bg-white/10" : "bg-black/10";
+  const legenda = tom === "escuro" ? "text-white/40" : "text-charcoal/40";
+
   return (
     <div>
       <button type="button" onClick={ir} disabled={ocupado} className={`${base} ${cor}`}>
         <MarcaGoogle />
         {ocupado ? "Abrindo o Google…" : rotulo}
       </button>
+
+      {nota && (
+        <p className={`mt-2 text-[11px] leading-relaxed ${tom === "escuro" ? "text-white/55" : "text-charcoal/50"}`}>
+          {nota}
+        </p>
+      )}
+
       {erro && (
         <p className={`mt-2 text-xs leading-relaxed ${tom === "escuro" ? "text-[#E5A44C]" : "text-[#B3261E]"}`}>
           {erro}
         </p>
+      )}
+
+      {divisor && (
+        <div className="mt-5 flex items-center gap-3">
+          <span className={`h-px flex-1 ${risco}`} />
+          <span className={`text-[10px] uppercase tracking-wider ${legenda}`}>{divisor}</span>
+          <span className={`h-px flex-1 ${risco}`} />
+        </div>
       )}
     </div>
   );

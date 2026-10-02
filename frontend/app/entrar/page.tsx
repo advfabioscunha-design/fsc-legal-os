@@ -249,14 +249,7 @@ export default function Entrar() {
             fala de cadastro. */}
         {(modo === "login" || modo === "cadastro") && (
           <div className="mb-6">
-            <BotaoGoogle />
-            <div className="mt-5 flex items-center gap-3">
-              <span className="h-px flex-1 bg-black/10" />
-              <span className="text-[11px] uppercase tracking-wider text-charcoal/40">
-                ou com e-mail e senha
-              </span>
-              <span className="h-px flex-1 bg-black/10" />
-            </div>
+            <BotaoGoogle divisor="ou com e-mail e senha" />
           </div>
         )}
 

@@ -854,14 +854,8 @@ function Entrada({
           contrato precisa do nome inteiro. Duas, e não um formulário. */}
       {(modo === "entrar" || modo === "criar") && (
         <div className="mt-5">
-          <BotaoGoogle destino="/balcao" tom="escuro" />
-          <div className="mt-4 flex items-center gap-3">
-            <span className="h-px flex-1 bg-white/10" />
-            <span className="text-[10px] uppercase tracking-wider text-white/35">
-              ou com e-mail e senha
-            </span>
-            <span className="h-px flex-1 bg-white/10" />
-          </div>
+          <BotaoGoogle destino="/balcao" tom="escuro"
+            divisor="ou com e-mail e senha" />
         </div>
       )}
 
