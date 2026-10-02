@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
+import BotaoGoogle from "../components/BotaoGoogle";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -83,12 +84,21 @@ export default function Entrar() {
     const daEquipe = ["OPERADOR", "ADMIN"].includes(perfil?.papel);
     const next = new URLSearchParams(window.location.search).get("next") || "";
 
-    if (next === "/cliente") { router.push("/cliente"); return; }
-    if (next.startsWith("/")) {
-      router.push(daEquipe ? next : "/cliente");
-      return;
-    }
-    router.push(daEquipe ? "/inicio" : "/cliente");
+    /* O cliente passa pela tela de conclusão — nome completo, WhatsApp
+       e o aceite dos termos. Ela se encarrega de sumir para quem já
+       respondeu, então ninguém vê isso duas vezes. Vale para quem entra
+       com senha tanto quanto para quem entra com o Google: o aceite não
+       pode depender da porta usada. */
+    const pedido = next.startsWith("/") && !next.startsWith("//") ? next : "";
+    // Tela interna só para quem é da equipe. Para o cliente o destino é
+    // a área dele, salvo o balcão, de onde ele pode ter vindo no meio de
+    // um pedido de contrato — e voltar para a lista de casos ali seria
+    // mandá-lo recomeçar.
+    const alvo = daEquipe
+      ? (pedido || "/inicio")
+      : (pedido === "/balcao" || pedido.startsWith("/balcao?") ? pedido : "/cliente");
+    if (daEquipe) { router.push(alvo); return; }
+    router.push(`/entrada/completar?next=${encodeURIComponent(alvo)}`);
   }
 
   /* RECUPERAR A SENHA, PEDINDO SÓ O E-MAIL
@@ -227,6 +237,28 @@ export default function Entrar() {
             : "Informe o e-mail cadastrado. Enviamos para ele o link para você "
               + "criar uma senha nova."}
         </p>
+
+        {/* O CAMINHO CURTO VEM PRIMEIRO
+
+            O botão fica ACIMA do formulário porque é o caminho mais
+            curto, e caminho curto escondido embaixo não é caminho. Quem
+            tem Gmail entra num clique: o Google já confirmou o e-mail e
+            o nome, então não há cadastro a preencher nem senha a
+            esquecer depois. Vale tanto para entrar quanto para criar o
+            acesso — é o mesmo clique, e é por isso que o rótulo não
+            fala de cadastro. */}
+        {(modo === "login" || modo === "cadastro") && (
+          <div className="mb-6">
+            <BotaoGoogle />
+            <div className="mt-5 flex items-center gap-3">
+              <span className="h-px flex-1 bg-black/10" />
+              <span className="text-[11px] uppercase tracking-wider text-charcoal/40">
+                ou com e-mail e senha
+              </span>
+              <span className="h-px flex-1 bg-black/10" />
+            </div>
+          </div>
+        )}
 
         {/* RECUPERAR PEDE UMA COISA SÓ
 

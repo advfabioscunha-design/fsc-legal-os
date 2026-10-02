@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
+import BotaoGoogle from "../components/BotaoGoogle";
 
 /* ÁREA DA EQUIPE
  *
@@ -102,7 +103,34 @@ export default function AcessoEquipe() {
             e o acompanhamento dos casos.
           </p>
 
-          <div className="mt-6 space-y-4">
+          {/* ENTRAR COM A CONTA GOOGLE DO TRABALHO
+
+              Quase todo escritório usa Gmail, e quem trabalha aqui já
+              está logado nele no navegador: um clique, sem mais uma
+              senha para guardar.
+
+              O que o botão NÃO faz é dar acesso. Ele prova quem a
+              pessoa é; o que ela pode abrir continua vindo do papel
+              gravado na plataforma. Quem entrar com um Google que não
+              está na equipe cai na área do cliente — não em erro, e
+              nunca na operação. */}
+          <div className="mt-6">
+            <BotaoGoogle destino="/inicio" tom="escuro"
+              rotulo="Entrar com o Google do escritório" />
+            <p className="mt-2 text-[11px] leading-relaxed text-slate/70">
+              Use a conta Google do seu e-mail de trabalho, o mesmo que recebeu
+              o convite. Conta pessoal entra como cliente.
+            </p>
+            <div className="mt-5 flex items-center gap-3">
+              <span className="h-px flex-1 bg-white/10" />
+              <span className="text-[10px] uppercase tracking-wider text-slate/60">
+                ou com e-mail e senha
+              </span>
+              <span className="h-px flex-1 bg-white/10" />
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-4">
             <label className="block">
               <span className="text-caption text-slate">E-mail de trabalho</span>
               <input value={email} onChange={(e) => setEmail(e.target.value)}

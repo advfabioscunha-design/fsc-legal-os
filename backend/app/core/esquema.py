@@ -40,6 +40,10 @@ DE_ONDE_VEM = {
     "descadastrado_em": "0060", "descadastro_motivo": "0060",
     "origem_consentimento": "0060", "consentimento_em": "0060",
     "relacionamento_nota": "0060", "relacionamento_envios": "0060",
+    # 0061 — o aceite dos termos na entrada
+    "aceite_termos_em": "0061", "aceite_termos_versao": "0061",
+    "aceite_privacidade_em": "0061", "aceite_privacidade_versao": "0061",
+    "aceite_origem_ip": "0061",
 }
 
 O_QUE_PARA = {
@@ -49,6 +53,7 @@ O_QUE_PARA = {
     "0058": "o cliente que veio do WhatsApp criar o acesso à plataforma",
     "0059": "a agenda de contatos de WhatsApp no card do caso",
     "0060": "o cadastro de clientes e as felicitações de aniversário",
+    "0061": "registrar o aceite dos termos quando o cliente cria o acesso",
 }
 
 # As mensagens que o PostgREST devolve quando o nome não existe.

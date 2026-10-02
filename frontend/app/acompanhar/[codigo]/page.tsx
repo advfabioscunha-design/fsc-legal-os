@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
+import BotaoGoogle from "../../components/BotaoGoogle";
 
 // O endereço da API do escritório.
 const API = process.env.NEXT_PUBLIC_API_URL || "https://api.fscadvocaciadigital.com.br";
@@ -93,7 +94,10 @@ export default function Acompanhar() {
         return setErro(jv?.detail
           || "A conta foi criada, mas não consegui ligar ao seu cadastro. Fale com o escritório pelo WhatsApp.");
       }
-      router.push("/cliente");
+      /* Falta o que o cadastro do WhatsApp não tem: o nome completo
+         conferido pela própria pessoa e o aceite dos termos. A tela de
+         conclusão pergunta, e some sozinha para quem já respondeu. */
+      router.push("/entrada/completar?next=%2Fcliente");
     } catch {
       setOcupado(false);
       setErro("Falha de conexão. Tente de novo em instantes.");
@@ -134,7 +138,26 @@ export default function Acompanhar() {
               documentos e fala com o escritório pelo mesmo lugar.
             </p>
 
-            <div className="mt-5 space-y-2.5">
+            {/* O CAMINHO DE UM CLIQUE
+
+                Quem chega aqui está no celular, veio de uma conversa de
+                WhatsApp e não quer inventar senha. Com o Google ele
+                entra direto, e o convite viaja junto: a conta nova cai
+                no cadastro que o escritório já abriu, com o caso dele
+                dentro. Sem isso ele entraria numa área vazia. */}
+            <div className="mt-5">
+              <BotaoGoogle convite={codigo} destino="/cliente"
+                rotulo="Entrar com o Google" />
+              <div className="mt-4 flex items-center gap-3">
+                <span className="h-px flex-1 bg-black/10" />
+                <span className="text-[10px] uppercase tracking-wider text-black/35">
+                  ou crie uma senha
+                </span>
+                <span className="h-px flex-1 bg-black/10" />
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2.5">
               <input type="email" value={email} inputMode="email"
                 autoComplete="email" placeholder="seu e-mail"
                 onChange={(e) => setEmail(e.target.value)} className={campo} />

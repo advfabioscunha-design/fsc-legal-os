@@ -3572,6 +3572,11 @@ def cliente_cadastro(authorization: str | None = Header(default=None)):
         # a pessoa digitava tudo de novo a cada visita.
         "nacionalidade", "nascimento", "estado_civil", "profissao",
         "cpf_conferido_em",
+        # O aceite dos termos. Vai na mesma resposta porque é ela que a
+        # tela de entrada consulta para saber se ainda falta alguma
+        # coisa — uma consulta a menos entre o login e a tela.
+        "aceite_termos_em", "aceite_termos_versao",
+        "aceite_privacidade_em", "aceite_privacidade_versao",
         "endereco_cep", "endereco_rua", "endereco_numero",
         "endereco_complemento", "endereco_bairro", "endereco_cidade",
         "endereco_uf",
@@ -3696,6 +3701,60 @@ def cliente_atualizar_cadastro(body: CadastroCliente,
         except Exception as e:
             troca = {"erro": str(e)}
     return {"ok": True, **({"contato": troca} if troca else {})}
+
+
+class AceiteDoCliente(BaseModel):
+    termos: bool = False
+    privacidade: bool = False
+    # A versão vem da tela porque é a tela que mostrou o texto. Gravar a
+    # data de hoje seria registrar o que o servidor acha que está no ar,
+    # e não o que a pessoa de fato leu.
+    versao_termos: str | None = None
+    versao_privacidade: str | None = None
+
+
+@app.post("/api/v1/cliente/aceite")
+def cliente_registrar_aceite(body: AceiteDoCliente, request: Request,
+                             authorization: str | None = Header(default=None)):
+    """Registra o aceite dos Termos de Uso e da Política de Privacidade.
+
+    A caixa marcada na tela não prova nada sozinha. O que prova é o
+    registro do ato: quando foi, qual versão do texto estava no ar
+    naquele momento e de onde partiu. Sem a versão, o aceite não se
+    refere a documento nenhum — e o documento muda.
+
+    O instante é carimbado AQUI, no servidor. Aceitar data vinda do
+    navegador seria aceitar o relógio de quem está do outro lado.
+
+    Os dois são exigidos juntos porque a plataforma não funciona sem
+    tratar dado pessoal: deixar aceitar um e recusar o outro criaria um
+    cadastro que não pode ser usado para nada."""
+    if not (body.termos and body.privacidade):
+        raise HTTPException(
+            400, "É preciso aceitar os Termos de Uso e a Política de "
+                 "Privacidade para concluir o acesso.")
+
+    cli = _cliente_do_token(authorization)
+    agora = _dt_agora()
+
+    # O endereço de origem passa por um proxy (Caddy) antes de chegar
+    # aqui: sem ler o cabeçalho encaminhado, todo aceite ficaria
+    # registrado com o IP do próprio servidor, o que não serve de prova.
+    encaminhado = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    ip = encaminhado or (request.client.host if request.client else "")
+
+    campos = {
+        "aceite_termos_em": agora,
+        "aceite_termos_versao": (body.versao_termos or "").strip()[:40] or None,
+        "aceite_privacidade_em": agora,
+        "aceite_privacidade_versao": (body.versao_privacidade or "").strip()[:40] or None,
+        "aceite_origem_ip": ip[:60] or None,
+    }
+    try:
+        get_db().table("clientes").update(campos).eq("id", cli["id"]).execute()
+    except Exception as e:
+        raise HTTPException(503, esquema.erro_amigavel(e, "registrar o aceite"))
+    return {"ok": True, "em": agora}
 
 
 @app.get("/api/v1/cliente/caso/{caso_id}")

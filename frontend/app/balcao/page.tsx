@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 import { useRascunho } from "@/lib/rascunho";
+import BotaoGoogle from "../components/BotaoGoogle";
+import { faltaNoCadastro } from "@/lib/cadastro";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -119,6 +121,33 @@ export default function Balcao() {
     })();
     return () => { vivo = false; };
   }, [sessao]);
+
+  /* CONCLUIR O CADASTRO ANTES DE PEDIR O DOCUMENTO
+
+     Quem entra aqui — com senha ou com o Google — pode estar com o
+     cadastro pela metade: sem nome completo, sem WhatsApp, sem o aceite
+     dos termos. Nada disso pode faltar na hora de emitir um contrato, e
+     perguntar depois, no meio da coleta, é interromper a pessoa quando
+     ela já está adiantada.
+
+     A tela de conclusão decide sozinha se tem o que perguntar. Quem já
+     respondeu volta para cá sem ver nada, e é por isso que esta
+     verificação pode ser simples assim. */
+  useEffect(() => {
+    if (!sessao) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/api/v1/cliente/cadastro`, {
+          headers: { Authorization: `Bearer ${sessao.access_token}` },
+        });
+        const c = await r.json().catch(() => ({} as any));
+        if (!vivo) return;
+        if (faltaNoCadastro(c)) router.push("/entrada/completar?next=%2Fbalcao");
+      } catch { /* consulta que falhou não pode fechar a porta do balcão */ }
+    })();
+    return () => { vivo = false; };
+  }, [sessao, router]);
 
   const reais = (v: number) =>
     v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -812,6 +841,29 @@ function Entrada({
             + "pediu."
           : "Vamos recuperar o seu acesso."}
       </p>
+
+      {/* ENTRAR COM O GOOGLE, NO MEIO DE UM PEDIDO
+
+          Este é o lugar onde a conta mais atrapalha: a pessoa veio
+          pedir um contrato e esbarra num cadastro. Um clique resolve —
+          e a volta cai aqui mesmo, no balcão, para ela continuar o
+          pedido de onde parou, e não na lista de casos.
+
+          Depois do Google ela ainda responde duas perguntas (nome
+          completo e WhatsApp), porque o Google não manda telefone e o
+          contrato precisa do nome inteiro. Duas, e não um formulário. */}
+      {(modo === "entrar" || modo === "criar") && (
+        <div className="mt-5">
+          <BotaoGoogle destino="/balcao" tom="escuro" />
+          <div className="mt-4 flex items-center gap-3">
+            <span className="h-px flex-1 bg-white/10" />
+            <span className="text-[10px] uppercase tracking-wider text-white/35">
+              ou com e-mail e senha
+            </span>
+            <span className="h-px flex-1 bg-white/10" />
+          </div>
+        </div>
+      )}
 
       {/* O QUE A CONTA DÁ, ALÉM DE GUARDAR O PEDIDO
 
