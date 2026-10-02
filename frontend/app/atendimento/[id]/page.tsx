@@ -167,9 +167,13 @@ export default function Atendimento() {
       <div className="fixed inset-0 flex flex-col bg-black">
         {faltaAutorizar && (
           <div className="flex flex-wrap items-center gap-3 bg-amber-50 px-4 py-2.5">
+            {/* A faixa não é cobrança. Ela existe para que, quando o
+                advogado disser "vou gravar a partir daqui, tudo bem?", a
+                pessoa tenha onde responder — e para deixar claro que,
+                até ela clicar, nada está sendo gravado. */}
             <span className="text-sm text-amber-900">
-              Você entrou <b>sem autorizar a gravação</b>. Se quiser que o
-              escritório registre o áudio desta conversa, pode autorizar agora.
+              Esta conversa <b>não está sendo gravada</b>. Se o advogado pedir
+              para registrar o áudio, você autoriza por aqui.
             </span>
             <button
               onClick={autorizarAgora}
@@ -263,27 +267,21 @@ export default function Atendimento() {
               />
             </label>
 
-            <div className="mt-5 rounded-xl border border-charcoal/10 bg-ice/60 p-4">
-              <div className="space-y-2 text-sm leading-relaxed text-charcoal/80">
-                {dados.resumo.split("\n\n").map((p, i) => (
-                  <p key={i}>{p.replace(/\*\*/g, "")}</p>
-                ))}
-              </div>
+            {/* A ENTRADA NÃO PEDE MAIS AUTORIZAÇÃO DE GRAVAÇÃO
 
-              <button
-                onClick={() => { setTermoAberto(true); setAviso(""); }}
-                className="mt-3 inline-flex items-center gap-2 rounded-xl border border-navy/25 bg-white px-4 py-3 text-sm font-semibold text-navy transition hover:bg-navy/5"
-              >
-                📄 Abrir e ler o Termo de Consentimento
-              </button>
+                Antes, a porta da sala era um termo para ler até o fim e
+                duas opções de entrada. Quem chegava para uma conversa de
+                dez minutos encontrava um documento jurídico e a decisão
+                de autorizar algo que ainda não tinha começado — e muita
+                gente desistia ali, ou entrava sem entender o que marcou.
 
-              <p className={`mt-2 text-sm font-medium ${aceitouTermo ? "text-forest" : "text-charcoal/55"}`}>
-                {aceitouTermo
-                  ? "✓ Termo lido e ciência confirmada. Você pode entrar."
-                  : "Ainda não lido. A leitura é necessária para autorizar a gravação."}
-              </p>
-            </div>
+                Consentimento pedido antes da conversa também vale pouco:
+                a pessoa autoriza a gravação de algo que ela ainda não
+                sabe o que é. Agora ele é pedido no momento em que a
+                gravação vai acontecer, quando o advogado aciona o botão
+                — aí a pergunta tem contexto, e a resposta tem peso.
 
+                Até lá, nada é gravado. A pessoa entra e conversa. */}
             {aviso && (
               <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 ⚠ {aviso}
@@ -291,23 +289,17 @@ export default function Atendimento() {
             )}
 
             <button
-              onClick={() => entrar(true)}
+              onClick={() => entrar(false)}
               disabled={entrando}
-              className="mt-4 w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+              className="mt-5 w-full rounded-xl bg-navy px-6 py-4 text-base font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
             >
               {entrando ? "Entrando…" : "Entrar no atendimento"}
             </button>
 
-            <button
-              onClick={() => entrar(false)}
-              disabled={entrando}
-              className="mt-2 w-full rounded-xl border border-charcoal/15 px-6 py-3 text-sm font-medium text-charcoal/70 transition hover:bg-charcoal/5 disabled:opacity-50"
-            >
-              Entrar sem autorizar a gravação
-            </button>
-
-            <p className="mt-3 text-center text-xs text-charcoal/50">
-              O navegador vai pedir permissão para usar sua câmera e seu microfone.
+            <p className="mt-3 text-center text-xs leading-relaxed text-charcoal/50">
+              O navegador vai pedir permissão para usar sua câmera e seu
+              microfone. A conversa não é gravada — se for necessário gravar,
+              o advogado pede a sua autorização durante o atendimento.
             </p>
           </>
         )}
