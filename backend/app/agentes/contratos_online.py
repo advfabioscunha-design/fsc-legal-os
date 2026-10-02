@@ -906,13 +906,15 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
     campos = {"revisao": dados, "revisado_em": _agora(),
               "atualizado_em": _agora()}
     if not auto:
-        campos.update({"fase": "AJUSTE", "fase_em": _agora(),
-                       "avanca_em": _mais(JANELA_AJUSTE)})
+        # Direto para a mesa do advogado, com os apontamentos. Na mão
+        # dele o relógio não corre: `avanca_em` nulo.
+        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora(),
+                       "avanca_em": None})
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_REVISADO",
                      {"pedido": pedido_id, "apontamentos": len(apontamentos),
                       "auto": auto})
-    return {"ok": True, "fase": "REVISAO_IA" if auto else "AJUSTE",
+    return {"ok": True, "fase": "REVISAO_IA" if auto else "REVISAO_ADV",
             "apontamentos": apontamentos,
             "parecer": dados.get("parecer", "")}
 
@@ -2411,7 +2413,9 @@ JANELA_REVISAO_2 = 1      # a segunda revisão é confirmação, não releitura
 
 _PROXIMA = {
     "REDACAO": ("REVISAO_IA", JANELA_REDACAO),
-    "REVISAO_IA": ("AJUSTE", JANELA_REVISAO),
+    # Depois da revisão, o advogado. O relógio da esteira para aqui: na
+    # mesa dele não há janela correndo, e nunca houve.
+    "REVISAO_IA": ("REVISAO_ADV", JANELA_REVISAO),
     # DO AJUSTE DIRETO PARA O ADVOGADO
     #
     # Havia uma segunda conferência automática entre o ajuste e a
@@ -2422,6 +2426,20 @@ _PROXIMA = {
     # Quem confere o contrato é o advogado, e ele lê a íntegra. Uma
     # máquina conferindo antes dele não acrescenta segurança: acrescenta
     # uma hora de espera e mais uma chamada de IA por pedido.
+    # DA REVISÃO DIRETO PARA O ADVOGADO
+    #
+    # O ajuste automático saiu do rito. Ele reescrevia a minuta inteira
+    # para aplicar os apontamentos da revisão, e isso tinha dois
+    # problemas: custava uma reescrita completa por pedido, e o advogado
+    # recebia um texto novo sem ver o que tinha mudado.
+    #
+    # Agora os apontamentos chegam à mesa dele junto com a minuta, e ele
+    # aplica o que concordar com o especialista ao lado, um a um, com o
+    # texto na tela. É o fluxo que ele pediu: nada muda sem a
+    # autorização de quem assina, e o pedido não volta para a esteira.
+    #
+    # AJUSTE continua aqui para quem o advogado DEVOLVE de propósito, e
+    # para os pedidos que já estavam nesta fase.
     "AJUSTE": ("REVISAO_ADV", JANELA_AJUSTE),
     # Continua aqui para os pedidos que JÁ estavam nesta fase quando a
     # mudança subiu. Sem esta linha eles ficariam parados para sempre,
@@ -2764,9 +2782,10 @@ def esteira_automatica() -> dict:
                     if proxima == "REVISAO_IA":
                         revisar(p["id"], auto=True)
                         feitos["revisados"] += 1
+                    # O ajuste automático saiu do rito: a revisão vai
+                    # direto para o advogado, e é ele que aplica.
                     elif proxima == "AJUSTE":
-                        ajustar(p["id"], auto=True)
-                        feitos["ajustados"] += 1
+                        pass
                     elif proxima == "REVISAO_2":
                         revisar_segunda(p["id"], auto=True)
                         feitos["revisados"] += 1

@@ -60,11 +60,26 @@ const COLUNAS = [
  * fase atual, seja ela qual for. Esconder a exceção enquanto ela está
  * em curso seria trocar um erro por outro.
  */
-/* A conferência automática saiu do rito: do ajuste vai direto para a
- * revisão do advogado. Ela continua na lista de COLUNAS porque pedidos
- * que já estavam nela quando a mudança subiu precisam continuar
- * visíveis até drenarem. */
-const FASES_DE_EXCECAO = ["CIENCIA_ALTERACAO", "REVISAO_2"];
+/* O RITO ENCOLHEU, E ESTAS QUATRO SAÍRAM DELE
+ *
+ * Ciência  — nada no sistema põe pedido nesta fase. Estava na lista
+ *            desde o começo e nunca foi usada: coluna que nunca enche
+ *            é coluna que só ocupa espaço.
+ * Ajuste   — o ajuste automático reescrevia a minuta inteira para
+ *            aplicar os apontamentos, e o advogado recebia um texto
+ *            novo sem ver o que mudou. Agora a revisão vai direto para
+ *            a mesa dele, com os apontamentos ao lado, e ele aplica o
+ *            que concordar, um a um. A fase continua existindo para o
+ *            que ELE devolve de propósito.
+ * Decisão do cliente — desvio que só acontece quando a revisão encontra
+ *            algo que a lei não admite.
+ * Conferência — a segunda revisão automática, que saiu do fluxo.
+ *
+ * Nenhuma delas some da lista de COLUNAS: pedido em fase sem coluna
+ * desaparece da tela, e desaparecer é o pior que pode acontecer com um
+ * pedido. A regra é outra: elas aparecem QUANDO TÊM ALGUÉM DENTRO.
+ */
+const FASES_DE_EXCECAO = ["CIENCIA", "AJUSTE", "CIENCIA_ALTERACAO", "REVISAO_2"];
 
 function trilhaPara(faseAtual: string) {
   return COLUNAS.filter(
@@ -585,13 +600,20 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 </>
               ) : (
                 <>
+                  {/* O AJUSTE AUTOMÁTICO SAIU DO RITO
+                      A revisão agora vai direto para a mesa do advogado,
+                      com os apontamentos ao lado da minuta, e ele aplica
+                      o que concordar, um a um, vendo o que muda. Este
+                      botão continua aqui para o pedido que ELE devolveu
+                      de propósito, e para quem ficou nesta fase. */}
                   <p className="mb-2 text-[11px] leading-relaxed text-white/60">
-                    Em até 2 horas o pedido chega à sua revisão sozinho. Dali não
-                    passa sem você.
+                    Este pedido está no ajuste porque foi devolvido, ou porque
+                    já estava aqui. Hoje a revisão vai direto para a sua mesa.
                   </p>
-                  <Botao rotulo="Aplicar os apontamentos" ocupado={ocupado === "ajustar"}
+                  <Botao rotulo="Aplicar os apontamentos e trazer para mim"
+                    ocupado={ocupado === "ajustar"}
                     onClick={() => acao("/ajustar", {}, "ajustar")}
-                    nota="Reescreve a minuta atendendo a revisão. A anterior fica guardada." />
+                    nota="Reescreve a minuta atendendo a revisão e põe na sua mesa. A anterior fica guardada." />
                 </>
               )}
             </div>

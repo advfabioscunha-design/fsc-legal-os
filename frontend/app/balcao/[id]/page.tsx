@@ -33,10 +33,8 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.
 const FASES: { id: string; rotulo: string }[] = [
   { id: "PAGAMENTO", rotulo: "Pagamento" },
   { id: "COLETA", rotulo: "Informações do documento" },
-  { id: "CIENCIA", rotulo: "Orientação e ciência" },
   { id: "REDACAO", rotulo: "Elaboração" },
   { id: "REVISAO_IA", rotulo: "Revisão técnica" },
-  { id: "AJUSTE", rotulo: "Ajustes" },
   { id: "REVISAO_ADV", rotulo: "Revisão final" },
   { id: "APROVACAO", rotulo: "Sua aprovação" },
   { id: "ASSINATURA", rotulo: "Assinatura" },
@@ -137,7 +135,9 @@ export default function PedidoDoCliente() {
    * ao começo, dizendo ao cliente que o documento regrediu.
    */
   const ONDE_CAI: Record<string, string> = {
-    CIENCIA_ALTERACAO: "AJUSTE",
+    CIENCIA: "COLETA",
+    AJUSTE: "REVISAO_IA",
+    CIENCIA_ALTERACAO: "REVISAO_IA",
     REVISAO_2: "REVISAO_ADV",
   };
   const faseNaBarra = ONDE_CAI[faseAtual] || faseAtual;
