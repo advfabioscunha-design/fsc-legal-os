@@ -34,7 +34,11 @@ const FASES: { id: string; rotulo: string }[] = [
   { id: "PAGAMENTO", rotulo: "Pagamento" },
   { id: "COLETA", rotulo: "Informações do documento" },
   { id: "REDACAO", rotulo: "Elaboração" },
-  { id: "REVISAO_IA", rotulo: "Revisão técnica" },
+  /* A "revisão técnica" automática saiu daqui junto com o rito. Para o
+     cliente ela nunca significou grande coisa — duas revisões seguidas
+     numa régua de oito passos parecem burocracia, não cuidado. O que
+     ele precisa saber é que um advogado lê antes de o documento chegar
+     às mãos dele, e isso a "Revisão final" já diz. */
   { id: "REVISAO_ADV", rotulo: "Revisão final" },
   { id: "APROVACAO", rotulo: "Sua aprovação" },
   { id: "ASSINATURA", rotulo: "Assinatura" },
@@ -136,8 +140,12 @@ export default function PedidoDoCliente() {
    */
   const ONDE_CAI: Record<string, string> = {
     CIENCIA: "COLETA",
-    AJUSTE: "REVISAO_IA",
-    CIENCIA_ALTERACAO: "REVISAO_IA",
+    // A revisão automática saiu da régua, mas pedidos antigos ainda
+    // podem estar nela e nas fases que dependiam dela. Todas caem na
+    // revisão final, que é para onde elas de fato levam hoje.
+    REVISAO_IA: "REVISAO_ADV",
+    AJUSTE: "REVISAO_ADV",
+    CIENCIA_ALTERACAO: "REVISAO_ADV",
     REVISAO_2: "REVISAO_ADV",
   };
   const faseNaBarra = ONDE_CAI[faseAtual] || faseAtual;
@@ -791,13 +799,18 @@ export default function PedidoDoCliente() {
                 <Pendencias pedidoId={String(id)} />
                 <p className="mt-1 text-[11px] text-white/45">
                   O escritório está escrevendo a partir do que você informou.
-                  Assim que a primeira versão ficar pronta, ela segue para
-                  revisão e depois para a conferência final. Você é avisado
-                  por e-mail quando puder ler e aprovar.
+                  Pronta a primeira versão, ela vai para a revisão do
+                  advogado, que lê o documento inteiro antes de liberar.
+                  Você é avisado por e-mail quando puder ler e aprovar.
                 </p>
               </>
             )}
-            {faseAtual === "REVISAO_IA" && <p>O documento está em revisão técnica.</p>}
+            {/* Etapa que saiu do rito. Para o cliente a verdade é a
+                mesma dos pedidos novos: o documento está com o
+                escritório, a caminho da leitura do advogado. */}
+            {faseAtual === "REVISAO_IA" && (
+              <p>O documento está com o escritório para a revisão do advogado.</p>
+            )}
             {/* Etapa que saiu do fluxo. O cliente não precisa saber
                 disso: para ele, o documento está com o escritório, que
                 é a verdade. */}

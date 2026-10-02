@@ -4615,6 +4615,19 @@ def revisar_contrato(pedido_id: str):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/v1/contratos/pedidos/{pedido_id}/para-o-advogado")
+def enviar_ao_advogado(pedido_id: str):
+    """Adianta o relógio e põe o pedido na mesa do advogado.
+
+    Sem chamada de IA: a minuta já está escrita, e o que restava era a
+    espera da esteira."""
+    from .agentes import contratos_online
+    try:
+        return contratos_online.enviar_ao_advogado(pedido_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/v1/contratos/pedidos/{pedido_id}/ajustar")
 def ajustar_contrato(pedido_id: str):
     """Só abre depois da revisão — a trava está no agente."""

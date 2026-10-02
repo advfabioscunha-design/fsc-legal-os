@@ -46,8 +46,8 @@ const COLUNAS = [
  * o pior que pode acontecer com um pedido.
  *
  * A trilha é outra coisa. Ela mostra o caminho que o contrato percorre,
- * e esse caminho é reto: coleta, redação, revisão, ajuste, conferência,
- * revisão do advogado, envio, assinatura.
+ * e esse caminho é reto: coleta, redação, revisão do advogado, envio,
+ * assinatura.
  *
  * "Decisão do cliente" NÃO faz parte dele. É um desvio que só acontece
  * quando a revisão encontra algo que a lei não admite e o cliente
@@ -60,26 +60,36 @@ const COLUNAS = [
  * fase atual, seja ela qual for. Esconder a exceção enquanto ela está
  * em curso seria trocar um erro por outro.
  */
-/* O RITO ENCOLHEU, E ESTAS QUATRO SAÍRAM DELE
+/* O RITO ENCOLHEU, E ESTAS CINCO SAÍRAM DELE
+ *
+ * O caminho de um contrato hoje é: qualificação, proposta, pagamento,
+ * coleta, REDAÇÃO, REVISÃO DO ADVOGADO, envio, assinatura, concluído.
+ * Nove paradas, e só uma delas é máquina escrevendo.
  *
  * Ciência  — nada no sistema põe pedido nesta fase. Estava na lista
  *            desde o começo e nunca foi usada: coluna que nunca enche
  *            é coluna que só ocupa espaço.
+ * Revisão  — a revisão automática lia a minuta que a própria máquina
+ *            tinha acabado de escrever e mandava os apontamentos para o
+ *            advogado. Ele recebia o documento e, ao lado, a opinião de
+ *            uma máquina sobre o trabalho de outra, antes de ter lido
+ *            qualquer coisa. Quem confere é ele, e ele lê a íntegra.
  * Ajuste   — o ajuste automático reescrevia a minuta inteira para
  *            aplicar os apontamentos, e o advogado recebia um texto
- *            novo sem ver o que mudou. Agora a revisão vai direto para
- *            a mesa dele, com os apontamentos ao lado, e ele aplica o
- *            que concordar, um a um. A fase continua existindo para o
+ *            novo sem ver o que mudou. A fase continua existindo para o
  *            que ELE devolve de propósito.
- * Decisão do cliente — desvio que só acontece quando a revisão encontra
- *            algo que a lei não admite.
+ * Decisão do cliente — desvio que só acontecia quando a revisão
+ *            encontrava algo que a lei não admite.
  * Conferência — a segunda revisão automática, que saiu do fluxo.
  *
  * Nenhuma delas some da lista de COLUNAS: pedido em fase sem coluna
  * desaparece da tela, e desaparecer é o pior que pode acontecer com um
- * pedido. A regra é outra: elas aparecem QUANDO TÊM ALGUÉM DENTRO.
+ * pedido — os que estavam nessas fases quando a mudança subiu precisam
+ * continuar visíveis até saírem. A regra é outra: elas aparecem QUANDO
+ * TÊM ALGUÉM DENTRO, e somem sozinhas quando esvaziam.
  */
-const FASES_DE_EXCECAO = ["CIENCIA", "AJUSTE", "CIENCIA_ALTERACAO", "REVISAO_2"];
+const FASES_DE_EXCECAO = ["CIENCIA", "REVISAO_IA", "AJUSTE",
+                          "CIENCIA_ALTERACAO", "REVISAO_2"];
 
 function trilhaPara(faseAtual: string) {
   return COLUNAS.filter(
@@ -497,40 +507,46 @@ function PainelDoPedido({ id, fechar, recarregar }:
             <BaixaPix onConfirmar={(txid) => acao("/pagamento", { txid, quem: "escritório" }, "pago")}
               ocupado={ocupado === "pago"} />
           )}
-          {/* AS TRÊS PRIMEIRAS FASES ANDAM SOZINHAS
+          {/* DA REDAÇÃO DIRETO PARA A MESA DO ADVOGADO
 
               A minuta é escrita assim que a coleta fecha, e o pedido
-              fica quatro horas visível como "em elaboração" para o
-              cliente. Depois disso vai para revisão sozinho, e de duas
-              em duas horas segue, até parar na revisão do advogado.
+              fica duas horas visível como "em elaboração" para o
+              cliente. Passadas elas, vai sozinho para a revisão do
+              advogado — não há mais revisão automática no meio.
 
               O botão continua aqui porque a janela é teto, não piso:
-              quem clicar, passa na frente do relógio. O que ele mostra
-              agora é se o trabalho daquela fase já está pronto. */}
+              quem clicar, passa na frente do relógio. E ele NÃO gasta
+              uma chamada de IA para isso: só muda a fase. */}
           {fase === "REDACAO" && (
             <div>
               <p className="mb-2 text-[11px] leading-relaxed text-white/60">
                 {p.minuta
-                  ? "Minuta já escrita. O cliente vê o pedido em elaboração por 4 horas; depois disso vai para revisão sozinho."
+                  ? "Minuta escrita. O cliente vê o pedido em elaboração por 2 horas; depois disso vai sozinho para a sua mesa."
                   : "A minuta está sendo escrita. Se demorar, a esteira tenta de novo a cada 15 minutos."}
               </p>
-              <Botao rotulo={p.minuta ? "Mandar para revisão agora" : "Redigir a minuta"}
+              <Botao rotulo={p.minuta ? "Mandar para o advogado agora" : "Redigir a minuta"}
                 ocupado={ocupado === "redigir"}
-                onClick={() => acao(p.minuta ? "/revisar" : "/redigir", {},
-                                    p.minuta ? "revisar" : "redigir")}
-                nota="Passar na frente do relógio é sempre permitido." />
+                onClick={() => acao(p.minuta ? "/para-o-advogado" : "/redigir", {},
+                                    "redigir")}
+                nota={p.minuta
+                  ? "Só adianta o relógio. A minuta não é reescrita."
+                  : "Passar na frente do relógio é sempre permitido."} />
             </div>
           )}
+          {/* Fase que saiu do rito. Nenhum pedido novo entra aqui; os
+              que já estavam seguem para a mesa do advogado no relógio,
+              sem nova leitura de máquina. O bloco existe para que esses
+              pedidos não fiquem sem explicação na tela. */}
           {fase === "REVISAO_IA" && (
             <div>
               <p className="mb-2 text-[11px] leading-relaxed text-white/60">
-                {p.revisao
-                  ? "Revisão feita. Em até 2 horas segue para ajuste sozinho."
-                  : "O revisor está lendo a íntegra."}
+                Este pedido ficou na revisão automática, que saiu do rito.
+                Ele segue sozinho para a sua mesa — ou vá agora.
               </p>
-              <Botao rotulo="Revisar" ocupado={ocupado === "revisar"}
-                onClick={() => acao("/revisar", {}, "revisar")}
-                nota="O revisor lê a íntegra e anota o que precisa mudar." />
+              <Botao rotulo="Mandar para o advogado agora"
+                ocupado={ocupado === "redigir"}
+                onClick={() => acao("/para-o-advogado", {}, "redigir")}
+                nota="Quem lê a íntegra é você. Não há nova leitura automática." />
             </div>
           )}
           {fase === "QUALIFICACAO" && (

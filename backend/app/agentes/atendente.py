@@ -73,7 +73,7 @@ FASE_PARA_O_CLIENTE = {
     "COLETA": "reunindo as informações do documento",
     "CIENCIA": "orientação e ciência",
     "REDACAO": "em elaboração",
-    "REVISAO_IA": "em revisão",
+    "REVISAO_IA": "com o escritório, a caminho da revisão do advogado",
     "AJUSTE": "em ajuste",
     "REVISAO_ADV": "em conferência final pelo escritório",
     "APROVACAO": "aguardando a sua aprovação",
@@ -128,12 +128,13 @@ LIMITES_DA_FASE = {
     },
     "REDACAO": {
         "pode": "que o documento está em elaboração, que é o que a tela dele "
-                "mostra, e que depois segue para revisão e conferência final",
+                "mostra, e que depois segue para a revisão do advogado",
         "nao": "dizer que está pronto, que já foi revisado, que já pode ler "
                "ou que já foi enviado. Nada disso aconteceu ainda",
     },
     "REVISAO_IA": {
-        "pode": "que o documento está na etapa de revisão",
+        "pode": "que o documento está com o escritório, a caminho da "
+                "revisão do advogado",
         "nao": "dizer que está pronto, descrever o texto, contar que a "
                "minuta já existe ou mandar o cliente conferir agora",
     },

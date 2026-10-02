@@ -9,9 +9,11 @@ O caminho, e o que cada etapa protege:
               fica registrada com data, hora e versão do texto
   PAGAMENTO   PIX; o trabalho começa depois de confirmado
   REDACAO     o redator escreve seguindo a lei do tipo
-  REVISAO_IA  o revisor lê a íntegra e anota o que precisa mudar
-  AJUSTE      o redator corrige — este botão só abre depois da revisão
-  REVISAO_ADV o advogado lê e aprova. Nada chega ao cliente sem isso
+  REVISAO_ADV o advogado lê a íntegra e aprova. Nada chega ao cliente
+              sem isso. É aqui que a automação termina: a revisão e o
+              ajuste automáticos saíram do rito, porque produziam um
+              parecer de máquina sobre o texto de outra máquina, antes
+              de quem assina ter lido qualquer coisa
   APROVACAO   o cliente vê com marca d'água e aprova ou pede mudança
   ASSINATURA  assinatura eletrônica; cópia por e-mail quando todos
               tiverem assinado
@@ -776,14 +778,53 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
     campos = {"minuta": texto, "redigido_em": _agora(),
               "atualizado_em": _agora()}
     if not auto:
-        campos.update({"fase": "REVISAO_IA", "fase_em": _agora(),
-                       "avanca_em": _mais(JANELA_REVISAO)})
+        # Escrita a minuta, ela vai para a mesa do advogado. Não há mais
+        # revisão automática no meio: a leitura que vale é a dele, e ela
+        # vem logo em seguida. Na mesa não corre janela — por isso
+        # `avanca_em` fica nulo, e não com um prazo que ninguém cumpre.
+        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora(),
+                       "avanca_em": None})
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_REDIGIDO",
                      {"pedido": pedido_id, "tipo": p["tipo"],
                       "caracteres": len(texto), "auto": auto})
-    return {"ok": True, "fase": "REDACAO" if auto else "REVISAO_IA",
+    return {"ok": True, "fase": "REDACAO" if auto else "REVISAO_ADV",
             "caracteres": len(texto)}
+
+
+def enviar_ao_advogado(pedido_id: str) -> dict:
+    """Passa o pedido na frente do relógio e põe na mesa do advogado.
+
+    A minuta já existe; o que falta é só a espera. Antes, para adiantar,
+    o operador clicava em "mandar para revisão", que reescrevia ou
+    reanalisava o texto — pagava uma chamada de IA para fazer o que o
+    relógio faria de graça em duas horas.
+
+    Aqui não há trabalho de máquina nenhum: muda a fase e pronto. E
+    exige a minuta escrita, porque mesa de advogado sem documento é
+    tarefa sem conteúdo, e ele descobriria isso ao abrir."""
+    db = get_db()
+    achado = db.table("pedidos_contrato").select("*").eq("id", pedido_id) \
+        .limit(1).execute().data
+    if not achado:
+        raise ValueError("Pedido não encontrado.")
+    p = achado[0]
+    if not (p.get("minuta") or "").strip():
+        raise ValueError("A minuta ainda não foi escrita. "
+                         "Redija antes de mandar para o advogado.")
+    if p.get("fase") == "REVISAO_ADV":
+        return {"ok": True, "fase": "REVISAO_ADV", "ja_estava": True}
+
+    db.table("pedidos_contrato").update({
+        "fase": "REVISAO_ADV", "fase_em": _agora(),
+        # Na mesa do advogado não corre relógio. Nunca correu, e pôr um
+        # agora seria inventar um prazo para quem já tem os seus.
+        "avanca_em": None, "atualizado_em": _agora(),
+    }).eq("id", pedido_id).execute()
+    registrar_evento(None, "BALCAO_PARA_O_ADVOGADO",
+                     {"pedido_id": pedido_id, "de": p.get("fase"),
+                      "numero": p.get("numero")})
+    return {"ok": True, "fase": "REVISAO_ADV"}
 
 
 def revisar(pedido_id: str, auto: bool = False) -> dict:
@@ -2412,9 +2453,26 @@ JANELA_AJUSTE = 0.5       # aplicar apontamento é trabalho curto
 JANELA_REVISAO_2 = 1      # a segunda revisão é confirmação, não releitura
 
 _PROXIMA = {
-    "REDACAO": ("REVISAO_IA", JANELA_REDACAO),
-    # Depois da revisão, o advogado. O relógio da esteira para aqui: na
-    # mesa dele não há janela correndo, e nunca houve.
+    # DA REDAÇÃO DIRETO PARA A MESA DO ADVOGADO
+    #
+    # Havia uma revisão automática entre as duas. Ela lia a minuta que a
+    # própria máquina tinha acabado de escrever e produzia uma lista de
+    # apontamentos — que iam para a mesa do advogado junto com o texto.
+    # Ou seja: o advogado recebia o documento e, ao lado, a opinião de
+    # uma máquina sobre o trabalho de outra, antes de ele próprio ter
+    # lido qualquer coisa.
+    #
+    # Quem confere o contrato é ele, e ele lê a íntegra. A revisão
+    # automática não impedia erro nenhum que a leitura dele não pegasse:
+    # custava uma hora de espera e mais uma chamada de IA por pedido
+    # para antecipar um juízo que ele faria melhor sozinho.
+    #
+    # Se, lendo, ele precisar de informação do cliente, pede dali mesmo,
+    # pela própria mesa. Não há mais volta para a esteira.
+    "REDACAO": ("REVISAO_ADV", JANELA_REDACAO),
+    # Continua aqui para os pedidos que JÁ estavam em revisão automática
+    # quando esta mudança subiu. Sem esta linha eles ficariam parados
+    # para sempre, porque a esteira só toca o que está em `_PROXIMA`.
     "REVISAO_IA": ("REVISAO_ADV", JANELA_REVISAO),
     # DO AJUSTE DIRETO PARA O ADVOGADO
     #
@@ -2706,10 +2764,13 @@ def esteira_automatica() -> dict:
                 redigir(p["id"], auto=True)
                 feitos["redigidos"] += 1
                 continue                       # a janela conta da fase, não daqui
-            if not fora and fase == "REVISAO_IA" and not p.get("revisao"):
-                revisar(p["id"], auto=True)
-                feitos["revisados"] += 1
-                continue
+            # A REVISÃO AUTOMÁTICA SAIU DO RITO
+            #
+            # Nenhum pedido novo entra em REVISAO_IA. Os que já estavam
+            # nela quando a mudança subiu não são revisados agora: seria
+            # gastar uma chamada de IA para produzir apontamentos que o
+            # advogado vai ignorar, porque ele lê a íntegra de qualquer
+            # forma. Eles apenas seguem para a mesa dele, no relógio.
             # O PEDIDO QUE CHEGOU AO AJUSTE SEM REVISÃO
             #
             # Não deveria acontecer, e aconteceu: revisão cortada no
@@ -2749,8 +2810,6 @@ def esteira_automatica() -> dict:
             # Menos quando o trabalho da fase não existe. Avançar sem
             # ele leva o pedido para uma fase que depende do que não
             # foi feito, e é assim que nasce pedido travado.
-            if fase == "REVISAO_IA" and not p.get("revisao"):
-                continue
             if fase == "REDACAO" and not (p.get("minuta") or "").strip():
                 continue
             if _horas_desde(p["avanca_em"]) >= 0:
@@ -2779,12 +2838,11 @@ def esteira_automatica() -> dict:
                 # num pedido com urgência de seis horas é muito. Quem
                 # chega na fase já sai trabalhando.
                 try:
-                    if proxima == "REVISAO_IA":
-                        revisar(p["id"], auto=True)
-                        feitos["revisados"] += 1
-                    # O ajuste automático saiu do rito: a revisão vai
-                    # direto para o advogado, e é ele que aplica.
-                    elif proxima == "AJUSTE":
+                    # A revisão e o ajuste automáticos saíram do rito.
+                    # Da redação o pedido vai direto para a mesa do
+                    # advogado, e lá a automação termina: não há
+                    # trabalho de máquina para começar na fase nova.
+                    if proxima == "AJUSTE":
                         pass
                     elif proxima == "REVISAO_2":
                         revisar_segunda(p["id"], auto=True)
