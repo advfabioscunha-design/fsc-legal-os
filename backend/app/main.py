@@ -5972,10 +5972,109 @@ async def balcao_enviar_documentos(
     return {"salvos": len(salvos), "documentos": salvos, "falhas": falhas}
 
 
+# ── ABRIR O QUE O CLIENTE MANDOU ─────────────────────────────────
+#
+# O arquivo era guardado, era lido pelos agentes, e NINGUÉM conseguia
+# abrir: nem o cliente que mandou, nem o operador. A lista devolvia o
+# caminho dentro do armazenamento, que não é endereço de nada.
+#
+# Na prática, quem recebia uma foto de RG tinha a transcrição e não
+# tinha a foto. Se o agente lesse um dígito errado, não havia como
+# conferir sem abrir o banco.
+#
+# O link é ASSINADO E TEMPORÁRIO. O armazenamento é privado, de
+# propósito: documento de identidade de cliente em endereço público é
+# vazamento esperando acontecer. Uma hora é tempo de ver, baixar e
+# imprimir, e curto o bastante para um link encaminhado por engano não
+# valer no dia seguinte.
+@app.get("/api/v1/contratos/documentos/{documento_id}/abrir")
+def balcao_abrir_documento(documento_id: str,
+                           authorization: str | None = Header(default=None)):
+    """Link temporário para o arquivo que o cliente mandou no pedido.
+
+    Vale para os dois lados: o cliente abre o que ele mesmo enviou, e o
+    operador abre o que recebeu. Quem não é nem um nem outro não passa.
+    """
+    s, db = get_settings(), get_db()
+    r = db.table("pedidos_documentos") \
+        .select("id,pedido_id,nome,tipo_mime,url").eq("id", documento_id) \
+        .limit(1).execute().data
+    if not r:
+        raise HTTPException(404, "Documento não encontrado.")
+    doc = r[0]
+
+    # QUEM PODE ABRIR
+    #
+    # Primeiro tenta como gente do escritório; não sendo, tenta como o
+    # cliente dono do pedido. A ordem evita pedir login de cliente a
+    # quem está no painel interno.
+    liberado = False
+    try:
+        _perfil_do_token(authorization)
+        liberado = True
+    except Exception:
+        try:
+            _, ids = _clientes_do_token(authorization)
+            _pedido_do_cliente(doc["pedido_id"], ids)
+            liberado = True
+        except Exception:
+            liberado = False
+    if not liberado:
+        raise HTTPException(403, "Este documento não é do seu pedido.")
+
+    caminho = doc.get("url") or ""
+    if caminho.startswith("http"):
+        return {"url": caminho, "nome": doc.get("nome"),
+                "tipo": doc.get("tipo_mime")}
+    try:
+        res = db.storage.from_(s.bucket_documentos).create_signed_url(caminho, 3600)
+        url = (res.get("signedURL") or res.get("signedUrl")
+               or res.get("signed_url"))
+    except Exception as e:
+        raise HTTPException(503, f"Não consegui abrir o arquivo agora: {e}")
+    if not url:
+        raise HTTPException(503, "O arquivo não pôde ser aberto agora.")
+    return {"url": url, "nome": doc.get("nome"), "tipo": doc.get("tipo_mime")}
+
+
 @app.get("/api/v1/contratos/pedidos/{pedido_id}/documentos")
 def balcao_listar_documentos(pedido_id: str):
-    return get_db().table("pedidos_documentos").select("*") \
-        .eq("pedido_id", pedido_id).order("criado_em").execute().data or []
+    """O que foi mandado no pedido, pronto para a tela abrir.
+
+    O caminho dentro do armazenamento NÃO sai daqui. Ele não serve para
+    abrir nada e, sendo o endereço interno do arquivo, é informação que
+    não tem por que circular. Quem quiser ver chama a rota de abrir, que
+    confere quem está pedindo e devolve um link que vence.
+
+    `eh_imagem` e `lido` vão prontos porque são decisão de exibição que
+    as duas telas tomariam igual: imagem aparece como miniatura, e o que
+    já foi lido pelo sistema mostra isso, para o operador não ficar na
+    dúvida se o agente enxergou o arquivo."""
+    try:
+        linhas = get_db().table("pedidos_documentos").select(
+            "id,nome,tipo_mime,tamanho,enviado_por,rotulo,criado_em,"
+            "transcricao,transcrito_em"
+        ).eq("pedido_id", pedido_id).order("criado_em").execute().data or []
+    except Exception:
+        # A transcrição nasce na 0048. Sem ela, a lista ainda tem de sair.
+        linhas = get_db().table("pedidos_documentos").select(
+            "id,nome,tipo_mime,tamanho,enviado_por,rotulo,criado_em"
+        ).eq("pedido_id", pedido_id).order("criado_em").execute().data or []
+
+    saida = []
+    for d in linhas:
+        mime = str(d.get("tipo_mime") or "").lower()
+        saida.append({
+            "id": d.get("id"), "nome": d.get("nome"),
+            "tipo_mime": d.get("tipo_mime"), "tamanho": d.get("tamanho"),
+            "enviado_por": d.get("enviado_por"), "rotulo": d.get("rotulo"),
+            "criado_em": d.get("criado_em"),
+            "eh_imagem": mime.startswith("image/"),
+            "eh_pdf": mime == "application/pdf",
+            "lido": bool(d.get("transcricao")),
+            "transcricao": (d.get("transcricao") or "")[:4000] or None,
+        })
+    return saida
 
 
 @app.get("/api/v1/contratos/pix")

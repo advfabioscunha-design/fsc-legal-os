@@ -498,6 +498,53 @@ def _claude():
                                max_retries=TENTATIVAS)
 
 
+def texto_dos_anexos(pedido_id: str, limite_total: int = 20000) -> str:
+    """O que está escrito nos arquivos que o cliente mandou.
+
+    O CLIENTE MANDOU O DOCUMENTO E O REDATOR NÃO VIA
+
+    A foto do RG, a matrícula do imóvel, o comprovante de endereço: tudo
+    isso era guardado, lido e transcrito pelo atendimento, e a
+    transcrição ficava parada no registro do arquivo. O redator montava
+    o contexto a partir dos campos digitados e nunca encostava nela.
+
+    Na prática: o cliente mandava a matrícula do imóvel, o campo
+    "matrícula" continuava vazio porque ninguém digitou, e o contrato
+    saía com [A PREENCHER] em cima de um dado que estava na mão do
+    escritório havia dois dias.
+
+    Devolve texto pronto para entrar no pedido ao modelo, ou vazio
+    quando não há anexo lido. Vazio é resposta: não existindo
+    transcrição, o redator segue com o que tem, sem inventar."""
+    try:
+        docs = get_db().table("pedidos_documentos") \
+            .select("nome,rotulo,tipo_mime,transcricao,transcrito_em") \
+            .eq("pedido_id", pedido_id).order("criado_em") \
+            .limit(20).execute().data or []
+    except Exception as e:
+        print(f"[balcao] anexos não lidos: {e}")
+        return ""
+
+    partes, usado = [], 0
+    for d in docs:
+        texto = (d.get("transcricao") or "").strip()
+        if not texto:
+            continue
+        cabeca = d.get("nome") or "documento"
+        if d.get("rotulo"):
+            cabeca += f" ({d['rotulo']})"
+        pedaco = f"--- {cabeca} ---\n{texto}"
+        if usado + len(pedaco) > limite_total:
+            partes.append("[os demais anexos ficaram de fora por tamanho]")
+            break
+        partes.append(pedaco)
+        usado += len(pedaco)
+
+    if not partes:
+        return ""
+    return ("\n\n".join(partes))
+
+
 def redigir(pedido_id: str, auto: bool = False) -> dict:
     """Escreve a primeira versão a partir dos dados coletados.
 
@@ -585,6 +632,25 @@ def redigir(pedido_id: str, auto: bool = False) -> dict:
         contexto += ["", "QUALIFICAÇÃO DAS PARTES, JÁ CONFERIDA:",
                      json.dumps(p["partes"], ensure_ascii=False, indent=2)]
 
+    # O QUE ESTÁ ESCRITO NOS DOCUMENTOS QUE ELE MANDOU
+    #
+    # Antes disto, o cliente mandava a matrícula do imóvel, o campo
+    # "matrícula" continuava vazio porque ninguém digitou, e o contrato
+    # saía com [A PREENCHER] em cima de um dado que o escritório tinha
+    # na mão havia dois dias.
+    anexos = texto_dos_anexos(pedido_id)
+    if anexos:
+        contexto += [
+            "", "=" * 60,
+            "O QUE ESTÁ ESCRITO NOS DOCUMENTOS QUE O CLIENTE ENVIOU. "
+            "Use o que servir para preencher o contrato: número de "
+            "matrícula, endereço, qualificação, valores. Onde isto "
+            "divergir do que foi digitado nos campos, prevalece o que "
+            "está no DOCUMENTO, e diga no texto qual documento você "
+            "seguiu. O que não estiver aqui nem nos campos continua "
+            "sendo [A PREENCHER]: anexo ilegível não vira palpite.",
+            "=" * 60, anexos]
+
     # O MODELO DO ESCRITÓRIO, QUANDO EXISTE UM
     #
     # Escrever do zero produzia contrato correto e diferente a cada
@@ -661,6 +727,21 @@ def revisar(pedido_id: str, auto: bool = False) -> dict:
               "qualquer uma destas no contrato, ou no que o cliente pediu, "
               "marque gravidade ALTA e preencha `precisa_autorizacao`:",
               modelos_contrato.texto_das_proibidas(), "=" * 60]
+
+    # O DOCUMENTO É A FONTE MAIS FORTE DAS TRÊS
+    #
+    # O revisor confere a minuta contra o cadastro e contra a conversa.
+    # O documento enviado é a terceira fonte, e vale mais que as outras
+    # duas: cadastro tem erro de digitação e conversa tem erro de
+    # memória, mas a matrícula do imóvel é o que está escrito nela.
+    anexos_revisao = texto_dos_anexos(pedido_id, limite_total=12000)
+    if anexos_revisao:
+        partes += [
+            "O QUE ESTÁ ESCRITO NOS DOCUMENTOS QUE O CLIENTE ENVIOU. "
+            "Confira a minuta contra isto: número, nome, endereço e valor "
+            "que divergirem do documento são apontamento de gravidade "
+            "ALTA, porque saem no contrato assinado.",
+            anexos_revisao, "=" * 60]
     if base.get("tem"):
         partes += ["GUIA TÉCNICO DO ESCRITÓRIO, com os fundamentos de cada "
                    "cláusula do modelo. Confira o contrato contra ele:",

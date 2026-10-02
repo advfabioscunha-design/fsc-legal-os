@@ -6,6 +6,7 @@ import VisualizadorProtegido from "../../components/VisualizadorProtegido";
 import { esperarAVez } from "../../components/ritmoDaConversa";
 import { baixarComToken } from "../../../lib/baixar";
 import { useRascunho } from "@/lib/rascunho";
+import { AnexosDoPedido } from "@/app/components/AnexoDoPedido";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -433,9 +434,10 @@ export default function PedidoDoCliente() {
                     <p className="mb-1 text-xs font-bold text-white/70">
                       Recebidos ({docs.length})
                     </p>
-                    {docs.map((d) => (
-                      <p key={d.id} className="truncate text-[11px] text-white/55">✓ {d.nome}</p>
-                    ))}
+                    {/* O cliente abre o que ele mesmo mandou. Serve para
+                        conferir se a foto saiu legível antes de o
+                        escritório cobrar de novo. */}
+                    <AnexosDoPedido docs={docs} />
                   </div>
                 )}
 

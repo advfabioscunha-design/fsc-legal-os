@@ -5,6 +5,7 @@ import VisualizadorProtegido from "../components/VisualizadorProtegido";
 import { baixarComToken } from "../../lib/baixar";
 import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
 import { useRascunho } from "@/lib/rascunho";
+import { AnexosDoPedido } from "@/app/components/AnexoDoPedido";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -691,12 +692,10 @@ function PainelDoPedido({ id, fechar, recarregar }:
                   Nenhum documento. O cliente pode ter digitado tudo — veja os dados abaixo.
                 </p>
               )}
-              {docs.map((d) => (
-                <div key={d.id} className="flex items-center gap-2 text-[11px] text-white/70">
-                  <span className="flex-1 truncate">{d.nome}</span>
-                  <span className="text-white/30">{d.rotulo || ""}</span>
-                </div>
-              ))}
+              {/* O arquivo abre aqui: antes a lista mostrava só o nome,
+                  e quem recebia a foto de um RG tinha a transcrição e
+                  não tinha a foto. */}
+              <AnexosDoPedido docs={docs} />
             </Bloco>
 
             <Bloco titulo="Informações do contrato">
