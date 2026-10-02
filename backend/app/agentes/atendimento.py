@@ -478,6 +478,55 @@ def transcrever(atendimento_id: str) -> dict:
         "atualizado_em": _iso(_agora()),
     }).eq("id", atendimento_id).execute()
 
+    # ── A TRANSCRIÇÃO VIRA DOCUMENTO DA PASTA DO CASO ──────────────
+    #
+    # Ela já ficava guardada numa coluna, e ali só existia para quem
+    # soubesse abrir a aba do atendimento e clicar em "ver a
+    # transcrição". Documento que mora num canto que ninguém visita é
+    # documento perdido: na hora de montar a peça, quem procura abre os
+    # anexos do caso — e ali não havia nada.
+    #
+    # Agora ela nasce arquivo, ao lado do áudio e do resto. O texto leva
+    # cabeçalho com data, duração e a versão do termo que o cliente
+    # aceitou, porque transcrição sem essas três coisas não serve como
+    # registro de nada.
+    try:
+        quando = str(a.get("iniciado_em") or a.get("criado_em") or "")[:16] \
+            .replace("T", " ")
+        minutos = round((a.get("duracao_segundos") or 0) / 60)
+        cabecalho = (
+            "TRANSCRIÇÃO DE ATENDIMENTO POR VIDEOCONFERÊNCIA\n"
+            "FC Advocacia — Fábio Silva Cunha, OAB/RO 10.849\n"
+            f"{'-' * 64}\n"
+            f"Data e hora do atendimento: {quando}\n"
+            f"Duração: {minutos} minuto(s)\n"
+            f"Gravação autorizada em: {a.get('consentimento_em') or '—'}\n"
+            f"Versão do termo aceito: {a.get('consentimento_versao') or '—'}\n"
+            f"{'-' * 64}\n\n"
+            "Transcrição automática do áudio. Pode conter imprecisões de\n"
+            "reconhecimento de fala; em caso de dúvida, vale o áudio.\n\n"
+        )
+        caminho_txt = f"{a['caso_id']}/atendimentos/transcricao-{atendimento_id}.txt"
+        db.storage.from_(s.bucket_documentos).upload(
+            caminho_txt, (cabecalho + texto).encode("utf-8"),
+            {"content-type": "text/plain; charset=utf-8", "upsert": "true"})
+        # Uma linha por atendimento, não uma por transcrição refeita: quem
+        # mandar transcrever de novo substitui o arquivo, e a pasta não
+        # enche de cópias quase iguais que ninguém sabe qual vale.
+        ja = db.table("documentos").select("id") \
+               .eq("caso_id", a["caso_id"]) \
+               .eq("storage_path", caminho_txt).limit(1).execute().data
+        if not ja:
+            db.table("documentos").insert({
+                "caso_id": a["caso_id"], "tipo": "TRANSCRICAO_ATENDIMENTO",
+                "storage_path": caminho_txt, "status": "RECEBIDO",
+                "observacao": f"Transcrição do atendimento de {quando}",
+            }).execute()
+    except Exception as e:
+        # Falhar aqui não pode apagar a transcrição que já foi gravada na
+        # coluna: o texto existe, só não virou arquivo.
+        print(f"[atendimento] transcricao nao virou documento: {e}")
+
     try:
         db.table("mensagens").insert({
             "caso_id": a["caso_id"], "canal": "CRM", "autor": "HUMANO",

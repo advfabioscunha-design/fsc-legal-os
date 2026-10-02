@@ -1607,6 +1607,72 @@ class EncerrarAtendimento(BaseModel):
     observacao: str | None = None
 
 
+@app.get("/api/v1/atendimentos/{atendimento_id}/audio")
+def ouvir_audio_do_atendimento(atendimento_id: str):
+    """O áudio do atendimento, para ouvir ou baixar.
+
+    Existia só dentro do balde de armazenamento, com o caminho gravado
+    numa coluna. Quem quisesse ouvir precisava de acesso ao Supabase —
+    ou seja, ninguém ouvia. A gravação é feita para ser ouvida."""
+    from fastapi.responses import Response
+    s = get_settings()
+    db = get_db()
+    a = db.table("atendimentos").select("caso_id,audio_path,iniciado_em") \
+          .eq("id", atendimento_id).maybe_single().execute().data
+    if not a:
+        raise HTTPException(404, "Atendimento não encontrado.")
+    if not a.get("audio_path"):
+        raise HTTPException(404, "Este atendimento não tem áudio guardado. "
+                                 "Só há gravação quando o cliente autoriza.")
+    try:
+        conteudo = db.storage.from_(s.bucket_documentos).download(a["audio_path"])
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível abrir o áudio: {e}")
+    quando = str(a.get("iniciado_em") or "")[:10] or "atendimento"
+    return Response(
+        content=conteudo, media_type="audio/mp4",
+        # `inline` de propósito: o navegador toca em vez de baixar. Quem
+        # quiser o arquivo usa o botão de baixar do próprio player.
+        headers={"Content-Disposition":
+                 f'inline; filename="atendimento-{quando}.m4a"'})
+
+
+@app.get("/api/v1/atendimentos/{atendimento_id}/transcricao.txt")
+def baixar_transcricao(atendimento_id: str):
+    """A transcrição como arquivo de texto, com o cabeçalho de registro."""
+    from fastapi.responses import Response
+    db = get_db()
+    a = db.table("atendimentos").select(
+        "transcricao,iniciado_em,criado_em,duracao_segundos,"
+        "consentimento_em,consentimento_versao"
+    ).eq("id", atendimento_id).maybe_single().execute().data
+    if not a:
+        raise HTTPException(404, "Atendimento não encontrado.")
+    texto = (a.get("transcricao") or "").strip()
+    if not texto:
+        raise HTTPException(404, "Este atendimento ainda não foi transcrito.")
+
+    quando = str(a.get("iniciado_em") or a.get("criado_em") or "")[:16].replace("T", " ")
+    minutos = round((a.get("duracao_segundos") or 0) / 60)
+    cabecalho = (
+        "TRANSCRIÇÃO DE ATENDIMENTO POR VIDEOCONFERÊNCIA\n"
+        "FC Advocacia — Fábio Silva Cunha, OAB/RO 10.849\n"
+        f"{'-' * 64}\n"
+        f"Data e hora do atendimento: {quando}\n"
+        f"Duração: {minutos} minuto(s)\n"
+        f"Gravação autorizada em: {a.get('consentimento_em') or '—'}\n"
+        f"Versão do termo aceito: {a.get('consentimento_versao') or '—'}\n"
+        f"{'-' * 64}\n\n"
+        "Transcrição automática do áudio. Pode conter imprecisões de\n"
+        "reconhecimento de fala; em caso de dúvida, vale o áudio.\n\n"
+    )
+    nome = f"transcricao-{(quando[:10] or 'atendimento').replace('-', '')}.txt"
+    return Response(
+        content=(cabecalho + texto).encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+
+
 @app.post("/api/v1/atendimentos/{atendimento_id}/encerrar")
 def encerrar_atendimento(atendimento_id: str, body: EncerrarAtendimento):
     from .agentes import atendimento

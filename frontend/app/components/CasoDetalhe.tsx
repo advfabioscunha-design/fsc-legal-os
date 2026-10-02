@@ -458,7 +458,27 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     { tipo: "HIPOSSUFICIENCIA", nome: "Declaração de Hipossuficiência" },
     { tipo: "OUTRO", nome: "Outros" },
   ];
-  const ROTULO_DOC: Record<string, string> = Object.fromEntries(DOCS_MENU.map((d) => [d.tipo, d.nome]));
+  /* NOMES DOS ARQUIVOS NA PASTA DO CASO
+   *
+   * O menu de gerar documento só conhece quatro tipos, e a lista de
+   * anexos usava esse mesmo mapa para escrever o nome de cada arquivo.
+   * Resultado: tudo que chega por outro caminho aparecia com o código
+   * cru — "AUDIO_ATENDIMENTO", "RG_CLIENTE" — e quem procurava um
+   * documento tinha de adivinhar.
+   *
+   * Nome de arquivo é para ser lido por quem procura, não pelo sistema.
+   */
+  const ROTULO_DOC: Record<string, string> = {
+    ...Object.fromEntries(DOCS_MENU.map((d) => [d.tipo, d.nome])),
+    AUDIO_ATENDIMENTO: "🎧 Áudio do atendimento por vídeo",
+    TRANSCRICAO_ATENDIMENTO: "📄 Transcrição do atendimento",
+    COMPROVANTE: "Comprovante",
+    CPF_CLIENTE: "CPF do cliente",
+    COMPROVANTE_RESIDENCIA: "Comprovante de residência",
+    PETICAO: "Petição",
+    DECISAO: "Decisão judicial",
+    MINUTA: "Minuta",
+  };
 
   async function gerarDocumento(tipo: string) {
     if (tipo === "OUTRO") { anexoRef.current?.click(); return; }
@@ -968,6 +988,59 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                             className="ml-auto text-[#2D7DD2] hover:underline">transcrever</button>
                         )}
                       </div>
+
+                      {/* O ÁUDIO E A TRANSCRIÇÃO, À MÃO
+
+                          Os dois existiam e ninguém alcançava: o áudio só
+                          dentro do balde de armazenamento, a transcrição
+                          escondida atrás de um "ver". Gravação que não se
+                          ouve e texto que não se abre são trabalho jogado
+                          fora — e, num caso contencioso, prova que não
+                          está onde se procura.
+
+                          Ficam logo abaixo da linha do atendimento, que é
+                          onde a pessoa está olhando quando se lembra
+                          deles. Os mesmos arquivos também aparecem nos
+                          anexos do caso, para quem chega pelo outro lado. */}
+                      {(a.audio_path || a.transcricao) && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {a.audio_path && (
+                            <a href={`${API}/api/v1/atendimentos/${a.id}/audio`}
+                              target="_blank" rel="noopener noreferrer"
+                              className="rounded-lg border border-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-white/40 hover:text-white">
+                              🎧 ouvir o áudio
+                            </a>
+                          )}
+                          {a.transcricao && (
+                            <a href={`${API}/api/v1/atendimentos/${a.id}/transcricao.txt`}
+                              className="rounded-lg border border-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-white/40 hover:text-white">
+                              📄 baixar a transcrição
+                            </a>
+                          )}
+                          {a.audio_path && a.transcricao && (
+                            <button onClick={() => transcreverAtendimento(a.id)}
+                              className="text-[11px] text-white/40 underline underline-offset-2 hover:text-white/70">
+                              transcrever de novo
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* O CASO EM QUE NÃO HÁ NADA, E POR QUÊ
+
+                          Atendimento encerrado, sem autorização e sem
+                          áudio é o desfecho normal do rito novo — não é
+                          defeito. Dizer isso aqui evita a procura por um
+                          arquivo que nunca existiu. */}
+                      {!a.audio_path && !a.consentimento_em
+                        && ["ENCERRADO", "TRANSCRITO", "FALHOU"].includes(a.status) && (
+                        <p className="mt-2 text-[11px] leading-relaxed text-white/40">
+                          Sem áudio: o cliente não autorizou a gravação durante a
+                          conversa, então nada foi registrado. A autorização é
+                          pedida dentro da sala, no momento em que o senhor for
+                          gravar.
+                        </p>
+                      )}
 
                       {a.erro && <p className="mt-1 text-[#E57373]">⚠ {a.erro}</p>}
 
