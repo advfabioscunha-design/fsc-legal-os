@@ -1007,17 +1007,16 @@ def ajustar(pedido_id: str, auto: bool = False) -> dict:
                 "faltas": faltas, "pendencias": estado}
 
     if not auto:
-        # Vai para a segunda revisão, não direto para o advogado. Texto
-        # que acabou de mudar e não foi lido por ninguém depois da
-        # mudança é onde o erro entra.
-        campos.update({"fase": "REVISAO_2", "fase_em": _agora(),
-                       "avanca_em": _mais(_janela("REVISAO_2",
-                                                  bool(p.get("urgente"))))})
+        # Direto para o advogado. A conferência automática que havia
+        # aqui repetia, pior, o trabalho de quem lê a íntegra logo
+        # depois, e custava uma hora de prazo por pedido.
+        campos.update({"fase": "REVISAO_ADV", "fase_em": _agora(),
+                       "avanca_em": None})
     db.table("pedidos_contrato").update(campos).eq("id", pedido_id).execute()
     registrar_evento(None, "CONTRATO_AJUSTADO",
                      {"pedido": pedido_id, "apontamentos": len(apontamentos),
                       "auto": auto})
-    return {"ok": True, "fase": "AJUSTE" if auto else "REVISAO_2",
+    return {"ok": True, "fase": "AJUSTE" if auto else "REVISAO_ADV",
             "aplicados": len(apontamentos)}
 
 
@@ -1150,19 +1149,19 @@ def registrar_decisao(pedido_id: str, chave: str, escolha: str,
     except Exception as e:
         print(f"[balcao] minuta não refeita agora: {e}")
     db.table("pedidos_contrato").update({
-        "fase": "REVISAO_2", "fase_em": _agora(),
-        "avanca_em": _mais(_janela("REVISAO_2", bool(p.get("urgente")))),
+        "fase": "REVISAO_ADV", "fase_em": _agora(),
+        "avanca_em": None,
         "atualizado_em": _agora(),
     }).eq("id", pedido_id).execute()
     try:
         recado(pedido_id,
                "Obrigado, já registrei a sua decisão. O documento foi "
-               "atualizado e está na conferência final antes de chegar "
-               "até você.",
+               "atualizado e está com o advogado para a revisão final "
+               "antes de chegar até você.",
                canais=["PLATAFORMA", "EMAIL"], autor="AGENTE")
     except Exception as e:
         print(f"[balcao] confirmação da decisão não enviada: {e}")
-    return {"ok": True, "faltam": 0, "fase": "REVISAO_2"}
+    return {"ok": True, "faltam": 0, "fase": "REVISAO_ADV"}
 
 
 def revisar_segunda(pedido_id: str, auto: bool = False) -> dict:
@@ -2319,7 +2318,20 @@ JANELA_REVISAO_2 = 1      # a segunda revisão é confirmação, não releitura
 _PROXIMA = {
     "REDACAO": ("REVISAO_IA", JANELA_REDACAO),
     "REVISAO_IA": ("AJUSTE", JANELA_REVISAO),
-    "AJUSTE": ("REVISAO_2", JANELA_AJUSTE),
+    # DO AJUSTE DIRETO PARA O ADVOGADO
+    #
+    # Havia uma segunda conferência automática entre o ajuste e a
+    # revisão do advogado. A ideia era boa no papel — texto que acabou
+    # de mudar ser lido de novo antes de subir — e na prática atrasava o
+    # pedido para repetir o trabalho de quem lê a sério logo depois.
+    #
+    # Quem confere o contrato é o advogado, e ele lê a íntegra. Uma
+    # máquina conferindo antes dele não acrescenta segurança: acrescenta
+    # uma hora de espera e mais uma chamada de IA por pedido.
+    "AJUSTE": ("REVISAO_ADV", JANELA_AJUSTE),
+    # Continua aqui para os pedidos que JÁ estavam nesta fase quando a
+    # mudança subiu. Sem esta linha eles ficariam parados para sempre,
+    # porque a esteira só toca o que está em `_PROXIMA`.
     "REVISAO_2": ("REVISAO_ADV", JANELA_REVISAO_2),
 }
 

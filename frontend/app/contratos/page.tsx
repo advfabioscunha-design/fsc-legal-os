@@ -39,6 +39,38 @@ const COLUNAS = [
   { f: "ENTREGUE", l: "Concluído", cor: "#1DB954", cliente: false },
 ];
 
+/* A TRILHA NÃO É A LISTA DE COLUNAS.
+ *
+ * As colunas do quadro precisam ter TODAS as fases, inclusive as de
+ * exceção: pedido que cai numa fase sem coluna some da tela, e sumir é
+ * o pior que pode acontecer com um pedido.
+ *
+ * A trilha é outra coisa. Ela mostra o caminho que o contrato percorre,
+ * e esse caminho é reto: coleta, redação, revisão, ajuste, conferência,
+ * revisão do advogado, envio, assinatura.
+ *
+ * "Decisão do cliente" NÃO faz parte dele. É um desvio que só acontece
+ * quando a revisão encontra algo que a lei não admite e o cliente
+ * precisa escolher entre manter como pediu ou adequar. Mostrá-la entre
+ * o ajuste e a conferência dizia que todo contrato passa por ali, e que
+ * o cliente decide no meio do caminho. Nenhuma das duas coisas é
+ * verdade: a decisão dele é no fim, quando recebe o documento.
+ *
+ * Quando o desvio ACONTECE, ele aparece — a trilha abre espaço para a
+ * fase atual, seja ela qual for. Esconder a exceção enquanto ela está
+ * em curso seria trocar um erro por outro.
+ */
+/* A conferência automática saiu do rito: do ajuste vai direto para a
+ * revisão do advogado. Ela continua na lista de COLUNAS porque pedidos
+ * que já estavam nela quando a mudança subiu precisam continuar
+ * visíveis até drenarem. */
+const FASES_DE_EXCECAO = ["CIENCIA_ALTERACAO", "REVISAO_2"];
+
+function trilhaPara(faseAtual: string) {
+  return COLUNAS.filter(
+    (c) => !FASES_DE_EXCECAO.includes(c.f) || c.f === faseAtual);
+}
+
 const btn = "rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-40";
 const inp = "w-full rounded-lg border border-white/15 bg-[#0B1F3B] px-3 py-2 text-sm text-white outline-none focus:border-[#C9A24D]";
 const brl = (v: any) => `R$ ${Number(v || 0).toFixed(2)}`;
@@ -370,9 +402,10 @@ function PainelDoPedido({ id, fechar, recarregar }:
           </div>
         </div>
 
-        {/* A régua das fases */}
+        {/* A régua das fases. Ver `trilhaPara`: o caminho é reto, e o
+            desvio só aparece quando o pedido está nele. */}
         <div className="mb-4 flex flex-wrap gap-1">
-          {COLUNAS.map((c) => (
+          {trilhaPara(fase).map((c) => (
             <span key={c.f}
               className={`rounded px-2 py-0.5 text-[10px] ${c.f === fase
                 ? "bg-[#C9A24D] font-bold text-[#0A1628]"

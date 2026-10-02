@@ -37,8 +37,6 @@ const FASES: { id: string; rotulo: string }[] = [
   { id: "REDACAO", rotulo: "Elaboração" },
   { id: "REVISAO_IA", rotulo: "Revisão técnica" },
   { id: "AJUSTE", rotulo: "Ajustes" },
-  { id: "CIENCIA_ALTERACAO", rotulo: "Sua decisão" },
-  { id: "REVISAO_2", rotulo: "Conferência" },
   { id: "REVISAO_ADV", rotulo: "Revisão final" },
   { id: "APROVACAO", rotulo: "Sua aprovação" },
   { id: "ASSINATURA", rotulo: "Assinatura" },
@@ -127,7 +125,23 @@ export default function PedidoDoCliente() {
   }, []);
 
   const faseAtual = pedido?.fase || "COLETA";
-  const indiceFase = Math.max(0, FASES.findIndex((f) => f.id === faseAtual));
+  /* AS FASES QUE SAÍRAM DA BARRA
+   *
+   * "Sua decisão" é um desvio que quase nunca acontece, e "Conferência"
+   * saiu do rito. Mostrá-las como etapas normais dizia ao cliente que
+   * todo documento passa por ali.
+   *
+   * Mas um pedido PODE estar numa delas — o desvio quando a revisão
+   * encontra algo que a lei não admite, e a conferência nos pedidos
+   * antigos. Sem este mapa, `findIndex` devolveria -1 e a barra voltaria
+   * ao começo, dizendo ao cliente que o documento regrediu.
+   */
+  const ONDE_CAI: Record<string, string> = {
+    CIENCIA_ALTERACAO: "AJUSTE",
+    REVISAO_2: "REVISAO_ADV",
+  };
+  const faseNaBarra = ONDE_CAI[faseAtual] || faseAtual;
+  const indiceFase = Math.max(0, FASES.findIndex((f) => f.id === faseNaBarra));
   const nomeCliente = pedido?.clientes?.nome || "cliente";
 
   async function salvarColeta() {
