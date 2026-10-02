@@ -94,6 +94,27 @@ export default function BalcaoOperador() {
   useEffect(() => { carregar(); }, [carregar]);
 
   const daColuna = (f: string) => pedidos.filter((p) => p.fase === f);
+
+  /* AS COLUNAS QUE O QUADRO MOSTRA
+   *
+   * O rito é reto: coleta, redação, revisão, ajuste, revisão do
+   * advogado, envio, assinatura. "Decisão do cliente" e "Conferência"
+   * não fazem parte dele — a primeira é um desvio que só acontece
+   * quando a revisão encontra algo que a lei não admite, e a segunda
+   * saiu do fluxo.
+   *
+   * Mas elas não podem simplesmente sumir da lista: pedido numa fase
+   * sem coluna desaparece da tela, e desaparecer é o pior que pode
+   * acontecer com um pedido. Então a regra é esta: a coluna de exceção
+   * aparece QUANDO TEM ALGUÉM DENTRO, e some quando esvazia.
+   *
+   * Na prática, a "Conferência" vai desaparecer sozinha assim que os
+   * pedidos que estavam nela quando a mudança subiu terminarem de
+   * drenar, e a "Decisão do cliente" só vai aparecer nas vezes em que
+   * de fato acontecer.
+   */
+  const colunasVisiveis = COLUNAS.filter(
+    (c) => !FASES_DE_EXCECAO.includes(c.f) || daColuna(c.f).length > 0);
   const arquivados = pedidos.filter((p) => p.fase === "ARQUIVADO");
 
   return (
@@ -142,7 +163,7 @@ export default function BalcaoOperador() {
           </div>
         ) : (
           <div className="flex gap-3 overflow-x-auto pb-4">
-            {COLUNAS.map((c) => {
+            {colunasVisiveis.map((c) => {
               const lista = daColuna(c.f);
               return (
                 <div key={c.f} className="w-64 shrink-0">
@@ -522,17 +543,23 @@ function PainelDoPedido({ id, fechar, recarregar }:
               </p>
             </div>
           )}
+          {/* FASE QUE SAIU DO RITO
+              A conferência automática entre o ajuste e a revisão do
+              advogado deixou de existir: do ajuste vai direto para a
+              sua mesa. Este bloco continua aqui só para os pedidos que
+              estavam nela quando a mudança subiu — eles precisam de um
+              caminho para sair, e o botão é esse. Quando o último
+              drenar, a coluna some sozinha do quadro. */}
           {fase === "REVISAO_2" && (
             <div>
-              <p className="mb-2 text-[11px] leading-relaxed text-white/60">
-                {p.revisao_2
-                  ? "Conferência feita. Em até 1 hora chega à sua revisão sozinho."
-                  : "Conferindo se o ajuste atendeu ao que foi apontado."}
+              <p className="mb-2 text-[11px] leading-relaxed text-[#E5A44C]">
+                Este pedido ficou numa etapa que saiu do fluxo. Hoje o
+                ajuste vai direto para a sua revisão.
               </p>
-              <Botao rotulo="Enviar para a minha revisão"
+              <Botao rotulo="Trazer para a minha revisão"
                 ocupado={ocupado === "revisar2"}
                 onClick={() => acao("/revisar-2", {}, "revisar2")}
-                nota="Passar na frente do relógio é sempre permitido." />
+                nota="Tira o pedido da etapa antiga e põe na sua mesa." />
             </div>
           )}
           {fase === "AJUSTE" && (

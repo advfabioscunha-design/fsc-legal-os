@@ -1253,6 +1253,24 @@ def revisar_segunda(pedido_id: str, auto: bool = False) -> dict:
     if not (p.get("minuta") or "").strip():
         raise ValueError("Não há minuta para conferir.")
 
+    # ESTA FASE SAIU DO RITO
+    #
+    # Do ajuste o pedido vai direto para o advogado. Isto aqui existe só
+    # para os pedidos que estavam nesta fase quando a mudança subiu.
+    #
+    # Já tendo conferência feita, o botão do operador só MOVE: gastar
+    # uma chamada de IA para reler o que já foi lido atrasa quem está
+    # esperando e, com a conta de IA bloqueada, impediria o pedido de
+    # sair daqui.
+    if p.get("revisao_2") and not auto:
+        db.table("pedidos_contrato").update({
+            "fase": "REVISAO_ADV", "fase_em": _agora(),
+            "avanca_em": None, "atualizado_em": _agora(),
+        }).eq("id", pedido_id).execute()
+        registrar_evento(None, "CONTRATO_SAIU_DA_FASE_ANTIGA",
+                         {"pedido": pedido_id, "de": "REVISAO_2"})
+        return {"ok": True, "fase": "REVISAO_ADV", "ja_conferido": True}
+
     anteriores = _dados.lista_de_dicts(
         _dados.como_dict(p.get("revisao")).get("apontamentos"), "problema")
     decisoes = _dados.lista_de_dicts(p.get("decisoes"), "chave")

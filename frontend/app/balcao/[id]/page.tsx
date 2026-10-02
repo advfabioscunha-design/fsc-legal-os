@@ -798,9 +798,11 @@ export default function PedidoDoCliente() {
               </>
             )}
             {faseAtual === "REVISAO_IA" && <p>O documento está em revisão técnica.</p>}
+            {/* Etapa que saiu do fluxo. O cliente não precisa saber
+                disso: para ele, o documento está com o escritório, que
+                é a verdade. */}
             {faseAtual === "REVISAO_2" && (
-              <p>O documento está na conferência antes da leitura final do
-                 escritório.</p>
+              <p>O documento está com o escritório para a leitura final.</p>
             )}
             {faseAtual === "AJUSTE" && <p>Aplicando os ajustes apontados na revisão.</p>}
             {faseAtual === "REVISAO_ADV" && (
