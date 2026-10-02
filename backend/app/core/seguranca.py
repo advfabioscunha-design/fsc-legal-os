@@ -89,6 +89,26 @@ PUBLICO = [
     r"^/api/v1/contratos/pedidos/[^/]+/decisao$",
     r"^/api/v1/contratos/pedidos/[^/]+/urgencia/paguei$",
 
+    # ATENDIMENTO POR VÍDEO — a sala do cliente.
+    #
+    # O cliente recebe o link por WhatsApp e clica. Ele não tem conta de
+    # operador, e muitas vezes nem conta na plataforma: abre o link no
+    # navegador do celular e espera entrar. Estas rotas estavam atrás do
+    # porteiro, e por isso ele via "Esta área é da equipe do escritório"
+    # — uma recusa que não fazia sentido nenhum para quem tinha sido
+    # convidado para a conversa.
+    #
+    # O que protege aqui é o mesmo que protege o convite da equipe: o id
+    # sorteado na URL é a credencial, e ele vence. A rota de entrada
+    # confere o prazo e devolve `expirado`; a de entrar recusa sala
+    # encerrada. E nada do que está atrás destas três rotas é dado de
+    # outro cliente: é o termo de consentimento, que é público por
+    # natureza, e a decisão desta pessoa sobre a gravação desta conversa.
+    #
+    # Fora daqui ficam, de propósito, `encerrar`, `transcrever` e
+    # `pode-gravar`: essas são do escritório.
+    r"^/api/v1/atendimentos/[^/]+/(entrada|entrar|autorizar-gravacao)$",
+
     # Convite da equipe: quem recebe ainda não tem conta, e é o token
     # sorteado que faz as vezes de credencial.
     r"^/api/v1/convites/[^/]+$",

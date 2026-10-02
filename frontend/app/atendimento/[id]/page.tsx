@@ -53,8 +53,26 @@ export default function Atendimento() {
     (async () => {
       try {
         const r = await fetch(`${API}/api/v1/atendimentos/${id}/entrada`);
-        const d = await r.json();
-        if (!r.ok) { setErro(d.detail || "Atendimento não encontrado."); return; }
+        const d = await r.json().catch(() => ({} as any));
+        if (!r.ok) {
+          /* O QUE O CLIENTE PODE E NÃO PODE LER AQUI
+
+             Mensagem de recusa do servidor é escrita para a equipe. Esta
+             tela mostrava o texto cru, e o cliente que clicou no link do
+             atendimento lia "Esta área é da equipe do escritório" — uma
+             frase que, para ele, significa que foi barrado por engano,
+             ou que clicou onde não devia. Ele não tem como saber que é
+             uma regra de permissão nossa.
+
+             Para quem está do lado de fora, o que importa é só: o link
+             serve ou não serve, e o que fazer agora. */
+          setErro(r.status === 401 || r.status === 403
+            ? "Este link não pôde ser aberto. Peça ao escritório um link "
+              + "novo pelo WhatsApp — leva um instante."
+            : (d.detail || "Atendimento não encontrado. Confira o link ou "
+                           + "peça um novo ao escritório."));
+          return;
+        }
         setDados(d);
       } catch {
         setErro("Não foi possível carregar o atendimento. Verifique sua conexão.");
