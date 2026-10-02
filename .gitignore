@@ -10,3 +10,14 @@ venv/
 .venv/
 subir_log.txt
 .DS_Store
+
+# Credenciais baixadas de painéis (Google Cloud, contas de serviço).
+# O arquivo que o Google entrega ao criar um cliente OAuth chama-se
+# "client_secret_....json" e carrega a chave secreta em texto puro.
+# Nada no sistema lê esse arquivo — quem usa a chave é o Supabase, pelo
+# painel dele. Esta trava existe só para o caso de alguém arrastar o
+# arquivo para cá sem perceber: segredo em repositório é varrido por
+# robôs em minutos, e um repositorio publico nao perdoa esse engano.
+client_secret*.json
+*-credentials.json
+*service-account*.json
