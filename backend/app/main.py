@@ -1626,6 +1626,18 @@ def iniciar_gravacao_atendimento(atendimento_id: str, request: Request,
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/v1/atendimentos/{atendimento_id}/gravacao/procurar")
+def procurar_gravacao_atendimento(atendimento_id: str,
+                                  authorization: str | None = Header(default=None)):
+    """Vai buscar a gravação na Daily quando o aviso automático não chegou."""
+    from .agentes import atendimento
+    _perfil_do_token(authorization)
+    try:
+        return atendimento.procurar_gravacao(atendimento_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/v1/atendimentos/{atendimento_id}/audio")
 def ouvir_audio_do_atendimento(atendimento_id: str):
     """O áudio do atendimento, para ouvir ou baixar.

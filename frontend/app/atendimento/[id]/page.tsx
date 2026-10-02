@@ -1,32 +1,44 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://api.fscadvocaciadigital.com.br";
 
 /* ATENDIMENTO POR VÍDEO — a tela do cliente.
 
-   O consentimento não é um checkbox ao lado de um parágrafo. Ele exige
-   abrir o Termo, ROLAR ATÉ O FINAL e confirmar a ciência lá dentro: o
-   botão de concordar só destrava quando o texto acabou de ser percorrido.
+   Esta tela faz pouca coisa de propósito: pergunta como chamar a pessoa
+   e abre a sala. Nada mais.
 
-   Isso muda o valor probatório da coisa. Um aceite marcado sem que o
-   texto tenha sido exibido é fácil de contestar; um aceite dado ao fim do
-   documento, com data, hora, IP e a versão do termo guardada por inteiro,
-   é outra conversa.
+   Ela já pediu muito mais. Havia um Termo de Consentimento para abrir,
+   rolar até o fim e confirmar, e duas opções de entrada — com e sem
+   autorizar a gravação. A ideia era dar peso probatório ao aceite. Na
+   prática fazia o contrário: a pessoa clicava para destravar a tela, e
+   um aceite dado para destravar uma tela não prova entendimento nenhum.
+   Pior, parava o atendimento na porta: idoso no celular não achava o
+   botão, e o advogado ficava esperando.
 
-   Quem tentar entrar autorizando sem ter lido recebe orientação, e o
-   servidor recusa de qualquer forma — a tela é a parte fácil de burlar. */
+   A autorização mudou de lugar. Hoje o advogado pede em voz alta no
+   início da gravação, e a resposta do cliente fica DENTRO do áudio,
+   junto com a pergunta que a originou. É prova melhor: registra o que
+   foi dito, por quem e em que tom.
+
+   O que resta aqui é informar — a faixa no alto da sala diz que, se for
+   necessário gravar, o advogado avisa antes. Informar é obrigação; pedir
+   clique não é. */
 
 type Entrada = {
   ok: boolean;
   status: string;
   expirado: boolean;
   ja_consentiu: boolean;
-  resumo: string;
-  termo: string;
-  versao_consentimento: string;
+  // `resumo`, `termo` e `versao_consentimento` ainda vêm do servidor
+  // e deixaram de ser usados aqui quando a autorização saiu da porta.
+  // Ficam no tipo porque a resposta continua trazendo-os, e porque o
+  // termo segue existindo: ele é o texto que o advogado resume em voz.
+  resumo?: string;
+  termo?: string;
+  versao_consentimento?: string;
 };
 
 export default function Atendimento() {
@@ -39,8 +51,6 @@ export default function Atendimento() {
   const [sala, setSala] = useState<
     { url: string; token: string; podeGravar: boolean } | null
   >(null);
-
-  // termo
 
   useEffect(() => {
     if (!id) return;

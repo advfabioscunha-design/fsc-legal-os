@@ -611,9 +611,27 @@ def _apelido_do_assunto(texto: str) -> str:
 
     import re as _re
     apelido = _sem_acento(bruto.strip().lower())
-    apelido = _re.sub(r"[^a-z0-9]+", "-", apelido).strip("-")
-    apelido = "-".join([p for p in apelido.split("-") if p][:4])
-    return (apelido or "atendimento")[:60]
+
+    # O modelo às vezes responde "assunto: pensao alimenticia" em vez de
+    # só o apelido. Sem esta limpeza o arquivo nasce
+    # "01-resposta-pensao-alimenticia", e a primeira palavra do nome não
+    # diz nada sobre o caso.
+    apelido = _re.sub(r"^\s*(resposta|assunto|tema|titulo|nome|arquivo)\s*[:\-–]\s*",
+                      "", apelido)
+
+    apelido = _re.sub(r"[^a-z0-9]+", "-", apelido)
+    partes = [p for p in apelido.split("-") if p]
+
+    # Palavra de ligação não ajuda a achar nada e ainda come uma das
+    # quatro vagas do nome: "revisao-de-financiamento" gasta duas vagas
+    # para dizer o que "revisao-financiamento-veiculo-juros" diz melhor.
+    # Nome de arquivo não precisa ser frase; precisa ser achável.
+    ligacao = {"de", "da", "do", "das", "dos", "e", "com", "para", "em",
+               "no", "na", "nos", "nas", "ao", "aos", "a", "o", "os", "as",
+               "por", "sobre", "sem", "um", "uma"}
+    partes = [p for p in partes if p not in ligacao][:4]
+
+    return ("-".join(partes) or "atendimento")[:60]
 
 
 def _ordem_no_caso(db, caso_id: str, atendimento_id: str) -> int:
@@ -734,12 +752,38 @@ def transcrever(atendimento_id: str) -> dict:
             "reconhecimento de fala; em caso de dúvida, vale o áudio.\n\n"
         )
         caminho_txt = f"{a['caso_id']}/atendimentos/{base_nome}.txt"
+
+        # A TRANSCRIÇÃO REFEITA NÃO PODE DEIXAR RASTRO
+        #
+        # Transcrever de novo pode produzir outro apelido — a IA lê o
+        # mesmo áudio e resume diferente. Sem esta limpeza, a transcrição
+        # antiga ficava no balde com o nome velho E com uma linha própria
+        # nos anexos: duas transcrições do mesmo atendimento, com nomes
+        # diferentes, e ninguém sabendo qual vale.
+        #
+        # São duas as possibilidades de nome anterior: o do áudio antes de
+        # ser renomeado, e o formato legado "transcricao-<id>.txt" usado
+        # antes de os arquivos ganharem apelido.
+        antigos = {
+            (a["audio_path"] or "").replace(".m4a", ".txt"),
+            f"{a['caso_id']}/atendimentos/transcricao-{atendimento_id}.txt",
+        } - {caminho_txt, ""}
+        for velho_txt in antigos:
+            try:
+                db.storage.from_(s.bucket_documentos).remove([velho_txt])
+            except Exception:
+                pass
+            try:
+                db.table("documentos").delete() \
+                  .eq("caso_id", a["caso_id"]) \
+                  .eq("storage_path", velho_txt).execute()
+            except Exception:
+                pass
+
         db.storage.from_(s.bucket_documentos).upload(
             caminho_txt, (cabecalho + texto).encode("utf-8"),
             {"content-type": "text/plain; charset=utf-8", "upsert": "true"})
-        # Uma linha por atendimento, não uma por transcrição refeita: quem
-        # mandar transcrever de novo substitui o arquivo, e a pasta não
-        # enche de cópias quase iguais que ninguém sabe qual vale.
+        # Uma linha por atendimento, não uma por transcrição refeita.
         ja = db.table("documentos").select("id") \
                .eq("caso_id", a["caso_id"]) \
                .eq("storage_path", caminho_txt).limit(1).execute().data
@@ -766,6 +810,44 @@ def transcrever(atendimento_id: str) -> dict:
     registrar_evento(a["caso_id"], "ATENDIMENTO_TRANSCRITO",
                      {"atendimento_id": atendimento_id, "caracteres": len(texto)})
     return {"ok": True, "caracteres": len(texto)}
+
+
+def procurar_gravacao(atendimento_id: str) -> dict:
+    """Vai buscar a gravação na Daily, em vez de esperar o aviso dela.
+
+    O fluxo normal é o fornecedor avisar por webhook que o arquivo ficou
+    pronto. Quando esse aviso não chega — e ele não chega se o endereço
+    não estiver registrado no painel da Daily —, o áudio existe lá e a
+    pasta do caso fica vazia, sem erro nenhum na tela. Falha silenciosa é
+    a pior de todas: ninguém procura o que não sabe que faltou.
+
+    Este caminho é o manual. O operador clica, a plataforma pergunta à
+    Daily quais gravações existem naquela sala e importa a última."""
+    db = get_db()
+    a = db.table("atendimentos").select("*").eq("id", atendimento_id) \
+          .single().execute().data
+    if not a:
+        raise ValueError("Atendimento não encontrado.")
+    if a.get("audio_path"):
+        return {"ok": True, "info": "O áudio deste atendimento já está guardado.",
+                "audio_path": a["audio_path"]}
+
+    gravacoes = daily.gravacoes_da_sala(a["sala_nome"])
+    if not gravacoes:
+        return {"ok": False,
+                "motivo": "Não há gravação desta sala no fornecedor. Se o "
+                          "atendimento foi gravado, aguarde alguns minutos: o "
+                          "arquivo demora a ficar pronto depois de encerrado."}
+
+    pronta = next((g for g in gravacoes
+                   if (g.get("status") or "").lower() in ("finished", "ready")),
+                  gravacoes[0])
+    if (pronta.get("status") or "").lower() not in ("finished", "ready"):
+        return {"ok": False,
+                "motivo": f"A gravação ainda está sendo processada "
+                          f"(situação: {pronta.get('status')}). Tente de novo "
+                          f"em alguns minutos."}
+    return guardar_gravacao(pronta.get("id") or "", a["sala_nome"])
 
 
 # ── Webhook ──────────────────────────────────────────────────────

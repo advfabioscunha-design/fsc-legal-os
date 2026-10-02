@@ -157,6 +157,26 @@ def token_cliente(sala: str, nome_exibicao: str, expira_em: int) -> str:
 
 
 # ── Gravação ─────────────────────────────────────────────────────
+def gravacoes_da_sala(sala: str) -> list[dict]:
+    """Todas as gravações daquela sala, da mais recente para a mais antiga.
+
+    Existe porque o caminho normal — o fornecedor avisar por webhook que
+    a gravação ficou pronta — depende de uma configuração no painel da
+    Daily que ninguém lembra de conferir, e que some quando se troca de
+    projeto. Sem o aviso, o áudio fica lá e a pasta do caso fica vazia,
+    sem nenhuma mensagem de erro: o pior tipo de falha.
+
+    Com esta consulta o escritório pode ir buscar, em vez de esperar."""
+    try:
+        r = httpx.get(f"{BASE}/recordings", headers=_headers(),
+                      params={"room_name": sala, "limit": 20}, timeout=30)
+        r.raise_for_status()
+        dados = r.json().get("data") or []
+        return sorted(dados, key=lambda g: g.get("start_ts") or 0, reverse=True)
+    except Exception:
+        return []
+
+
 def buscar_gravacao(gravacao_id: str) -> dict:
     try:
         r = httpx.get(f"{BASE}/recordings/{gravacao_id}",

@@ -222,6 +222,28 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
     carregarAtendimentos();
   }
 
+  /* QUANDO O ÁUDIO NÃO APARECE SOZINHO
+   *
+   * O normal é a Daily avisar que a gravação ficou pronta, e o áudio cair
+   * na pasta do caso sem ninguém fazer nada. Esse aviso depende de um
+   * endereço registrado no painel da Daily — e quando ele não está lá, o
+   * arquivo existe no fornecedor e a pasta do caso fica vazia, sem erro
+   * nenhum na tela. É a falha pior: ninguém procura o que não sabe que
+   * faltou.
+   *
+   * Este botão é a saída manual. */
+  async function procurarGravacao(id: string) {
+    const r = await fetch(`${API}/api/v1/atendimentos/${id}/gravacao/procurar`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
+    });
+    const d = await r.json().catch(() => ({} as any));
+    alert(d.ok
+      ? (d.info || "Áudio importado. A transcrição começa em seguida.")
+      : (d.motivo || d.detail || "Não foi possível buscar a gravação."));
+    carregarAtendimentos();
+  }
+
   async function encerrarAtendimento(id: string) {
     if (!confirm("Encerrar este atendimento? A sala é apagada e a gravação, se houver, será transcrita.")) return;
     const r = await fetch(`${API}/api/v1/atendimentos/${id}/encerrar`, {
@@ -1063,14 +1085,18 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                           áudio é o desfecho normal do rito novo — não é
                           defeito. Dizer isso aqui evita a procura por um
                           arquivo que nunca existiu. */}
-                      {!a.audio_path && !a.consentimento_em
-                        && ["ENCERRADO", "TRANSCRITO", "FALHOU"].includes(a.status) && (
-                        <p className="mt-2 text-[11px] leading-relaxed text-white/40">
-                          Sem áudio: o cliente não autorizou a gravação durante a
-                          conversa, então nada foi registrado. A autorização é
-                          pedida dentro da sala, no momento em que o senhor for
-                          gravar.
-                        </p>
+                      {!a.audio_path && ["ENCERRADO", "TRANSCRITO", "FALHOU"].includes(a.status) && (
+                        <div className="mt-2">
+                          <p className="text-[11px] leading-relaxed text-white/40">
+                            {a.consentimento_em
+                              ? "A gravação foi iniciada, mas o áudio ainda não chegou. O arquivo demora alguns minutos a ficar pronto depois do encerramento."
+                              : "Não há registro de gravação neste atendimento. Se o senhor gravou mesmo assim, busque o arquivo abaixo."}
+                          </p>
+                          <button onClick={() => procurarGravacao(a.id)}
+                            className="mt-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-white/40 hover:text-white">
+                            ⬇ buscar a gravação no fornecedor
+                          </button>
+                        </div>
                       )}
 
                       {a.erro && <p className="mt-1 text-[#E57373]">⚠ {a.erro}</p>}
