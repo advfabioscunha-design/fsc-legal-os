@@ -2783,18 +2783,20 @@ def esteira_automatica() -> dict:
                 feitos["revisados"] += 1
                 continue
 
-            if not fora and fase == "AJUSTE" and not p.get("revisao"):
-                revisar(p["id"], auto=True)
-                feitos["revisados"] += 1
-                continue
-
-            if not fora and fase == "AJUSTE" and _horas_desde(p.get("ajustado_em")) > \
-                    _horas_desde(p.get("fase_em")):
-                # ajustado antes de entrar nesta fase quer dizer que o
-                # ajuste desta rodada ainda não aconteceu
-                ajustar(p["id"], auto=True)
-                feitos["ajustados"] += 1
-                continue
+            # O AJUSTE NÃO SEGURA MAIS NINGUÉM
+            #
+            # Havia duas travas aqui: o pedido em AJUSTE sem revisão era
+            # revisado antes de andar, e o que tinha revisão era
+            # reescrito pela IA. Cada uma custava uma chamada, e as duas
+            # juntas faziam o pior: com a conta de IA no teto, o pedido
+            # ficava parado nesta fase indefinidamente, sem dizer por
+            # quê — o relógio não corria porque o trabalho da fase nunca
+            # terminava.
+            #
+            # Agora AJUSTE é só uma sala de espera para o que o advogado
+            # devolveu de propósito, e ela esvazia sozinha: o relógio
+            # leva o pedido para a mesa dele, que é onde a correção
+            # acontece de verdade.
 
             # 2. O relógio está parado esperando o cliente? Não anda.
             #

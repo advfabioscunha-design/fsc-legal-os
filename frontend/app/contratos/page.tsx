@@ -593,45 +593,30 @@ function PainelDoPedido({ id, fechar, recarregar }:
                 nota="Tira o pedido da etapa antiga e põe na sua mesa." />
             </div>
           )}
+          {/* O AJUSTE SAIU DO RITO, E ESTA FASE SÓ FAZ UMA COISA
+
+              O botão daqui reescrevia a minuta inteira para aplicar os
+              apontamentos. Isso tinha dois problemas e um defeito. Os
+              problemas: custava uma reescrita completa por pedido, e o
+              advogado recebia um texto novo sem ver o que havia mudado.
+              O defeito: dependia da IA, e com a conta no teto o botão
+              ficava preso em "Um momento…" para sempre, sem dizer por
+              quê — que foi o que aconteceu neste pedido.
+
+              Agora a fase tem uma saída só, e ela não chama IA nenhuma:
+              vai para a mesa do advogado, onde a leitura e as correções
+              acontecem de verdade, com o texto na tela. */}
           {fase === "AJUSTE" && (
             <div>
-              {/* O PEDIDO QUE CHEGOU AQUI SEM REVISÃO
-
-                  Acontecia quando a revisão falhava e o pedido avançava
-                  assim mesmo: o único botão da fase pedia para "acionar
-                  o revisor primeiro", e o botão do revisor só existia na
-                  fase anterior. Beco sem saída, e alguém precisava mexer
-                  no banco para destravar. Agora a fase mostra o botão
-                  que falta, e o próprio ajuste revisa antes se for
-                  preciso. */}
-              {!p.revisao ? (
-                <>
-                  <p className="mb-2 text-[11px] leading-relaxed text-[#E5A44C]">
-                    Este pedido chegou ao ajuste sem a revisão registrada.
-                    Rode o revisor e o ajuste abre em seguida.
-                  </p>
-                  <Botao rotulo="Revisar agora" ocupado={ocupado === "revisar"}
-                    onClick={() => acao("/revisar", {}, "revisar")}
-                    nota="O revisor lê a íntegra e anota o que precisa mudar." />
-                </>
-              ) : (
-                <>
-                  {/* O AJUSTE AUTOMÁTICO SAIU DO RITO
-                      A revisão agora vai direto para a mesa do advogado,
-                      com os apontamentos ao lado da minuta, e ele aplica
-                      o que concordar, um a um, vendo o que muda. Este
-                      botão continua aqui para o pedido que ELE devolveu
-                      de propósito, e para quem ficou nesta fase. */}
-                  <p className="mb-2 text-[11px] leading-relaxed text-white/60">
-                    Este pedido está no ajuste porque foi devolvido, ou porque
-                    já estava aqui. Hoje a revisão vai direto para a sua mesa.
-                  </p>
-                  <Botao rotulo="Aplicar os apontamentos e trazer para mim"
-                    ocupado={ocupado === "ajustar"}
-                    onClick={() => acao("/ajustar", {}, "ajustar")}
-                    nota="Reescreve a minuta atendendo a revisão e põe na sua mesa. A anterior fica guardada." />
-                </>
-              )}
+              <p className="mb-2 text-[11px] leading-relaxed text-white/60">
+                Este pedido ficou no ajuste, que saiu do rito. Mande para a
+                revisão final: é lá que você lê, corrige e, se precisar,
+                pede informação ao cliente.
+              </p>
+              <Botao rotulo="Mandar para a revisão final"
+                ocupado={ocupado === "redigir"}
+                onClick={() => acao("/para-o-advogado", {}, "redigir")}
+                nota="Só muda a fase. A minuta não é reescrita, e nada é apagado." />
             </div>
           )}
           {/* DOIS PASSOS, NÃO UM
