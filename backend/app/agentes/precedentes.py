@@ -35,6 +35,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import ia as _ia_nucleo
 from ..integracoes import jurisprudencia_api
 
 # aceita aspas retas, curvas ou nenhuma, e variações de espaço
@@ -233,9 +234,7 @@ def _resolver_tema(tema: str, contexto: str, tribunal: str | None,
 
     lista = "\n\n".join(_rotulo(p) for p in candidatos)
 
-    cliente = anthropic.Anthropic(api_key=s.claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    cliente = _ia_nucleo.cliente(s.claude_api_key)
     r = cliente.messages.create(
         model=s.claude_model, max_tokens=2500, system=INSTRUCAO,
         tools=[FERRAMENTA],

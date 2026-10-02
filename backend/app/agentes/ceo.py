@@ -9,14 +9,13 @@ import anthropic
 
 from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
+from ..core import ia as _ia_nucleo
 
 _client = None
 def _claude():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=get_settings().claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+        _client = _ia_nucleo.cliente(get_settings().claude_api_key)
     return _client
 
 SYSTEM_CEO = """

@@ -31,6 +31,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from ..core.db import get_db, registrar_evento
+from ..core import ia as _ia_nucleo
 
 # Brasília. É o relógio que o escritório usa, e o aniversário é do dia de
 # quem recebe, não do UTC: sem isto, quem faz aniversário dia 10 recebia
@@ -114,9 +115,7 @@ def escrever_felicitacao(cliente_id: str, nome: str) -> str:
             pedido.append("É a primeira felicitação que esta pessoa recebe "
                           "do escritório.")
 
-        r = anthropic.Anthropic(api_key=s.claude_api_key,
-                                timeout=TEMPO_LIMITE,
-                                max_retries=TENTATIVAS).messages.create(
+        r = _ia_nucleo.cliente(s.claude_api_key).messages.create(
             model=s.claude_model, max_tokens=400, system=_regua(),
             messages=[{"role": "user", "content": "\n\n".join(pedido)}])
         texto = "".join(b.text for b in r.content

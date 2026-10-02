@@ -36,6 +36,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import ia as _ia_nucleo
 from . import documentos as redator
 from . import honorarios as hon
 
@@ -202,9 +203,7 @@ def ler_com_a_conversa(doc: dict, paragrafos: list[str]) -> dict:
     # A resposta vem por ferramenta: o relatório chega já estruturado, sem
     # depender de o texto ser um JSON bem formado. Aspas dentro de citações
     # do contrato quebravam o JSON solto e a revisão inteira se perdia.
-    cliente = anthropic.Anthropic(api_key=s.claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    cliente = _ia_nucleo.cliente(s.claude_api_key)
     r = cliente.messages.create(
         model=s.claude_model, max_tokens=3000, system=INSTRUCAO,
         tools=[FERRAMENTA], tool_choice={"type": "tool", "name": "relatorio"},

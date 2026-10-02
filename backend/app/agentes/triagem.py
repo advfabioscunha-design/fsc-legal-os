@@ -9,6 +9,7 @@ import anthropic
 from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import ia as _ia_nucleo
 from .orquestrador import mudar_estado
 
 # Nichos de atuação do escritório (FC ADVOCACIA)
@@ -30,9 +31,7 @@ DESCRICAO_NICHOS = """
 
 def identificar_grupo(relato: str) -> dict:
     s = get_settings()
-    client = anthropic.Anthropic(api_key=s.claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    client = _ia_nucleo.cliente(s.claude_api_key)
     resposta = client.messages.create(
         model=s.claude_model_rapido,
         max_tokens=300,

@@ -26,6 +26,7 @@ import fitz  # PyMuPDF
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core import dados as _dados
+from ..core import ia as _ia_nucleo
 
 BUCKET = "jurisprudencia"
 GRUPOS_VALIDOS = ["BANCARIO", "IMOBILIARIO", "TRIBUTARIO", "CONSUMIDOR"]
@@ -47,9 +48,7 @@ REGRAS ABSOLUTAS:
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    return _ia_nucleo.cliente(get_settings().claude_api_key)
 
 
 def _resumo_banco(grupo: str) -> list:

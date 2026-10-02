@@ -60,6 +60,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core.texto import REGRA_DE_ESCRITA, humanizar
+from ..core import ia as _ia_nucleo
 
 
 # ── Rótulos de fase, na língua do cliente ──────────────────────
@@ -441,9 +442,7 @@ def _claude():
     s = get_settings()
     if not s.claude_api_key:
         raise ValueError("Chave da Claude não configurada no servidor.")
-    return anthropic.Anthropic(api_key=s.claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    return _ia_nucleo.cliente(s.claude_api_key)
 
 
 def _agora() -> datetime:

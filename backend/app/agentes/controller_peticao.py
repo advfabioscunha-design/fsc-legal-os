@@ -36,6 +36,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core import dados as _dados
+from ..core import ia as _ia_nucleo
 
 # tipos que entram pela Regra A
 INICIAIS = {"INICIAL", "PETICAO_INICIAL", "INICIAL_CUMULATIVA"}
@@ -96,9 +97,7 @@ FERRAMENTA = {
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    return _ia_nucleo.cliente(get_settings().claude_api_key)
 
 
 def _parecer(system: str, conteudo: str) -> dict:

@@ -6,6 +6,7 @@ import { baixarComToken } from "../../lib/baixar";
 import { comoLista, comoObjeto, comoTexto } from "@/lib/listas";
 import { useRascunho } from "@/lib/rascunho";
 import { AnexosDoPedido } from "@/app/components/AnexoDoPedido";
+import AvisoDaIA from "@/app/components/AvisoDaIA";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 
@@ -66,6 +67,7 @@ export default function BalcaoOperador() {
   return (
     <PainelLayout titulo="Contratos">
       <div className="space-y-4 p-5">
+        <AvisoDaIA />
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-xs text-white/50">
             Pedidos de redação de contrato. Serviço separado dos casos judiciais —

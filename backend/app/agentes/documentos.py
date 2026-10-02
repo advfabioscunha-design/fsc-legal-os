@@ -39,6 +39,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core import dados as _dados
+from ..core import ia as _ia_nucleo
 from . import honorarios
 
 MODELOS_DIR = os.getenv(
@@ -201,9 +202,7 @@ def redigir_objeto(caso: dict, tese: dict | None = None) -> dict:
     if tese:
         contexto.append(f"TESE APLICÁVEL: {tese.get('titulo')} — {tese.get('ratio_decidendi')}")
 
-    cliente = anthropic.Anthropic(api_key=s.claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    cliente = _ia_nucleo.cliente(s.claude_api_key)
     r = cliente.messages.create(
         model=s.claude_model,
         max_tokens=1600,

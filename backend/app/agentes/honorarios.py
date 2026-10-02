@@ -27,6 +27,7 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
+from ..core import ia as _ia_nucleo
 
 CAMPOS = ("hon_percentual", "hon_salarios_minimos", "hon_valor_fixo",
           "hon_entrada", "hon_parcelas", "hon_parcela_valor",
@@ -387,9 +388,7 @@ def ler_da_conversa(caso_id: str) -> dict:
                                     "hon_valor_fixo,honorarios_valor") \
              .eq("id", caso_id).single().execute().data or {}
 
-    cliente = anthropic.Anthropic(api_key=s.claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    cliente = _ia_nucleo.cliente(s.claude_api_key)
     r = cliente.messages.create(
         model=s.claude_model,
         max_tokens=1200,

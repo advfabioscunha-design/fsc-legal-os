@@ -493,9 +493,14 @@ FERRAMENTA_REVISAO = {
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    """O cliente da IA, que avisa quando recusa e quando volta.
+
+    Passa por `core/ia.cliente` para que a esteira saiba parar de
+    insistir quando a conta bloqueia, e saiba voltar a trabalhar assim
+    que a primeira chamada der certo de novo. Sem isso, o freio ficava
+    puxado depois de alguém já ter arrumado a conta."""
+    from ..core import ia as _ia
+    return _ia.cliente(get_settings().claude_api_key)
 
 
 def texto_dos_anexos(pedido_id: str, limite_total: int = 20000) -> str:
@@ -2551,16 +2556,33 @@ def esteira_automatica() -> dict:
 
     feitos = {"redigidos": 0, "revisados": 0, "ajustados": 0, "avancados": 0}
 
+    # A IA FORA DO AR NÃO VIRA CEM TENTATIVAS POR RODADA
+    #
+    # Com a conta bloqueada, cada rodada tentava redigir, revisar e
+    # ajustar CADA pedido em andamento, e cada tentativa falhava igual.
+    # Cem erros no log a cada quinze minutos escondem o erro de verdade
+    # quando ele aparecer, e no caso de sobrecarga insistir é exatamente
+    # o que faz a sobrecarga durar mais.
+    #
+    # O AVANÇO DE FASE CONTINUA. Ele não depende da IA: é relógio, e
+    # parar o relógio porque a IA caiu puniria o cliente por um problema
+    # que é do escritório.
+    from ..core import ia as _ia
+    fora = _ia.indisponivel()
+    if fora:
+        feitos["ia_fora"] = fora["motivo"]
+        feitos["aviso"] = fora["detalhe"]
+
     for p in pendentes:
         fase = p["fase"]
         proxima = _PROXIMA[fase][0]
         try:
             # 1. O trabalho daquela fase ainda não foi feito? Faz agora.
-            if fase == "REDACAO" and not (p.get("minuta") or "").strip():
+            if not fora and fase == "REDACAO" and not (p.get("minuta") or "").strip():
                 redigir(p["id"], auto=True)
                 feitos["redigidos"] += 1
                 continue                       # a janela conta da fase, não daqui
-            if fase == "REVISAO_IA" and not p.get("revisao"):
+            if not fora and fase == "REVISAO_IA" and not p.get("revisao"):
                 revisar(p["id"], auto=True)
                 feitos["revisados"] += 1
                 continue
@@ -2571,17 +2593,17 @@ def esteira_automatica() -> dict:
             # avançava assim mesmo. A esteira agora repara isso na
             # passagem seguinte, em vez de deixar o pedido parado à
             # espera de alguém notar.
-            if fase == "REVISAO_2" and not p.get("revisao_2"):
+            if not fora and fase == "REVISAO_2" and not p.get("revisao_2"):
                 revisar_segunda(p["id"], auto=True)
                 feitos["revisados"] += 1
                 continue
 
-            if fase == "AJUSTE" and not p.get("revisao"):
+            if not fora and fase == "AJUSTE" and not p.get("revisao"):
                 revisar(p["id"], auto=True)
                 feitos["revisados"] += 1
                 continue
 
-            if fase == "AJUSTE" and _horas_desde(p.get("ajustado_em")) > \
+            if not fora and fase == "AJUSTE" and _horas_desde(p.get("ajustado_em")) > \
                     _horas_desde(p.get("fase_em")):
                 # ajustado antes de entrar nesta fase quer dizer que o
                 # ajuste desta rodada ainda não aconteceu

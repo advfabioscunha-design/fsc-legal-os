@@ -19,15 +19,14 @@ from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 from ..core.texto import REGRA_DE_ESCRITA, humanizar
+from ..core import ia as _ia_nucleo
 from .orquestrador import mudar_estado, escalar_para_humano
 
 _client = None
 def _claude():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=get_settings().claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+        _client = _ia_nucleo.cliente(get_settings().claude_api_key)
     return _client
 
 

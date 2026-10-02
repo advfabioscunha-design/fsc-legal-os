@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import PainelLayout from "../components/PainelLayout";
 import { comoLista, comoTexto } from "@/lib/listas";
+import AvisoDaIA from "@/app/components/AvisoDaIA";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://api.fscadvocaciadigital.com.br";
 
@@ -93,6 +94,7 @@ export default function Clientes() {
   return (
     <PainelLayout>
       <div className="space-y-5 p-5">
+        <AvisoDaIA />
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-white">Clientes</h1>

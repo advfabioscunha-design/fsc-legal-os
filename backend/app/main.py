@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from .core.config import get_settings
 from .core.db import get_db
-from .core import esquema
+from .core import esquema, ia
 from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
 from .integracoes import asaas, zapsign, whatsapp, avisos, email_entrada
@@ -95,23 +95,41 @@ async def _porteiro(request: Request, call_next):
         de_dentro = getattr(getattr(request.state, "usuario", None) or {},
                             "get", lambda *_: None)("papel")
 
-        # A FALTA DE SALDO NÃO É UM DEFEITO, E NÃO PODE PARECER UM
+        # A RECUSA DA IA NÃO É UM DEFEITO, E NÃO PODE PARECER UM
         #
-        # Sem crédito na conta da Anthropic, a API recusa em menos de um
-        # segundo e todo agente para junto: redator, revisor, atendente,
-        # negociador, esteira. O texto que vem de lá está em inglês e
-        # fala de "credit balance", o que manda quem lê procurar defeito
-        # no sistema. Horas podem se perder assim, e o conserto é de um
-        # minuto no painel de cobrança.
-        texto = str(e).lower()
-        if "credit balance" in texto or "insufficient" in texto:
+        # Quando a API da Anthropic recusa, todo agente para junto:
+        # redator, revisor, atendente, negociador, esteira. O texto que
+        # vem de lá está em inglês, com um JSON dentro, e manda quem lê
+        # procurar defeito no sistema.
+        #
+        # São cinco motivos bem diferentes, e o conserto de três deles é
+        # de um minuto no painel de cobrança. O mais traiçoeiro é o TETO
+        # DE GASTO: a conta TEM saldo, o que acabou foi o limite que o
+        # próprio escritório configurou, e ninguém procura isso.
+        #
+        # Ver `core/ia.explicar`. Aqui só se traduz e se devolve.
+        # `anotar_recusa` faz as duas coisas: traduz e LEMBRA. É o que
+        # faz a esteira parar de insistir na próxima rodada, em vez de
+        # repetir o mesmo erro cem vezes a cada quinze minutos.
+        diagnostico = ia.anotar_recusa(e)
+        if diagnostico:
+            print(f"[ia] {diagnostico['motivo']}: {request.url.path}")
             return JSONResponse(
-                {"detail": "A conta de IA do escritório está sem saldo, e "
-                           "por isso nenhum agente consegue trabalhar agora. "
-                           "Recarregue em console.anthropic.com, em Plans & "
-                           "Billing. Assim que o saldo entrar, é só clicar "
-                           "de novo: nada se perdeu."},
-                status_code=503)
+                {"detail": diagnostico["detalhe"],
+                 "motivo": diagnostico["motivo"],
+                 "pode_tentar_de_novo": diagnostico["pode_tentar_de_novo"]},
+                status_code=diagnostico["status"])
+
+        # FALTA DE MIGRAÇÃO TAMBÉM TEM NOME
+        #
+        # Mesma razão: o código sobe pelo Docker e as migrações rodam à
+        # mão. Entre uma coisa e outra, pedir uma coluna que ainda não
+        # existe virava "deu erro no servidor", e quem está olhando não
+        # tinha como saber que bastava rodar um SQL.
+        aviso = esquema.falta_migracao(e)
+        if aviso:
+            return JSONResponse({"detail": aviso, "motivo": "MIGRACAO"},
+                                status_code=503)
 
         corpo = {"detail": "Deu erro aqui no servidor ao executar esta ação. "
                            "O escritório já tem o registro do que houve."}
@@ -6075,6 +6093,16 @@ def balcao_listar_documentos(pedido_id: str):
             "transcricao": (d.get("transcricao") or "")[:4000] or None,
         })
     return saida
+
+
+@app.get("/api/v1/ia/estado")
+def ia_estado():
+    """Se os agentes estão trabalhando, e por que não, quando não estão.
+
+    A tela consulta isto para mostrar a faixa de aviso ANTES de a pessoa
+    clicar: descobrir que a IA está fora só depois de preencher uma tela
+    e apertar o botão é descobrir tarde."""
+    return ia.estado()
 
 
 @app.get("/api/v1/contratos/pix")

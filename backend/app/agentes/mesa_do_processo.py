@@ -53,6 +53,7 @@ from ..core.db import get_db, registrar_evento
 from ..core.ia import TEMPO_LIMITE, TENTATIVAS
 from ..core.texto import humanizar
 from ..core import dados as _dados
+from ..core import ia as _ia_nucleo
 
 # As travas de aplicar texto são as mesmas do contrato, e é de propósito
 # que sejam o mesmo código: duas implementações de "procurar e
@@ -194,9 +195,7 @@ def _agora() -> str:
 
 
 def _claude():
-    return anthropic.Anthropic(api_key=get_settings().claude_api_key,
-                               timeout=TEMPO_LIMITE,
-                               max_retries=TENTATIVAS)
+    return _ia_nucleo.cliente(get_settings().claude_api_key)
 
 
 def _linha(rotulo: str, valor) -> str:
