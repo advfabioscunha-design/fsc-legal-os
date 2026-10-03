@@ -59,11 +59,6 @@ export default function Completar() {
   const [oabNumero, setOabNumero] = useState("");
   const [oabUf, setOabUf] = useState("");
   const [cpf, setCpf] = useState("");
-  const [pixTipo, setPixTipo] = useState("");
-  const [pixChave, setPixChave] = useState("");
-  const [bancoNome, setBancoNome] = useState("");
-  const [agencia, setAgencia] = useState("");
-  const [conta, setConta] = useState("");
 
   useEffect(() => {
     let vivo = true;
@@ -151,11 +146,8 @@ export default function Completar() {
           nome: limpo, cpf_cnpj: soCpf,
           oab_numero: oabNumero.trim(), oab_uf: oabUf.trim().toUpperCase(),
           whatsapp: fone.replace(/\D/g, "") || null,
-          banco_nome: bancoNome.trim() || null,
-          agencia: agencia.trim() || null,
-          conta: conta.trim() || null,
-          pix_tipo: pixTipo || null,
-          pix_chave: pixChave.trim() || null,
+          // Dados bancários ficam para a área do parceiro, em
+          // "Meu cadastro". Nada depende deles até o primeiro acerto.
         }),
       });
       const d = await r.json().catch(() => ({} as any));
@@ -350,42 +342,18 @@ export default function Completar() {
                       placeholder="000.000.000-00" className={`mt-1 ${campo}`} />
                   </label>
 
-                  {/* OS DADOS DO REPASSE, PEDIDOS AGORA
+                  {/* OS DADOS DO BANCO NÃO SÃO PEDIDOS AQUI
 
-                      Perguntar a chave PIX no dia do acerto é o jeito
-                      certo de atrasar o pagamento de quem já trabalhou.
-                      Ficam opcionais aqui porque não impedem ninguém de
-                      começar — só impedem o escritório de pagar. */}
-                  <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
-                    <p className="text-xs font-semibold text-[#0A1628]">
-                      Para onde vai o seu repasse
-                    </p>
-                    <p className="mt-1 text-[11px] leading-relaxed text-black/45">
-                      Pode deixar para depois, mas sem isso o escritório não
-                      consegue repassar a sua parte.
-                    </p>
-                    <div className="mt-2.5 grid grid-cols-[6.5rem_1fr] gap-2">
-                      <select value={pixTipo} onChange={(e) => setPixTipo(e.target.value)}
-                        className={campo}>
-                        <option value="">Chave PIX</option>
-                        <option value="CPF">CPF</option>
-                        <option value="CNPJ">CNPJ</option>
-                        <option value="EMAIL">E-mail</option>
-                        <option value="TELEFONE">Telefone</option>
-                        <option value="ALEATORIA">Aleatória</option>
-                      </select>
-                      <input value={pixChave} onChange={(e) => setPixChave(e.target.value)}
-                        placeholder="a chave" className={campo} />
-                    </div>
-                    <div className="mt-2 grid grid-cols-3 gap-2">
-                      <input value={bancoNome} onChange={(e) => setBancoNome(e.target.value)}
-                        placeholder="Banco" className={campo} />
-                      <input value={agencia} onChange={(e) => setAgencia(e.target.value)}
-                        placeholder="Agência" className={campo} />
-                      <input value={conta} onChange={(e) => setConta(e.target.value)}
-                        placeholder="Conta" className={campo} />
-                    </div>
-                  </div>
+                      Eles estavam nesta tela e saíram. O motivo é o
+                      tamanho: cada campo a mais entre o advogado e o
+                      botão é uma chance a mais de ele fechar a página —
+                      e dado bancário é dos que fazem parar para
+                      procurar.
+
+                      E eles não são urgentes. Nada depende deles até o
+                      primeiro acerto, que vem semanas depois. Ficam na
+                      área do parceiro, em "Meu cadastro", onde ele os
+                      informa quando quiser. */}
                 </>
               )}
             </div>

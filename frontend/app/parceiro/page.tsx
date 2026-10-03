@@ -47,6 +47,20 @@ export default function AreaDoParceiro() {
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(true);
 
+  /* MEU CADASTRO
+     Os dados bancários saíram da porta de entrada — pedi-los antes do
+     primeiro caso é parar o advogado para procurar número de conta num
+     momento em que ele só quer entrar. Vivem aqui, onde ele informa
+     quando quiser, e onde a cobrança faz sentido: ao lado do valor que
+     está esperando para ser repassado. */
+  const [abrirCadastro, setAbrirCadastro] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [recado, setRecado] = useState("");
+  const [ban, setBan] = useState({
+    pix_tipo: "", pix_chave: "", banco_nome: "", banco_codigo: "",
+    agencia: "", conta: "", conta_tipo: "", whatsapp: "",
+  });
+
   const buscar = useCallback(async (caminho: string) => {
     const { data } = await supabase.auth.getSession();
     if (!data.session) { router.replace("/entrar"); return null; }
@@ -88,8 +102,32 @@ export default function AreaDoParceiro() {
     })();
   }, [buscar]);
 
+  const campo = "rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2.5 "
+    + "text-sm text-white outline-none focus:border-[#C9A84C]";
+
   const reais = (v: any) =>
     Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+  async function salvarCadastro() {
+    setRecado(""); setSalvando(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) { router.replace("/entrar"); return; }
+      const r = await fetch(`${API}/api/v1/parceiro/cadastro`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json",
+                   Authorization: `Bearer ${data.session.access_token}` },
+        body: JSON.stringify(ban),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { setRecado(d.detail || "Não consegui salvar."); return; }
+      setRecado("Dados salvos. O escritório já pode repassar a sua parte.");
+      const quem = await buscar("/api/v1/parceiro/eu");
+      if (quem?.ok) setEu(quem.dados);
+    } catch {
+      setRecado("Falha de conexão. Tente de novo.");
+    } finally { setSalvando(false); }
+  }
 
   async function sair() {
     await supabase.auth.signOut();
@@ -252,6 +290,99 @@ export default function AreaDoParceiro() {
               </ul>
             </section>
           </>
+        )}
+
+
+        {/* ── MEU CADASTRO ─────────────────────────────────────
+            Aparece para quem está em análise e para quem já foi
+            aprovado. O pendente precisa dele tanto quanto: é enquanto
+            espera que ele tem tempo de completar. */}
+        {eu && (
+          <section className="mt-6 rounded-2xl border border-white/10 bg-[#0B1F3B] p-5">
+            <button onClick={() => setAbrirCadastro((v) => !v)}
+              className="flex w-full items-center justify-between text-left">
+              <span>
+                <span className="font-display text-base font-bold">Meu cadastro</span>
+                <span className="ml-2 text-[12px] text-white/45">
+                  dados para o repasse dos honorários
+                </span>
+              </span>
+              <span className={`text-xs ${eu.falta_dados_bancarios ? "text-[#E5A44C]" : "text-[#1DB954]"}`}>
+                {eu.falta_dados_bancarios ? "falta preencher" : "✓ completo"}
+              </span>
+            </button>
+
+            {eu.falta_dados_bancarios && !abrirCadastro && (
+              <p className="mt-2 text-[13px] leading-relaxed text-white/55">
+                Sem a chave PIX ou a conta, o escritório não consegue repassar
+                a sua parte — o valor fica parado esperando um dado que leva um
+                minuto para informar.
+              </p>
+            )}
+
+            {abrirCadastro && (
+              <div className="mt-4 space-y-3">
+                <div className="grid grid-cols-[7rem_1fr] gap-2">
+                  <select value={ban.pix_tipo}
+                    onChange={(e) => setBan({ ...ban, pix_tipo: e.target.value })}
+                    className={campo}>
+                    <option value="">Chave PIX</option>
+                    <option value="CPF">CPF</option>
+                    <option value="CNPJ">CNPJ</option>
+                    <option value="EMAIL">E-mail</option>
+                    <option value="TELEFONE">Telefone</option>
+                    <option value="ALEATORIA">Aleatória</option>
+                  </select>
+                  <input value={ban.pix_chave} placeholder="a chave"
+                    onChange={(e) => setBan({ ...ban, pix_chave: e.target.value })}
+                    className={campo} />
+                </div>
+
+                <p className="text-[11px] text-white/35">
+                  Ou os dados da conta, se preferir receber por transferência:
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <input value={ban.banco_nome} placeholder="Banco"
+                    onChange={(e) => setBan({ ...ban, banco_nome: e.target.value })}
+                    className={campo} />
+                  <input value={ban.agencia} placeholder="Agência"
+                    onChange={(e) => setBan({ ...ban, agencia: e.target.value })}
+                    className={campo} />
+                  <input value={ban.conta} placeholder="Conta"
+                    onChange={(e) => setBan({ ...ban, conta: e.target.value })}
+                    className={campo} />
+                  <select value={ban.conta_tipo}
+                    onChange={(e) => setBan({ ...ban, conta_tipo: e.target.value })}
+                    className={campo}>
+                    <option value="">Tipo</option>
+                    <option value="CORRENTE">Corrente</option>
+                    <option value="POUPANCA">Poupança</option>
+                  </select>
+                </div>
+
+                <input value={ban.whatsapp} placeholder="WhatsApp com DDD"
+                  inputMode="tel"
+                  onChange={(e) => setBan({ ...ban, whatsapp: e.target.value })}
+                  className={`${campo} w-full`} />
+
+                {recado && (
+                  <p className="rounded-lg bg-white/5 px-3 py-2 text-[12px] text-white/70">
+                    {recado}
+                  </p>
+                )}
+
+                <button onClick={salvarCadastro} disabled={salvando}
+                  className="w-full rounded-lg bg-[#C9A84C] px-4 py-3 text-sm font-bold text-[#0A1628] transition hover:bg-[#d8b95e] disabled:opacity-40">
+                  {salvando ? "Salvando…" : "Salvar os dados de pagamento"}
+                </button>
+
+                <p className="text-[11px] leading-relaxed text-white/35">
+                  A conta precisa ser de titularidade do senhor. O escritório não
+                  repassa honorário para conta de terceiro.
+                </p>
+              </div>
+            )}
+          </section>
         )}
 
         <p className="mt-10 border-t border-white/10 pt-5 text-[11px] leading-relaxed text-white/30">

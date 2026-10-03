@@ -3835,8 +3835,25 @@ class CadastroParceiro(BaseModel):
 @app.post("/api/v1/parceiro/cadastro")
 def parceiro_salvar_cadastro(body: CadastroParceiro,
                              authorization: str | None = Header(default=None)):
-    """O parceiro completa ou corrige o próprio cadastro."""
-    p = _parceiro_do_token(authorization)
+    """O parceiro completa ou corrige o próprio cadastro.
+
+    SEM A TRAVA DE STATUS, E DE PROPÓSITO
+
+    `_parceiro_do_token` recusa quem está PENDENTE — e pendente é
+    justamente quem mais precisa desta rota: o advogado acabou de se
+    cadastrar, a tela diz que faltam os dados bancários, ele clica para
+    informar e levaria um 403. Ficaria preso entre uma cobrança e uma
+    porta fechada.
+
+    Abrir aqui não custa sigilo nenhum: o que se grava é o cadastro da
+    própria pessoa. As rotas que mostram CASO continuam atrás da trava.
+    """
+    user = _usuario_do_token(authorization)
+    p = parceria.parceiro_do_login(user["id"])
+    if not p:
+        raise HTTPException(403, "Este acesso é de advogado parceiro.")
+    if (p.get("status") or "").upper() == "ENCERRADO":
+        raise HTTPException(403, "Esta parceria foi encerrada.")
     campos = {k: v for k, v in body.model_dump().items() if v not in (None, "")}
     if body.titular_confirmado is not None:
         campos["titular_confirmado"] = bool(body.titular_confirmado)
