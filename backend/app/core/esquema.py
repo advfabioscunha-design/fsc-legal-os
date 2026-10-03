@@ -44,6 +44,10 @@ DE_ONDE_VEM = {
     "aceite_termos_em": "0061", "aceite_termos_versao": "0061",
     "aceite_privacidade_em": "0061", "aceite_privacidade_versao": "0061",
     "aceite_origem_ip": "0061",
+    # 0062 — os advogados parceiros e o controle de acesso do admin
+    "parceiros": "0062", "parcerias": "0062", "repasses_parceiro": "0062",
+    "acessos_por_caso": "0062", "registro_de_acessos": "0062",
+    "pode_usar_ia": "0062", "pode_falar_com_cliente": "0062",
 }
 
 O_QUE_PARA = {
@@ -54,6 +58,8 @@ O_QUE_PARA = {
     "0059": "a agenda de contatos de WhatsApp no card do caso",
     "0060": "o cadastro de clientes e as felicitações de aniversário",
     "0061": "registrar o aceite dos termos quando o cliente cria o acesso",
+    "0062": "os advogados parceiros, a divisão de honorários e o controle "
+            "de acesso por caso",
 }
 
 # As mensagens que o PostgREST devolve quando o nome não existe.

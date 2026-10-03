@@ -48,6 +48,25 @@ create table if not exists public.parceiros (
   pix_tipo       text,
   pix_chave      text,
   titular_confirmado boolean not null default false,
+  -- ── O QUE ELE PODE FAZER ALÉM DO BÁSICO ──────────────────────
+  --
+  -- Nascem DESLIGADAS, as duas, e só o administrador liga. Não é
+  -- desconfiança do parceiro: é que estas duas abrem portas que
+  -- respondem pelo escritório, e abrir por padrão é decidir por quem
+  -- deveria decidir.
+  --
+  -- `pode_usar_ia` — os agentes consomem a conta de IA do escritório, e
+  -- a peça que sai leva o timbre e a OAB do responsável. Quem paga a
+  -- conta e assina o documento é quem autoriza.
+  --
+  -- `pode_falar_com_cliente` — mensagem no canal do escritório chega ao
+  -- cliente como se fosse do escritório. O parceiro conversa com a
+  -- equipe desde o primeiro dia; falar em nome da casa é outra coisa.
+  pode_usar_ia             boolean not null default false,
+  pode_falar_com_cliente   boolean not null default false,
+  permissoes_em            timestamptz,
+  permissoes_por           text,
+
   -- Situação
   status         text not null default 'ATIVO',   -- ATIVO | SUSPENSO | ENCERRADO
   observacao     text,
@@ -61,6 +80,13 @@ create unique index if not exists parceiros_oab_idx
   on public.parceiros (oab_numero, oab_uf)
   where oab_numero is not null and oab_uf is not null;
 create index if not exists parceiros_email_idx on public.parceiros (lower(email));
+
+comment on column public.parceiros.pode_usar_ia is
+  'Desligado ao nascer. Só o administrador liga: os agentes gastam a '
+  'conta de IA do escritório e a peça sai com o timbre dele.';
+comment on column public.parceiros.pode_falar_com_cliente is
+  'Desligado ao nascer. Só o administrador liga: mensagem nesse canal '
+  'chega ao cliente como se viesse do escritório.';
 
 comment on table public.parceiros is
   'Advogado de fora que atua em causa específica do escritório e divide '

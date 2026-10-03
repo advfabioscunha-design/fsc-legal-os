@@ -337,6 +337,86 @@ def _historico(caso_id: str, limite: int = 30) -> list:
     ]
 
 
+def consultar(caso_id: str, pergunta: str, quem: str = "") -> str:
+    """Consulta técnica sobre o caso — para quem trabalha nele.
+
+    É PARENTE DE `atender`, E É OUTRA COISA
+
+    `atender` fala com o cliente: grava a mensagem dele no canal, responde
+    em linguagem de quem não é da área e pode mexer na esteira. Usar
+    aquela função para uma dúvida técnica do advogado parceiro produziria
+    o pior dos dois mundos — a pergunta dele apareceria como se fosse do
+    cliente, e a resposta viria no tom de quem explica a um leigo.
+
+    Aqui é o contrário: ninguém escreve no canal do cliente, nada muda de
+    fase, e a resposta é técnica. O que entra no histórico é a consulta,
+    porque tese usada numa peça precisa ter de onde veio.
+
+    A régua do `_consultas` vai junto: é ela que impede o modelo de
+    produzir número de súmula ou de artigo que ele não conferiu."""
+    from . import consultas as _consultas
+
+    pergunta = (pergunta or "").strip()
+    if len(pergunta) < 3:
+        raise ValueError("Escreva a pergunta.")
+
+    db = get_db()
+    s = get_settings()
+    caso = db.table("casos").select("*").eq("id", caso_id) \
+             .maybe_single().execute().data
+    if not caso:
+        raise ValueError("Caso não encontrado.")
+
+    contexto = [
+        f"CASO: {caso.get('titulo') or '—'}",
+        f"Área: {caso.get('area') or caso.get('grupo') or '—'}",
+        f"Fase: {caso.get('fase') or '—'}",
+        f"Processo: {caso.get('numero_processo') or 'ainda sem número'}",
+        f"Tribunal: {caso.get('tribunal') or '—'}",
+        "",
+        f"DESCRIÇÃO: {caso.get('descricao') or '—'}",
+        "",
+        f"PERGUNTA DE {quem or 'quem trabalha no caso'}:",
+        pergunta,
+    ]
+
+    sistema = (
+        gerar_system_prompt(caso.get("grupo") or "OUTROS")
+        + "\n\n" + _consultas.regua()
+        + "\n\nQUEM ESTÁ PERGUNTANDO AGORA\n"
+        "Não é o cliente: é advogado trabalhando neste caso. Responda em "
+        "linguagem técnica, direto ao ponto, sem acolhimento e sem "
+        "explicar o óbvio da profissão. Se a resposta depender de "
+        "julgado ou de texto de lei, use as ferramentas de consulta — "
+        "número que o senhor não conferiu não entra na resposta."
+    )
+
+    mensagens = [{"role": "user", "content": "\n".join(contexto)}]
+    for _ in range(6):            # teto de idas e voltas com as ferramentas
+        r = _claude().messages.create(
+            model=s.claude_model, max_tokens=3000, system=sistema,
+            tools=_consultas.FERRAMENTAS, messages=mensagens,
+        )
+        usos = [b for b in r.content
+                if b.type == "tool_use" and b.name in _consultas.NOMES]
+        if not usos:
+            break
+        mensagens.append({"role": "assistant", "content": r.content})
+        mensagens.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": u.id,
+             "content": _consultas.atender(u.name, u.input)} for u in usos]})
+
+    texto = "".join(b.text for b in r.content if b.type == "text").strip()
+    if not texto:
+        texto = ("Não consegui formular a resposta agora. Refaça a pergunta "
+                 "com mais detalhe do ponto que o senhor quer esclarecer.")
+
+    registrar_evento(caso_id, "CONSULTA_TECNICA",
+                     {"quem": quem, "pergunta": pergunta[:300],
+                      "caracteres": len(texto)})
+    return texto
+
+
 def atender(caso_id: str, mensagem_cliente: str, canal: str = "PORTAL") -> dict:
     """Ponto de entrada: o especialista do grupo responde o cliente
     e aciona ferramentas (avançar etapa, escalar, registrar dados)."""

@@ -219,15 +219,32 @@ DO_PARCEIRO = [
     # Os casos da parceria, e o que se faz dentro deles
     r"^/api/v1/parceiro/casos$",
     r"^/api/v1/parceiro/caso/[^/]+$",
-    r"^/api/v1/parceiro/caso/[^/]+/(documentos|mensagens|tarefas|comentarios)$",
+    r"^/api/v1/parceiro/caso/[^/]+/(documentos|mensagens|tarefas)$",
     r"^/api/v1/parceiro/caso/[^/]+/documentos/[^/]+/baixar$",
     # Cadastrar causa nova: ela entra na esteira do escritório como
     # qualquer outra, e nasce com a parceria proposta por ele.
     r"^/api/v1/parceiro/casos/novo$",
+    # AS DUAS QUE NASCEM FECHADAS
+    #
+    # Alcançar a rota não é poder usá-la. Estas duas existem na lista
+    # porque o parceiro precisa receber uma recusa com explicação — e
+    # não um 403 seco de "esta área é do escritório", que o faria achar
+    # que errou de endereço.
+    #
+    # A autorização de verdade é conferida dentro da rota, lendo
+    # `pode_usar_ia` e `pode_falar_com_cliente` no cadastro dele. Nascem
+    # desligadas; só o administrador liga.
+    r"^/api/v1/parceiro/caso/[^/]+/cliente$",
+    r"^/api/v1/parceiro/caso/[^/]+/ia$",
     # O dinheiro dele — e só o dele
+    # A LISTA ACOMPANHA O QUE EXISTE
+    #
+    # Havia aqui `/parceiro/repasses` e `/parceiro/repasses/.../recibo`,
+    # rotas que eu previ e ainda não escrevi. Não é furo de segurança —
+    # rota inexistente devolve 404 —, mas é promessa na lista que
+    # ninguém cumpriu, e lista de permissão só serve enquanto se pode
+    # confiar que o que está nela existe. Voltam quando forem escritas.
     r"^/api/v1/parceiro/valores$",
-    r"^/api/v1/parceiro/repasses$",
-    r"^/api/v1/parceiro/repasses/[^/]+/recibo$",
     # Serventia geral que não revela nada de ninguém
     r"^/api/v1/cep/[^/]+$",
     r"^/api/v1/ia/estado$",
@@ -240,7 +257,7 @@ _PARCEIRO = [re.compile(p) for p in DO_PARCEIRO]
 # outra pessoa. O operador trabalha; quem decide quem trabalha é o dono.
 SO_DO_ADMIN = [
     r"^/api/v1/admin/acessos",
-    r"^/api/v1/admin/parceiros/[^/]+/(suspender|reativar)$",
+    r"^/api/v1/admin/parceiros/[^/]+/(suspender|reativar|permissoes)$",
     r"^/api/v1/equipe/[^/]+/(promover|rebaixar|remover)$",
 ]
 _SO_ADMIN = [re.compile(p) for p in SO_DO_ADMIN]

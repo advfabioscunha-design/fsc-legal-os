@@ -5,7 +5,7 @@ import time
 
 import httpx
 from fastapi import (FastAPI, Request, HTTPException, Header, UploadFile,
-                     File, BackgroundTasks)
+                     File, Form, BackgroundTasks)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -3665,6 +3665,11 @@ def parceiro_eu(authorization: str | None = Header(default=None)):
         "falta_cadastro": falta,
         "falta_dados_bancarios": sem_banco,
         "pode_receber": not falta and not sem_banco,
+        # A tela esconde o que não está liberado. Esconder é melhor do
+        # que mostrar desabilitado: botão apagado convida a perguntar
+        # por que não funciona, e a resposta é sempre a mesma.
+        "pode_usar_ia": bool(p.get("pode_usar_ia")),
+        "pode_falar_com_cliente": bool(p.get("pode_falar_com_cliente")),
     }
 
 
@@ -3790,9 +3795,11 @@ def parceiro_escrever(caso_id: str, body: RecadoDoParceiro,
     if not texto:
         raise HTTPException(400, "Escreva alguma coisa.")
     get_db().table("mensagens").insert({
-        "caso_id": caso_id, "canal": "CRM", "autor": "PARCEIRO",
-        # O nome vai no texto porque quem lê precisa saber de quem é o
-        # recado sem abrir o cadastro de ninguém.
+        # `autor` tem três valores no sistema inteiro: CLIENTE, AGENTE e
+        # HUMANO. Inventar um quarto aqui quebraria todo filtro que já
+        # existe por autor — e o parceiro É humano. Quem ele é fica no
+        # texto, que é onde quem lê procura.
+        "caso_id": caso_id, "canal": "CRM", "autor": "HUMANO",
         "conteudo": f"[parceiro · {p.get('nome')}] {texto}",
     }).execute()
     registrar_evento(caso_id, "PARCEIRO_ESCREVEU",
@@ -3814,7 +3821,8 @@ async def parceiro_anexar(caso_id: str, arquivo: UploadFile = File(...),
     if len(conteudo) > 25 * 1024 * 1024:
         raise HTTPException(400, "Arquivo acima de 25 MB.")
     nome = (arquivo.filename or "documento").replace("/", "-")[:120]
-    caminho = f"{caso_id}/parceiros/{uuid.uuid4().hex}-{nome}"
+    import uuid as _uuid
+    caminho = f"{caso_id}/parceiros/{_uuid.uuid4().hex}-{nome}"
     db.storage.from_(s.bucket_documentos).upload(
         caminho, conteudo,
         {"content-type": arquivo.content_type or "application/octet-stream",
@@ -3843,11 +3851,23 @@ def parceiro_criar_tarefa(caso_id: str, body: TarefaDoParceiro,
     _caso_do_parceiro(p["id"], caso_id)
     if not (body.titulo or "").strip():
         raise HTTPException(400, "A tarefa precisa de um título.")
+    # O ESQUEMA MANDA, NÃO O QUE EU IMAGINEI
+    #
+    # Escrevi esta inserção com uma coluna `prazo` que não existe, e com
+    # `origem` em texto livre. A tabela tem `data` (obrigatória, é quando
+    # fazer), `prazo_fatal` (o limite, quando há) e `origem` com lista
+    # fechada. Sem isto o insert estouraria na primeira tarefa criada por
+    # um parceiro — em produção, na frente dele.
+    from datetime import date as _date
+    quando = (body.prazo or "").strip() or _date.today().isoformat()
     get_db().table("tarefas").insert({
         "caso_id": caso_id, "titulo": body.titulo.strip()[:200],
-        "descricao": (body.descricao or "").strip(),
-        "prazo": body.prazo or None, "status": "ABERTA",
-        "origem": f"PARCEIRO:{p.get('nome')}",
+        "descricao": ((body.descricao or "").strip()
+                      + f"\n\n(criada pelo parceiro {p.get('nome')})").strip(),
+        "data": quando,
+        "prazo_fatal": (body.prazo or "").strip() or None,
+        "status": "ABERTA", "origem": "INTERNA",
+        "criado_por": f"PARCEIRO:{p.get('nome')}",
     }).execute()
     return {"ok": True}
 
@@ -3903,15 +3923,26 @@ def parceiro_novo_caso(body: CasoNovoDoParceiro,
             "origem": "PARCEIRO",
         }).execute().data[0]
 
-    caso = db.table("casos").insert({
-        "titulo": body.titulo.strip()[:200],
-        "area": (body.area or "OUTROS").upper(),
-        "descricao": (body.descricao or "").strip(),
+    # Os nomes das colunas são os do sistema, não os que eu suporia:
+    # `estado` é a fase da esteira, `grupo` é a área, `relato_inicial` é
+    # a descrição. A causa entra em TRIAGEM, como qualquer outra — causa
+    # que chega por parceiro passa pela mesma conferência das demais,
+    # senão a parceria vira porta dos fundos.
+    caso_novo = {
         "cliente_id": cli["id"],
-        "numero_processo": (body.numero_processo or "").strip() or None,
-        "fase": "TRIAGEM", "situacao": "ATIVO",
-        "origem": f"PARCEIRO:{p.get('nome')}",
-    }).execute().data[0]
+        "titulo": body.titulo.strip()[:200],
+        "estado": "TRIAGEM",
+        "situacao": "ATIVO",
+        "origem": "PARCEIRO",
+        "relato_inicial": (body.descricao or "").strip()
+                          or f"Causa trazida pelo parceiro {p.get('nome')}",
+    }
+    area = (body.area or "").strip().upper()
+    if area in _GRUPOS_VALIDOS:
+        caso_novo["grupo"] = area
+    if (body.numero_processo or "").strip():
+        caso_novo["numero_processo"] = body.numero_processo.strip()
+    caso = db.table("casos").insert(caso_novo).execute().data[0]
 
     db.table("parcerias").insert({
         "caso_id": caso["id"], "parceiro_id": p["id"],
@@ -3936,7 +3967,122 @@ def parceiro_novo_caso(body: CasoNovoDoParceiro,
     except Exception:
         pass
     return {"ok": True, "caso_id": caso["id"],
-            "numero": caso.get("numero_atendimento")}
+            "numero": caso.get("numero_atendimento")}  # pode vir por gatilho
+
+
+# ── AS DUAS PORTAS QUE O ADMINISTRADOR ABRE ─────────────────────
+#
+# Nascem fechadas. A recusa diz o motivo e para quem pedir: parceiro que
+# leva um "sem permissão" sem explicação escreve para o escritório
+# perguntando o que fez de errado, e isso custa mais tempo do que a
+# frase inteira.
+
+
+def _parceiro_pode(p: dict, chave: str, oque: str) -> None:
+    if p.get(chave):
+        return
+    raise HTTPException(
+        403, f"O escritório ainda não liberou {oque} para a sua parceria. "
+             f"Peça ao administrador — é uma chave no cadastro do parceiro.")
+
+
+@app.post("/api/v1/parceiro/caso/{caso_id}/cliente")
+def parceiro_fala_com_cliente(caso_id: str, body: RecadoDoParceiro,
+                              authorization: str | None = Header(default=None)):
+    """Mensagem do parceiro direto ao cliente, pelo canal do escritório.
+
+    Fechada ao nascer. O que sai daqui chega ao cliente como se viesse do
+    escritório — e quem responde pelo que o escritório diz é o escritório.
+
+    Quando liberada, a mensagem vai identificada: o cliente tem direito
+    de saber com quem está falando, e a identificação também protege o
+    parceiro de ser confundido com a equipe."""
+    p = _parceiro_do_token(authorization)
+    _parceiro_pode(p, "pode_falar_com_cliente", "falar direto com o cliente")
+    _caso_do_parceiro(p["id"], caso_id)
+    texto = (body.conteudo or "").strip()
+    if not texto:
+        raise HTTPException(400, "Escreva alguma coisa.")
+    oab = (f" (OAB {p.get('oab_numero')}/{p.get('oab_uf')})"
+           if p.get("oab_numero") else "")
+    get_db().table("mensagens").insert({
+        "caso_id": caso_id, "canal": "CLIENTE", "autor": "HUMANO",
+        "conteudo": f"{texto}\n\n— {p.get('nome')}{oab}, "
+                    f"advogado parceiro do escritório",
+    }).execute()
+    registrar_evento(caso_id, "PARCEIRO_FALOU_COM_CLIENTE",
+                     {"parceiro_id": p["id"], "nome": p.get("nome")})
+    return {"ok": True}
+
+
+class PerguntaDoParceiro(BaseModel):
+    pergunta: str
+
+
+@app.post("/api/v1/parceiro/caso/{caso_id}/ia")
+def parceiro_usa_ia(caso_id: str, body: PerguntaDoParceiro,
+                    authorization: str | None = Header(default=None)):
+    """Os agentes do escritório, a serviço do parceiro.
+
+    Fechada ao nascer, por dois motivos que não são de confiança: a
+    chamada gasta a conta de IA do escritório, e o que sai dela vira peça
+    com o timbre e a OAB de quem assina. Quem paga e quem assina é quem
+    autoriza.
+
+    Liberada, o uso fica registrado no caso — não para vigiar o parceiro,
+    mas porque consulta feita por IA é parte do histórico do processo e
+    precisa estar lá quando alguém perguntar de onde veio a tese."""
+    p = _parceiro_do_token(authorization)
+    _parceiro_pode(p, "pode_usar_ia", "o uso dos agentes de inteligência artificial")
+    _caso_do_parceiro(p["id"], caso_id)
+    pergunta = (body.pergunta or "").strip()
+    if len(pergunta) < 5:
+        raise HTTPException(400, "Escreva a sua pergunta.")
+
+    indisponivel = ia.indisponivel()
+    if indisponivel:
+        raise HTTPException(503, indisponivel.get("detalhe")
+                            or "A inteligência artificial está indisponível.")
+    from .agentes import especialista
+    try:
+        resposta = especialista.consultar(caso_id, pergunta, p.get("nome") or "parceiro")
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível consultar agora: {e}")
+    registrar_evento(caso_id, "PARCEIRO_CONSULTOU_IA",
+                     {"parceiro_id": p["id"], "nome": p.get("nome"),
+                      "pergunta": pergunta[:200]})
+    return {"ok": True, "resposta": resposta}
+
+
+@app.get("/api/v1/parceiro/caso/{caso_id}/documentos/{doc_id}/baixar")
+def parceiro_baixar_documento(caso_id: str, doc_id: str,
+                              authorization: str | None = Header(default=None)):
+    """Abre o documento do caso — conferindo as duas coisas.
+
+    O documento tem de ser DAQUELE caso, e o caso tem de ser da parceria.
+    Conferir só o caso deixaria passar um id de documento de outro
+    processo; conferir só o documento deixaria passar o caso de outro
+    parceiro. As duas perguntas, sempre."""
+    from fastapi.responses import Response
+    import mimetypes
+    p = _parceiro_do_token(authorization)
+    _caso_do_parceiro(p["id"], caso_id)
+    s = get_settings()
+    db = get_db()
+    d = (db.table("documentos").select("*").eq("id", doc_id)
+         .eq("caso_id", caso_id).maybe_single().execute().data)
+    if not d:
+        raise HTTPException(404, "Documento não encontrado neste caso.")
+    try:
+        conteudo = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível abrir o arquivo: {e}")
+    nome = (d.get("storage_path") or "documento").split("/")[-1]
+    tipo = mimetypes.guess_type(nome)[0] or "application/octet-stream"
+    registrar_evento(caso_id, "PARCEIRO_ABRIU_DOCUMENTO",
+                     {"parceiro_id": p["id"], "documento_id": doc_id})
+    return Response(content=conteudo, media_type=tipo,
+                    headers={"Content-Disposition": f'inline; filename="{nome}"'})
 
 
 @app.get("/api/v1/parceiro/valores")
