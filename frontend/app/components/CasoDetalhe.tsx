@@ -8,6 +8,96 @@ import { supabase } from "@/lib/supabaseClient";
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.fscadvocaciadigital.com.br";
 const GRUPOS = ["BANCARIO", "IMOBILIARIO", "TRABALHISTA", "PREVIDENCIARIO", "TRIBUTARIO", "CONSUMIDOR", "OUTROS"];
 
+/* A JORNADA INTEIRA EM UM CAMPO — da triagem ao arquivo.
+ *
+ * Esta lista parava no protocolo. Quem precisasse registrar que o
+ * processo foi para o segundo grau, ou que entrou em execução, não
+ * tinha onde: a fase judicial só se mexia na tela Judicializado, e a
+ * execução só pelo botão da tela de Recebimento. Então a pasta do caso
+ * — o lugar onde o advogado está quando LÊ a publicação e descobre o
+ * que mudou — era justamente o lugar onde ele não podia registrar.
+ *
+ * O VALOR CARREGA AS DUAS INFORMAÇÕES
+ *
+ * "JUDICIAL:SEGUNDO_GRAU" diz ao servidor duas coisas numa escolha: a
+ * fase do escritório (judicial) e o ponto do processo (2º grau). Para
+ * quem usa, é uma linha só — e é assim que ele pensa. O servidor
+ * desmonta e grava nas duas colunas; a separação é problema dele.
+ *
+ * AS DUAS FASES QUE EXIGEM NÚMERO DE PROCESSO
+ *
+ * Judicial e execução são recusadas sem número de processo, e a recusa
+ * agora aparece em tela. Não é burocracia: sem número não existe
+ * publicação para ler, e um caso "em 2º grau" que ninguém acompanha é
+ * pior que um caso parado — parece cuidado e não é.
+ */
+type OpcaoDeFase = { valor: string; rotulo: string };
+const FASES_PARA_MOVER: { grupo: string; opcoes: OpcaoDeFase[] }[] = [
+  {
+    grupo: "Triagem e produção",
+    opcoes: [
+      { valor: "QUALIFICACAO",  rotulo: "Qualificação" },
+      { valor: "PROPOSTA",      rotulo: "Proposta" },
+      { valor: "CONTRATO",      rotulo: "Contrato" },
+      { valor: "PAGAMENTO",     rotulo: "Pagamento" },
+      { valor: "COLETA_DOCS",   rotulo: "Coleta de documentos" },
+      { valor: "COLETA_PROVAS", rotulo: "Coleta de provas" },
+      { valor: "ANALISE",       rotulo: "Análise de viabilidade" },
+      { valor: "PETICAO",       rotulo: "Redação da petição" },
+      { valor: "REVISAO",       rotulo: "Revisão do advogado" },
+      { valor: "APROVADO",      rotulo: "Aprovada para protocolo" },
+      { valor: "PROTOCOLO_RPA", rotulo: "Na fila do protocolo" },
+      { valor: "PROTOCOLADO",   rotulo: "Protocolado" },
+      { valor: "AGENDADO",      rotulo: "Agendado com o advogado" },
+    ],
+  },
+  {
+    grupo: "Judicial — 1º grau",
+    opcoes: [
+      { valor: "JUDICIAL:PRIMEIRO_GRAU", rotulo: "1º grau — em andamento" },
+      { valor: "JUDICIAL:PRAZO_1G",      rotulo: "1º grau — prazo em aberto" },
+      { valor: "JUDICIAL:AUDIENCIA",     rotulo: "Audiência designada" },
+      { valor: "JUDICIAL:PERICIA",       rotulo: "Perícia" },
+      { valor: "JUDICIAL:CONCLUSO",      rotulo: "Concluso para decisão" },
+      { valor: "JUDICIAL:JULGADO_1G",    rotulo: "Julgado em 1º grau" },
+    ],
+  },
+  {
+    grupo: "Judicial — 2º grau e superiores",
+    opcoes: [
+      { valor: "JUDICIAL:SEGUNDO_GRAU",   rotulo: "2º grau — em andamento" },
+      { valor: "JUDICIAL:PRAZO_2G",       rotulo: "2º grau — prazo em aberto" },
+      { valor: "JUDICIAL:ACORDAO",        rotulo: "Acórdão publicado" },
+      { valor: "JUDICIAL:STJ",            rotulo: "STJ — recurso especial" },
+      { valor: "JUDICIAL:STF",            rotulo: "STF — recurso extraordinário" },
+      { valor: "TRANSITO_JULGADO:TRANSITO", rotulo: "Trânsito em julgado" },
+    ],
+  },
+  {
+    grupo: "Execução e encerramento",
+    opcoes: [
+      { valor: "RECEBIMENTO", rotulo: "Execução / recebimento" },
+      { valor: "CONCLUIDO",   rotulo: "Caso concluído" },
+      { valor: "ARQUIVADO",   rotulo: "Arquivar o caso" },
+    ],
+  },
+];
+
+const ROTULO_DA_FASE: Record<string, string> = Object.fromEntries(
+  FASES_PARA_MOVER.flatMap((g) => g.opcoes.map((o) => [o.valor, o.rotulo]))
+);
+
+/* O ponto do processo, escrito como gente fala. O cabeçalho mostrava
+   só o estado do escritório ("JUDICIAL"), que é a informação menos útil
+   das duas: saber que o caso está no judicial não diz se ele está
+   esperando audiência ou se já tem acórdão. */
+function rotuloJudicial(coluna?: string | null): string {
+  if (!coluna) return "";
+  return ROTULO_DA_FASE[`JUDICIAL:${coluna}`]
+    ?? ROTULO_DA_FASE[`TRANSITO_JULGADO:${coluna}`]
+    ?? coluna;
+}
+
 export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: string; onFechar: () => void; onMudou: () => void }) {
   const [caso, setCaso] = useState<any>(null);
   const [carregando, setCarregando] = useState(true);
@@ -701,10 +791,31 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
 
   async function moverFase() {
     if (!novaFase) return;
-    await fetch(`${API}/api/v1/casos/${casoId}/mover-fase`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fase: novaFase }),
-    });
+    const rotulo = ROTULO_DA_FASE[novaFase] ?? novaFase;
+    if (novaFase === "ARQUIVADO" && !window.confirm(
+      "Arquivar este caso?\n\nEle sai das esteiras e das telas de "
+      + "acompanhamento. A fase em que o processo parou continua "
+      + "registrada, e o caso pode ser reativado depois."
+    )) return;
+    /* A resposta era descartada: quando o servidor recusava o movimento
+       — "informe o número do processo antes de mover a fase" — o select
+       voltava ao normal e nada acontecia. Parecia botão quebrado, e o
+       motivo real estava dentro da resposta que ninguém lia. */
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/mover-fase`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fase: novaFase }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({} as any));
+        window.alert(`Não foi possível mover para ${rotulo}.\n\n`
+          + (d?.detail || `Erro ${r.status}.`));
+        return;
+      }
+    } catch {
+      window.alert("Não consegui falar com o servidor. Tente de novo.");
+      return;
+    }
     setNovaFase(""); onMudou(); carregar();
   }
 
@@ -752,7 +863,16 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
             )}
             <p className="text-xs text-white/55">
               {situacao !== "ATIVO" && <span className="mr-2 rounded bg-white/15 px-1.5 py-0.5">{situacao}</span>}
-              {caso?.estado} {ehEscritorio && <span className="text-[#C9A84C]">· ★ Escritório</span>}
+              {caso?.estado}
+              {caso?.fase_judicial && (
+                <span className="ml-2 text-white/75">
+                  · {rotuloJudicial(caso.fase_judicial)}
+                  {caso?.fase_judicial_fonte === "MANUAL" && (
+                    <span className="ml-1 text-white/40" title="Fase informada à mão — a leitura automática das publicações não mexe mais nela.">(à mão)</span>
+                  )}
+                </span>
+              )}
+              {ehEscritorio && <span className="text-[#C9A84C]"> · ★ Escritório</span>}
             </p>
           </div>
           <button onClick={onFechar} className="text-white/60 hover:text-white">✕</button>
@@ -1727,7 +1847,13 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
                 <select value={novaFase} onChange={(e) => setNovaFase(e.target.value)}
                   className="rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm">
                   <option value="">Mover para fase…</option>
-                  {["QUALIFICACAO", "PROPOSTA", "CONTRATO", "PAGAMENTO", "COLETA_DOCS", "COLETA_PROVAS", "ANALISE", "PETICAO", "REVISAO", "PROTOCOLADO"].map((f) => <option key={f} value={f}>{f}</option>)}
+                  {FASES_PARA_MOVER.map((g) => (
+                    <optgroup key={g.grupo} label={g.grupo}>
+                      {g.opcoes.map((o) => (
+                        <option key={o.valor} value={o.valor}>{o.rotulo}</option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
                 <button onClick={moverFase} className="rounded-lg bg-[#2D7DD2] px-3 py-2 text-sm font-semibold text-white hover:bg-[#256bb3]">Mover</button>
               </div>

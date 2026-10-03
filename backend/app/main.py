@@ -2638,6 +2638,241 @@ def excluir_folha(folha_id: str):
     return {"ok": True}
 
 
+# ══════════════════════════════════════════════════════════════════
+# CONTAS A RECEBER, A PAGAR E O FLUXO DE CAIXA
+# ══════════════════════════════════════════════════════════════════
+#
+# O que existia aqui anotava o que já tinha acontecido. Estas rotas
+# acrescentam a pergunta que um dono faz todo mês: o que vence, o que
+# atrasou, e quanto sobra no fim.
+
+
+class ContaNova(BaseModel):
+    tipo: str                         # ENTRADA | SAIDA
+    descricao: str
+    valor: float
+    vencimento: str | None = None
+    categoria: str | None = None
+    pessoa: str | None = None         # quem paga, ou a quem se paga
+    caso_id: str | None = None
+    cliente_id: str | None = None
+    documento: str | None = None
+    observacao: str | None = None
+    recorrente: bool = False
+    parcelas: int = 1
+
+
+@app.post("/api/v1/financeiro/contas")
+def criar_conta(body: ContaNova,
+                authorization: str | None = Header(default=None)):
+    """Lança uma conta a receber ou a pagar — inteira ou parcelada.
+
+    Cada parcela é um lançamento com o seu próprio vencimento, irmão das
+    outras por `grupo_parcelas`. Guardar o parcelamento como um registro
+    só, com um campo 'parcelas', obrigaria toda consulta de caixa a
+    calcular quanto cai em cada mês — e caixa que se calcula na hora é
+    caixa que diverge entre duas telas."""
+    import uuid as _uuid
+    from datetime import date as _date, timedelta as _td
+    perfil = _perfil_do_token(authorization)
+    tipo = (body.tipo or "").upper()
+    if tipo not in ("ENTRADA", "SAIDA"):
+        raise HTTPException(400, "O tipo é ENTRADA ou SAIDA.")
+    if not (body.descricao or "").strip():
+        raise HTTPException(400, "Descreva a conta.")
+    if float(body.valor or 0) <= 0:
+        raise HTTPException(400, "O valor precisa ser maior que zero.")
+    n = max(1, min(int(body.parcelas or 1), 60))
+
+    try:
+        venc = _date.fromisoformat((body.vencimento or "")[:10])
+    except Exception:
+        venc = _date.today()
+
+    db = get_db()
+    grupo = str(_uuid.uuid4()) if n > 1 else None
+    # O valor da parcela arredonda para baixo e a diferença vai na
+    # primeira: três parcelas de R$ 100,00 não podem somar R$ 99,99.
+    centavos = round(float(body.valor) * 100)
+    base = centavos // n
+    sobra = centavos - base * n
+
+    linhas = []
+    for i in range(n):
+        v = (base + (sobra if i == 0 else 0)) / 100
+        # Soma meses sem biblioteca: dia 31 em mês de 30 cai no dia 30,
+        # que é o que qualquer banco faz.
+        mes = venc.month - 1 + i
+        ano = venc.year + mes // 12
+        mes = mes % 12 + 1
+        dia = min(venc.day, [31, 29 if ano % 4 == 0 and (ano % 100 != 0 or ano % 400 == 0)
+                             else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1])
+        linhas.append({
+            "tipo": tipo, "categoria": body.categoria,
+            "descricao": (body.descricao.strip()
+                          + (f" ({i + 1}/{n})" if n > 1 else ""))[:300],
+            "valor": v, "data": _date.today().isoformat(),
+            "vencimento": _date(ano, mes, dia).isoformat(),
+            "pessoa": (body.pessoa or "").strip() or None,
+            "caso_id": body.caso_id, "cliente_id": body.cliente_id,
+            "documento": (body.documento or "").strip() or None,
+            "observacao": (body.observacao or "").strip() or None,
+            "recorrente": bool(body.recorrente) and n == 1,
+            "parcela": i + 1 if n > 1 else None,
+            "parcelas_total": n if n > 1 else None,
+            "grupo_parcelas": grupo,
+            "origem": "MANUAL", "criado_por": _quem_e(perfil),
+        })
+    db.table("fin_lancamentos").insert(linhas).execute()
+    return {"ok": True, "lancamentos": len(linhas)}
+
+
+class BaixaDaConta(BaseModel):
+    pago_em: str | None = None
+    forma_pagamento: str | None = None
+
+
+@app.post("/api/v1/financeiro/contas/{lanc_id}/baixar")
+def baixar_conta(lanc_id: str, body: BaixaDaConta,
+                 authorization: str | None = Header(default=None)):
+    """Marca como pago ou recebido. É a baixa que separa previsto de
+    realizado — sem ela, tudo fica eternamente 'a receber'."""
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    l = (db.table("fin_lancamentos").select("id,pago_em,descricao")
+         .eq("id", lanc_id).maybe_single().execute().data)
+    if not l:
+        raise HTTPException(404, "Lançamento não encontrado.")
+    if l.get("pago_em"):
+        return {"ok": True, "info": "Esta conta já estava baixada."}
+    db.table("fin_lancamentos").update({
+        "pago_em": (body.pago_em or _dt_agora()),
+        "forma_pagamento": (body.forma_pagamento or "").strip() or None,
+        "atualizado_em": _dt_agora(),
+    }).eq("id", lanc_id).execute()
+    return {"ok": True}
+
+
+@app.post("/api/v1/financeiro/contas/{lanc_id}/estornar")
+def estornar_conta(lanc_id: str,
+                   authorization: str | None = Header(default=None)):
+    """Desfaz a baixa. Existe porque errar o clique é comum, e a
+    alternativa seria apagar o lançamento — perdendo o histórico."""
+    _perfil_do_token(authorization)
+    get_db().table("fin_lancamentos").update({
+        "pago_em": None, "forma_pagamento": None,
+        "atualizado_em": _dt_agora(),
+    }).eq("id", lanc_id).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/financeiro/contas")
+def listar_contas(tipo: str | None = None, situacao: str | None = None,
+                  de: str | None = None, ate: str | None = None,
+                  limite: int = 400,
+                  authorization: str | None = Header(default=None)):
+    """As contas, com os totais que a tela mostra no alto.
+
+    Os totais vêm daqui e não da tela: duas somas calculadas em lugares
+    diferentes divergem no dia em que alguém mudar um filtro de um lado
+    só, e aí ninguém sabe qual número está certo."""
+    from datetime import date as _date
+    _perfil_do_token(authorization)
+    db = get_db()
+    q = db.table("fin_lancamentos").select("*")
+    if tipo:
+        q = q.eq("tipo", tipo.upper())
+    if de:
+        q = q.gte("vencimento", de)
+    if ate:
+        q = q.lte("vencimento", ate)
+    linhas = (q.order("vencimento", desc=False).limit(min(limite, 1000))
+              .execute().data or [])
+
+    hoje = _date.today().isoformat()
+    def _situacao(l):
+        if l.get("pago_em"):
+            return "PAGO"
+        v = (l.get("vencimento") or "")[:10]
+        if v and v < hoje:
+            return "VENCIDO"
+        return "ABERTO"
+
+    for l in linhas:
+        l["situacao"] = _situacao(l)
+    if situacao:
+        linhas = [l for l in linhas if l["situacao"] == situacao.upper()]
+
+    def _soma(filtro):
+        return round(sum(float(l.get("valor") or 0) for l in linhas if filtro(l)), 2)
+
+    return {
+        "contas": linhas,
+        "totais": {
+            "a_receber": _soma(lambda l: l["tipo"] == "ENTRADA" and l["situacao"] != "PAGO"),
+            "recebido": _soma(lambda l: l["tipo"] == "ENTRADA" and l["situacao"] == "PAGO"),
+            "a_pagar": _soma(lambda l: l["tipo"] == "SAIDA" and l["situacao"] != "PAGO"),
+            "pago": _soma(lambda l: l["tipo"] == "SAIDA" and l["situacao"] == "PAGO"),
+            "vencido_receber": _soma(lambda l: l["tipo"] == "ENTRADA" and l["situacao"] == "VENCIDO"),
+            "vencido_pagar": _soma(lambda l: l["tipo"] == "SAIDA" and l["situacao"] == "VENCIDO"),
+        },
+    }
+
+
+@app.get("/api/v1/financeiro/fluxo-caixa")
+def fluxo_de_caixa(meses: int = 6,
+                   authorization: str | None = Header(default=None)):
+    """Entradas, saídas e saldo, mês a mês — o realizado e o previsto.
+
+    Os dois juntos, e separados: previsto é o que está lançado e ainda
+    não aconteceu. Misturar os dois num número só é o jeito de o
+    escritório achar que tem dinheiro que ainda não entrou."""
+    from datetime import date as _date
+    _perfil_do_token(authorization)
+    db = get_db()
+    n = max(1, min(int(meses or 6), 24))
+
+    hoje = _date.today()
+    inicio_mes = hoje.month - (n - 1)
+    ano = hoje.year + (inicio_mes - 1) // 12
+    mes = (inicio_mes - 1) % 12 + 1
+    corte = _date(ano, mes, 1).isoformat()
+
+    linhas = (db.table("fin_lancamentos").select(
+        "tipo,valor,vencimento,data,pago_em")
+        .gte("vencimento", corte).limit(5000).execute().data or [])
+    # Lançamentos antigos não têm vencimento; para eles vale a data.
+    sem_venc = (db.table("fin_lancamentos").select(
+        "tipo,valor,vencimento,data,pago_em")
+        .is_("vencimento", "null").gte("data", corte)
+        .limit(5000).execute().data or [])
+
+    meses_mapa: dict[str, dict] = {}
+    for l in linhas + sem_venc:
+        quando = (l.get("vencimento") or l.get("data") or "")[:7]
+        if not quando:
+            continue
+        m = meses_mapa.setdefault(quando, {
+            "mes": quando, "entradas": 0.0, "saidas": 0.0,
+            "previsto_entradas": 0.0, "previsto_saidas": 0.0})
+        v = float(l.get("valor") or 0)
+        pago = bool(l.get("pago_em"))
+        if l.get("tipo") == "ENTRADA":
+            m["entradas" if pago else "previsto_entradas"] += v
+        else:
+            m["saidas" if pago else "previsto_saidas"] += v
+
+    saida = []
+    for m in sorted(meses_mapa.values(), key=lambda x: x["mes"]):
+        m = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in m.items()}
+        m["saldo"] = round(m["entradas"] - m["saidas"], 2)
+        m["saldo_previsto"] = round(
+            (m["entradas"] + m["previsto_entradas"])
+            - (m["saidas"] + m["previsto_saidas"]), 2)
+        saida.append(m)
+    return saida
+
+
 @app.get("/api/v1/financeiro/resumo")
 def financeiro_resumo(periodo: str = "mes"):
     from datetime import datetime, timedelta, date, timezone as tz
@@ -3157,10 +3392,22 @@ class MoverFase(BaseModel):
     fase: str | None = None
     destino: str | None = None
     motivo: str = ""
+    # A coluna do judicial (1º grau, 2º grau, acórdão, STJ…). Vem junto
+    # porque, para o advogado, "mover para segundo grau" é UM movimento —
+    # não "mover para judicial" e depois "corrigir a coluna". A tela pode
+    # mandar separado neste campo ou grudado na fase, "JUDICIAL:ACORDAO".
+    fase_judicial: str | None = None
 
     @property
     def alvo(self) -> str:
-        return (self.fase or self.destino or "").upper()
+        bruto = (self.fase or self.destino or "").upper()
+        return bruto.split(":", 1)[0].strip()
+
+    @property
+    def coluna_judicial(self) -> str:
+        bruto = (self.fase or self.destino or "").upper()
+        depois = bruto.split(":", 1)[1] if ":" in bruto else ""
+        return (depois or self.fase_judicial or "").strip().upper()
 
 
 class AjusteBody(BaseModel):
@@ -3189,33 +3436,82 @@ def retomar_producao(caso_id: str):
 
 @app.post("/api/v1/casos/{caso_id}/mover-fase")
 def mover_fase(caso_id: str, body: MoverFase):
-    """Mover o caso de fase à mão.
+    """Mover o caso de fase à mão — a jornada inteira, da triagem ao arquivo.
 
-    Dentro da esteira (triagem/contratos) segue valendo o movimento
-    livre: o advogado reinsere o caso no ponto certo depois de uma ação
-    humana. Já a entrada nas fases processuais passa pela controladoria,
-    que exige número de processo e respeita a máquina de estados —
-    judicializar um caso sem número seria criar um processo que ninguém
-    consegue acompanhar."""
+    UM CAMPO, TRÊS COISAS DIFERENTES
+    --------------------------------
+    O que o advogado chama de "fase do processo" o banco guarda em três
+    colunas, e ele não tem por que saber disso:
+
+      · `estado`        — a fase do ESCRITÓRIO (triagem, produção,
+                          judicial, execução). É a máquina de estados.
+      · `fase_judicial` — o ponto do PROCESSO dentro do juízo (1º grau,
+                          audiência, 2º grau, acórdão, STJ, trânsito).
+                          Muda toda semana, é lido das publicações.
+      · `situacao`      — se o caso está ativo, suspenso ou ARQUIVADO.
+
+    Então "mover para segundo grau" chega aqui como JUDICIAL:SEGUNDO_GRAU
+    e vira duas escritas; "arquivar" não mexe no estado, mexe na
+    situação. Separar isso na tela obrigaria o operador a aprender o
+    desenho interno do banco para registrar um fato que ele já sabe.
+
+    Fases processuais passam pela controladoria, que cobra o número do
+    processo — sem ele não há publicação para acompanhar. O pulo de
+    etapa é permitido no movimento manual (caso importado já em 2º grau
+    é a regra, não a exceção) e fica registrado no histórico.
+    """
     from .core.db import registrar_evento
     from .agentes import controladoria
+    from .agentes.fase_judicial import COLUNAS as COLUNAS_JUDICIAIS
     alvo = body.alvo
+    coluna = body.coluna_judicial
     if not alvo:
         raise HTTPException(400, "Informe a fase de destino.")
+    if coluna and coluna not in COLUNAS_JUDICIAIS:
+        raise HTTPException(400, f"Coluna do judicial '{coluna}' inválida.")
+
+    # ARQUIVAR não é estado, é situação: o caso sai da esteira e das
+    # telas, mas a fase em que ele parou continua registrada — é ela que
+    # diz o que aconteceu com o processo antes de ele ser guardado.
+    if alvo in ("ARQUIVADO", "ARQUIVAR"):
+        return _set_situacao(caso_id, "ARQUIVADO",
+                             body.motivo or "Arquivado pela pasta do caso",
+                             "CASO_ARQUIVADO")
+
+    # Coluna do judicial só existe dentro do judicial. Aceitar
+    # "PROPOSTA:ACORDAO" seria gravar que o processo está em acórdão num
+    # caso que ainda não foi protocolado.
+    if coluna and alvo not in ("JUDICIAL", "TRANSITO_JULGADO", "RECEBIMENTO"):
+        raise HTTPException(400, "A coluna do judicial só vale para casos já "
+                                 "judicializados.")
 
     if alvo in ("JUDICIAL", "RECEBIMENTO", "TRANSITO_JULGADO"):
         try:
-            r = controladoria.mover_fase(caso_id, alvo, body.motivo)
+            r = controladoria.mover_fase(caso_id, alvo, body.motivo, manual=True)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        if coluna:
+            from .agentes import fase_judicial as _fj
+            try:
+                _fj.mover_a_mao(caso_id, coluna,
+                                body.motivo or "fase informada pelo advogado")
+            except ValueError as e:
+                raise HTTPException(400, str(e))
         _avisar_fase(caso_id, alvo)
-        return {"ok": True, "novo_estado": alvo, **r}
+        return {"ok": True, "novo_estado": alvo,
+                "fase_judicial": coluna or None, **r}
 
     if alvo not in ORDEM_ESTEIRA and alvo not in ("CONCLUIDO", "AGENDADO"):
         raise HTTPException(400, f"Fase '{alvo}' inválida.")
-    get_db().table("casos").update({
-        "estado": alvo, "atualizado_em": datetime.now(_tz.utc).isoformat(),
-    }).eq("id", caso_id).execute()
+    campos = {"estado": alvo, "atualizado_em": datetime.now(_tz.utc).isoformat()}
+    # Voltando para a esteira, a coluna do judicial tem de ser apagada.
+    # Sem isto o caso vira uma contradição: estado "Revisão do advogado"
+    # e, no mesmo cabeçalho, "2º grau — em andamento". Quem lê acredita
+    # na parte errada.
+    if alvo != "CONCLUIDO":
+        campos.update({"fase_judicial": None, "fase_judicial_base": None,
+                       "fase_judicial_motivo": None, "fase_judicial_fonte": "AUTO"})
+    get_db().table("casos").update(campos).eq("id", caso_id).execute()
     registrar_evento(caso_id, "FASE_MOVIDA_MANUAL", {"fase": alvo})
     _avisar_fase(caso_id, alvo)
     return {"ok": True, "novo_estado": alvo}

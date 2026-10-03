@@ -153,9 +153,40 @@ def avancar_fases() -> dict:
     return {"para_judicial": para_judicial, "para_recebimento": para_recebimento}
 
 
-def mover_fase(caso_id: str, destino: str, motivo: str = "") -> dict:
-    """Mudança de fase pela mão do advogado (botões das telas)."""
-    if destino not in ("JUDICIAL", "RECEBIMENTO", "PROTOCOLADO"):
+# A data que cada fase processual grava no caso. A versão anterior
+# escrevia `judicial_em` para JUDICIAL e `recebimento_em` para TODO o
+# resto — então mover para PROTOCOLADO datava o recebimento de um caso
+# que ainda nem tinha sentença. Um mapa explícito não deixa isso
+# acontecer de novo quando aparecer a quinta fase.
+_SELO_DA_FASE = {
+    "PROTOCOLADO":      "protocolado_em",
+    "JUDICIAL":         "judicial_em",
+    "TRANSITO_JULGADO": "transito_em",
+    "RECEBIMENTO":      "recebimento_em",
+}
+
+# Fase processual sem número de processo é fase que ninguém acompanha:
+# não há publicação para ler, não há prazo para controlar.
+_PRECISAM_DE_NUMERO = ("JUDICIAL", "TRANSITO_JULGADO", "RECEBIMENTO")
+
+
+def mover_fase(caso_id: str, destino: str, motivo: str = "",
+               manual: bool = False) -> dict:
+    """Mudança de fase pela mão do advogado (botões das telas).
+
+    `manual=True` é quando QUEM OLHOU O PROCESSO está dizendo onde ele
+    está — e aí a máquina de estados deixa de ser um portão. Um caso
+    importado do PJe chega com o processo já em segundo grau; exigir que
+    ele passe por proposta, contrato e protocolo antes de poder ser
+    marcado como "2º grau" obrigaria o advogado a mentir sobre a
+    história do caso só para o sistema deixar registrar a verdade.
+
+    O que continua valendo, manual ou não, é o requisito do mundo real:
+    sem número de processo não existe fase processual. E o pulo fica
+    registrado no histórico — `pulou_etapas` —, porque caso que muda de
+    fase sem rastro é caso que ninguém consegue auditar depois.
+    """
+    if destino not in _SELO_DA_FASE:
         raise ValueError("Destino inválido.")
     db = get_db()
     # `.single()` levanta exceção quando não acha nada, e o que chegava
@@ -166,23 +197,26 @@ def mover_fase(caso_id: str, destino: str, motivo: str = "") -> dict:
     if not achados:
         raise ValueError("Caso não encontrado.")
     caso = achados[0]
-    if destino in ("JUDICIAL", "RECEBIMENTO") and not caso.get("numero_processo"):
+    if destino in _PRECISAM_DE_NUMERO and not caso.get("numero_processo"):
         raise ValueError("Informe o número do processo antes de mover a fase — "
                          "sem ele não há como acompanhar as publicações.")
-    # A máquina de estados continua mandando: mover à mão não é motivo
-    # para um caso pular da proposta direto para o recebimento.
     from .orquestrador import TRANSICOES
     atual = caso.get("estado")
-    if destino not in TRANSICOES.get(atual, []):
+    permitidos = TRANSICOES.get(atual, [])
+    pulou = destino not in permitidos
+    # Fora do movimento manual a máquina continua mandando: o agente não
+    # pula etapa, nunca.
+    if pulou and not manual:
         raise ValueError(f"Não dá para ir de {atual} para {destino}. "
                          f"Deste ponto o caso só pode seguir para: "
-                         f"{', '.join(TRANSICOES.get(atual, [])) or 'nenhum estado'}.")
+                         f"{', '.join(permitidos) or 'nenhum estado'}.")
     campos = {"estado": destino, "atualizado_em": _agora()}
-    campos["judicial_em" if destino == "JUDICIAL" else "recebimento_em"] = _agora()
+    campos[_SELO_DA_FASE[destino]] = _agora()
     db.table("casos").update(campos).eq("id", caso_id).execute()
     registrar_evento(caso_id, f"FASE_{destino}",
-                     {"de": caso.get("estado"), "manual": True, "motivo": motivo})
-    return {"ok": True, "de": caso.get("estado"), "para": destino}
+                     {"de": atual, "manual": True, "motivo": motivo,
+                      "pulou_etapas": pulou})
+    return {"ok": True, "de": atual, "para": destino, "pulou_etapas": pulou}
 
 
 # ── 4. Convites de agenda ───────────────────────────────────────
