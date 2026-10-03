@@ -3627,7 +3627,12 @@ def _parceiro_do_token(authorization: str | None) -> dict:
     p = parceria.parceiro_do_login(user["id"])
     if not p:
         raise HTTPException(403, "Este acesso é de advogado parceiro.")
-    if (p.get("status") or "ATIVO") != "ATIVO":
+    situacao = (p.get("status") or "ATIVO").upper()
+    if situacao == "PENDENTE":
+        raise HTTPException(
+            403, "Seu cadastro de parceiro está em análise pelo escritório. "
+                 "Assim que for aprovado, os casos da parceria aparecem aqui.")
+    if situacao != "ATIVO":
         raise HTTPException(
             403, "Sua parceria está suspensa. Fale com o escritório.")
     return p
@@ -3646,6 +3651,128 @@ def _caso_do_parceiro(parceiro_id: str, caso_id: str) -> dict:
     return c
 
 
+class QueroSerParceiro(BaseModel):
+    nome: str
+    cpf_cnpj: str
+    oab_numero: str
+    oab_uf: str
+    whatsapp: str | None = None
+    banco_nome: str | None = None
+    banco_codigo: str | None = None
+    agencia: str | None = None
+    conta: str | None = None
+    conta_tipo: str | None = None
+    pix_tipo: str | None = None
+    pix_chave: str | None = None
+
+
+@app.post("/api/v1/parceiro/quero-ser")
+def quero_ser_parceiro(body: QueroSerParceiro, request: Request,
+                       authorization: str | None = Header(default=None)):
+    """O advogado se declara parceiro no primeiro acesso.
+
+    NASCE PENDENTE, E ISSO É O PONTO
+
+    Qualquer pessoa com uma conta Google pode chegar nesta tela e dizer
+    que é advogado parceiro. Se a declaração já valesse, bastaria isso
+    para entrar na plataforma de um escritório de advocacia — e o
+    cadastro teria virado a fechadura e a chave ao mesmo tempo.
+
+    Então ela não vale sozinha. Cria o cadastro em PENDENTE, e pendente
+    não enxerga caso nenhum: a área abre dizendo que está em análise. A
+    aprovação é ato do escritório, e é lá que a OAB será conferida.
+
+    O papel em `perfis` muda para PARCEIRO desde já, de propósito: é o
+    que faz essa pessoa deixar de ser tratada como cliente e parar de
+    cair na área do cliente a cada login."""
+    user = _usuario_do_token(authorization)
+    db = get_db()
+
+    nome = (body.nome or "").strip()
+    if len(nome.split()) < 2:
+        raise HTTPException(400, "Informe o seu nome completo.")
+    oab_numero = "".join(c for c in (body.oab_numero or "") if c.isalnum())
+    oab_uf = (body.oab_uf or "").strip().upper()[:2]
+    if not oab_numero or len(oab_uf) != 2:
+        raise HTTPException(400, "Informe o número da OAB e a UF.")
+    cpf = "".join(c for c in (body.cpf_cnpj or "") if c.isdigit())
+    if len(cpf) not in (11, 14):
+        raise HTTPException(400, "Informe um CPF ou CNPJ válido.")
+
+    # Já existe cadastro para este login? Então é reenvio de formulário,
+    # não cadastro novo. Atualiza em vez de estourar na chave única.
+    ja = (db.table("parceiros").select("*")
+          .eq("auth_user_id", user["id"]).limit(1).execute().data or [None])[0]
+
+    # A MESMA OAB NÃO PODE TER DOIS CADASTROS
+    #
+    # O índice único no banco já impede, mas o erro que ele devolve é
+    # incompreensível para quem está preenchendo. Melhor perguntar antes
+    # e explicar: quase sempre é a pessoa que já se cadastrou e esqueceu.
+    outro = (db.table("parceiros").select("id,auth_user_id")
+             .eq("oab_numero", oab_numero).eq("oab_uf", oab_uf)
+             .limit(1).execute().data or [None])[0]
+    if outro and (not ja or outro["id"] != ja["id"]):
+        raise HTTPException(
+            409, f"Já existe cadastro de parceiro com a OAB {oab_numero}/"
+                 f"{oab_uf}. Se for o senhor, entre com a conta usada antes "
+                 f"ou fale com o escritório.")
+
+    campos = {
+        "auth_user_id": user["id"],
+        "nome": nome[:160],
+        "cpf_cnpj": cpf,
+        "oab_numero": oab_numero,
+        "oab_uf": oab_uf,
+        "email": (user.get("email") or "").strip().lower() or None,
+        "whatsapp": "".join(c for c in (body.whatsapp or "") if c.isdigit()) or None,
+        "banco_nome": (body.banco_nome or "").strip() or None,
+        "banco_codigo": (body.banco_codigo or "").strip() or None,
+        "agencia": (body.agencia or "").strip() or None,
+        "conta": (body.conta or "").strip() or None,
+        "conta_tipo": (body.conta_tipo or "").strip() or None,
+        "pix_tipo": (body.pix_tipo or "").strip() or None,
+        "pix_chave": (body.pix_chave or "").strip() or None,
+        "atualizado_em": _dt_agora(),
+    }
+    if ja:
+        db.table("parceiros").update(campos).eq("id", ja["id"]).execute()
+        parceiro_id = ja["id"]
+    else:
+        campos.update({"status": "PENDENTE",
+                       "cadastro_completo_em": _dt_agora(),
+                       "criado_por": "AUTOCADASTRO"})
+        parceiro_id = db.table("parceiros").insert(campos).execute().data[0]["id"]
+
+    # O papel muda agora. Sem isto, a pessoa volta a ser tratada como
+    # cliente no próximo login e cai na área errada, sem entender por quê.
+    try:
+        db.table("perfis").upsert({
+            "id": user["id"], "papel": "PARCEIRO",
+            "nome": nome[:160],
+            "email": (user.get("email") or "").strip().lower() or None,
+        }).execute()
+    except Exception as e:
+        print(f"[parceiro] papel nao gravado: {e}")
+
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else None)
+    try:
+        db.table("registro_de_acessos").insert({
+            "quem_fez": nome, "acao": "AUTOCADASTRO_PARCEIRO",
+            "alvo_tipo": "PARCEIRO", "alvo_id": parceiro_id, "alvo_nome": nome,
+            "detalhe": {"oab": f"{oab_numero}/{oab_uf}", "ip": ip,
+                        "email": user.get("email")},
+        }).execute()
+    except Exception:
+        pass
+
+    return {"ok": True, "parceiro_id": parceiro_id,
+            "status": "PENDENTE" if not ja else (ja.get("status") or "PENDENTE"),
+            "aviso": "Cadastro enviado. O escritório vai conferir a sua OAB e "
+                     "liberar o acesso aos casos da parceria."}
+
+
 @app.get("/api/v1/parceiro/eu")
 def parceiro_eu(authorization: str | None = Header(default=None)):
     """Quem sou eu, e o meu cadastro está completo?
@@ -3653,7 +3780,21 @@ def parceiro_eu(authorization: str | None = Header(default=None)):
     O cadastro incompleto não bloqueia o acesso: bloqueia o repasse. O
     parceiro trabalha enquanto providencia a chave PIX; o que não pode é
     o escritório descobrir que falta dado bancário no dia do pagamento."""
-    p = _parceiro_do_token(authorization)
+    # ESTA ROTA NÃO USA A TRAVA, DE PROPÓSITO
+    #
+    # `_parceiro_do_token` recusa quem está PENDENTE ou SUSPENSO — e é
+    # exatamente essa pessoa que precisa abrir a tela para LER que está
+    # pendente. Usar a trava aqui produziria o pior resultado possível:
+    # o advogado se cadastra, entra, e leva um 403 sem explicação, sem
+    # saber se errou alguma coisa ou se o escritório o rejeitou.
+    #
+    # O que esta rota devolve não é sigiloso: é o cadastro da própria
+    # pessoa e a situação dele. As rotas que mostram CASO continuam
+    # atrás da trava.
+    user = _usuario_do_token(authorization)
+    p = parceria.parceiro_do_login(user["id"])
+    if not p:
+        raise HTTPException(404, "Não há cadastro de parceiro para este acesso.")
     falta = [c for c in ("nome", "oab_numero", "oab_uf", "cpf_cnpj")
              if not (p.get(c) or "").strip()]
     sem_banco = not ((p.get("pix_chave") or "").strip()
@@ -3661,7 +3802,9 @@ def parceiro_eu(authorization: str | None = Header(default=None)):
     return {
         "id": p["id"], "nome": p.get("nome"),
         "oab": f"{p.get('oab_numero') or ''}/{p.get('oab_uf') or ''}".strip("/"),
-        "email": p.get("email"), "status": p.get("status"),
+        "email": p.get("email"),
+        "status": (p.get("status") or "PENDENTE").upper(),
+        "em_analise": (p.get("status") or "PENDENTE").upper() == "PENDENTE",
         "falta_cadastro": falta,
         "falta_dados_bancarios": sem_banco,
         "pode_receber": not falta and not sem_banco,

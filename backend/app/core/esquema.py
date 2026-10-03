@@ -60,6 +60,8 @@ O_QUE_PARA = {
     "0061": "registrar o aceite dos termos quando o cliente cria o acesso",
     "0062": "os advogados parceiros, a divisão de honorários e o controle "
             "de acesso por caso",
+    "0063": "o papel PARCEIRO no tipo papel_usuario — sem ele o cadastro "
+            "do advogado parceiro não consegue gravar o papel",
 }
 
 # As mensagens que o PostgREST devolve quando o nome não existe.

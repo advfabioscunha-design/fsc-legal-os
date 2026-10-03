@@ -51,6 +51,20 @@ export default function Completar() {
   const [aceitaPrivacidade, setAceitaPrivacidade] = useState(false);
   const [revalidando, setRevalidando] = useState(false);
 
+  /* QUEM É ESTA PESSOA, AFINAL
+     A mesma porta serve ao cliente e ao advogado parceiro — os dois
+     entram com o Google, e o sistema não tem como adivinhar. Perguntar
+     é mais honesto do que supor, e a resposta muda a tela inteira. */
+  const [sou, setSou] = useState<"cliente" | "parceiro">("cliente");
+  const [oabNumero, setOabNumero] = useState("");
+  const [oabUf, setOabUf] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [pixTipo, setPixTipo] = useState("");
+  const [pixChave, setPixChave] = useState("");
+  const [bancoNome, setBancoNome] = useState("");
+  const [agencia, setAgencia] = useState("");
+  const [conta, setConta] = useState("");
+
   useEffect(() => {
     let vivo = true;
     (async () => {
@@ -99,6 +113,62 @@ export default function Completar() {
     })();
     return () => { vivo = false; };
   }, [router]);
+
+  /* O CAMINHO DO PARCEIRO
+     Não passa pelo cadastro de cliente: são dados diferentes, tabela
+     diferente e um desfecho diferente — o dele fica em análise até o
+     escritório conferir a OAB. */
+  async function enviarComoParceiro() {
+    setErro("");
+    const limpo = nome.trim().replace(/\s+/g, " ");
+    if (limpo.split(" ").filter((x) => x.length > 1).length < 2) {
+      setErro("Escreva o seu nome completo, como consta na OAB.");
+      return;
+    }
+    if (!oabNumero.trim() || oabUf.trim().length !== 2) {
+      setErro("Informe o número da OAB e a UF (duas letras).");
+      return;
+    }
+    const soCpf = cpf.replace(/\D/g, "");
+    if (soCpf.length !== 11 && soCpf.length !== 14) {
+      setErro("Informe um CPF ou CNPJ válido.");
+      return;
+    }
+    if (!aceitaTermos || !aceitaPrivacidade) {
+      setErro("Para concluir, marque que aceita os Termos de Uso e a "
+              + "Política de Privacidade.");
+      return;
+    }
+    setSalvando(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) { router.replace("/entrar"); return; }
+      const r = await fetch(`${API}/api/v1/parceiro/quero-ser`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json",
+                   Authorization: `Bearer ${data.session.access_token}` },
+        body: JSON.stringify({
+          nome: limpo, cpf_cnpj: soCpf,
+          oab_numero: oabNumero.trim(), oab_uf: oabUf.trim().toUpperCase(),
+          whatsapp: fone.replace(/\D/g, "") || null,
+          banco_nome: bancoNome.trim() || null,
+          agencia: agencia.trim() || null,
+          conta: conta.trim() || null,
+          pix_tipo: pixTipo || null,
+          pix_chave: pixChave.trim() || null,
+        }),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) { setErro(d.detail || "Não consegui enviar o cadastro."); return; }
+      try { await supabase.auth.updateUser({ data: { nome: limpo } }); } catch { }
+      marcarConcluido();
+      router.replace("/parceiro");
+    } catch {
+      setErro("Falha de conexão. Tente de novo em instantes.");
+    } finally {
+      setSalvando(false);
+    }
+  }
 
   async function concluir() {
     setErro("");
@@ -200,9 +270,38 @@ export default function Completar() {
             <h1 className="mt-2 font-display text-lg font-bold text-[#0A1628]">
               Falta pouco para concluir
             </h1>
-            <p className="mt-2 text-sm leading-relaxed text-black/60">
-              Seu acesso já está criado. Confirme como você se chama e um
-              telefone para o escritório falar com você. São só estes dois.
+
+            {/* A PERGUNTA QUE MUDA TUDO
+
+                A mesma porta serve ao cliente e ao advogado parceiro: os
+                dois entram com o Google, e o sistema não tem como
+                adivinhar qual é qual. Supor que todo mundo é cliente
+                obrigaria o advogado a terminar um cadastro que não é o
+                dele para depois pedir outro — e é assim que se perde um
+                parceiro antes do primeiro caso.
+
+                Fica em cima de tudo, antes de qualquer campo, porque a
+                resposta decide o que será pedido a seguir. */}
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {([["cliente", "Sou cliente"],
+                 ["parceiro", "Sou advogado parceiro"]] as const).map(([v, r]) => (
+                <button key={v} type="button" onClick={() => { setSou(v); setErro(""); }}
+                  className={`rounded-xl border px-3 py-3 text-xs font-semibold leading-tight transition ${
+                    sou === v
+                      ? "border-[#C9A84C] bg-[#C9A84C]/10 text-[#0A1628]"
+                      : "border-black/10 bg-white text-black/55 hover:border-black/25"}`}>
+                  {r}
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-3 text-sm leading-relaxed text-black/60">
+              {sou === "cliente"
+                ? "Seu acesso já está criado. Confirme como você se chama e um "
+                  + "telefone para o escritório falar com você. São só estes dois."
+                : "Como parceiro, o senhor precisa informar a OAB e os dados "
+                  + "para o repasse dos honorários. O escritório confere a "
+                  + "inscrição antes de liberar os casos."}
             </p>
 
             <div className="mt-5 space-y-3">
@@ -221,9 +320,74 @@ export default function Completar() {
                   placeholder="(69) 99999-9999"
                   className={`mt-1 ${campo}`} />
                 <span className="mt-1 block text-[11px] leading-relaxed text-black/45">
-                  É por aqui que chegam o aviso de prazo e o pedido de documento.
+                  {sou === "cliente"
+                    ? "É por aqui que chegam o aviso de prazo e o pedido de documento."
+                    : "É por aqui que o escritório fala com o senhor sobre os casos."}
                 </span>
               </label>
+
+              {sou === "parceiro" && (
+                <>
+                  <div className="grid grid-cols-[1fr_5rem] gap-2">
+                    <label className="block">
+                      <span className="text-xs text-black/50">Número da OAB</span>
+                      <input value={oabNumero} inputMode="numeric"
+                        onChange={(e) => setOabNumero(e.target.value.replace(/[^0-9A-Za-z]/g, ""))}
+                        placeholder="123456" className={`mt-1 ${campo}`} />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs text-black/50">UF</span>
+                      <input value={oabUf} maxLength={2}
+                        onChange={(e) => setOabUf(e.target.value.replace(/[^A-Za-z]/g, "").toUpperCase())}
+                        placeholder="RO" className={`mt-1 ${campo}`} />
+                    </label>
+                  </div>
+
+                  <label className="block">
+                    <span className="text-xs text-black/50">CPF ou CNPJ</span>
+                    <input value={cpf} inputMode="numeric"
+                      onChange={(e) => setCpf(e.target.value)}
+                      placeholder="000.000.000-00" className={`mt-1 ${campo}`} />
+                  </label>
+
+                  {/* OS DADOS DO REPASSE, PEDIDOS AGORA
+
+                      Perguntar a chave PIX no dia do acerto é o jeito
+                      certo de atrasar o pagamento de quem já trabalhou.
+                      Ficam opcionais aqui porque não impedem ninguém de
+                      começar — só impedem o escritório de pagar. */}
+                  <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
+                    <p className="text-xs font-semibold text-[#0A1628]">
+                      Para onde vai o seu repasse
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-black/45">
+                      Pode deixar para depois, mas sem isso o escritório não
+                      consegue repassar a sua parte.
+                    </p>
+                    <div className="mt-2.5 grid grid-cols-[6.5rem_1fr] gap-2">
+                      <select value={pixTipo} onChange={(e) => setPixTipo(e.target.value)}
+                        className={campo}>
+                        <option value="">Chave PIX</option>
+                        <option value="CPF">CPF</option>
+                        <option value="CNPJ">CNPJ</option>
+                        <option value="EMAIL">E-mail</option>
+                        <option value="TELEFONE">Telefone</option>
+                        <option value="ALEATORIA">Aleatória</option>
+                      </select>
+                      <input value={pixChave} onChange={(e) => setPixChave(e.target.value)}
+                        placeholder="a chave" className={campo} />
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <input value={bancoNome} onChange={(e) => setBancoNome(e.target.value)}
+                        placeholder="Banco" className={campo} />
+                      <input value={agencia} onChange={(e) => setAgencia(e.target.value)}
+                        placeholder="Agência" className={campo} />
+                      <input value={conta} onChange={(e) => setConta(e.target.value)}
+                        placeholder="Conta" className={campo} />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* O ACEITE, ANTES DO BOTÃO
@@ -281,11 +445,20 @@ export default function Completar() {
               </p>
             )}
 
-            <button onClick={concluir}
+            <button onClick={sou === "parceiro" ? enviarComoParceiro : concluir}
               disabled={salvando || !aceitaTermos || !aceitaPrivacidade}
               className="mt-4 w-full rounded-lg bg-[#C9A84C] px-4 py-3 text-sm font-bold text-[#0A1628] transition hover:bg-[#d8b95e] disabled:cursor-not-allowed disabled:opacity-40">
-              {salvando ? "Salvando…" : "Concluir e acessar a plataforma"}
+              {salvando ? "Enviando…"
+                : sou === "parceiro" ? "Enviar cadastro de parceiro"
+                : "Concluir e acessar a plataforma"}
             </button>
+
+            {sou === "parceiro" && (
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-black/45">
+                O escritório confere a sua inscrição na OAB antes de liberar os
+                casos. O senhor é avisado quando isso acontecer.
+              </p>
+            )}
 
             <p className="mt-4 text-[11px] leading-relaxed text-black/40">
               Criar acesso não é contratar o escritório: a contratação tem

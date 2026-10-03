@@ -262,6 +262,26 @@ DO_PARCEIRO = [
 ]
 _PARCEIRO = [re.compile(p) for p in DO_PARCEIRO]
 
+# ── O QUE QUALQUER PESSOA IDENTIFICADA ALCANÇA ──────────────────
+#
+# Lista curta de propósito. São rotas que uma pessoa já autenticada
+# chama ANTES de ter papel definido — o momento entre "entrei com o
+# Google" e "o sistema sabe o que eu sou".
+#
+# Declarar-se parceiro está aqui porque, no instante em que o advogado
+# clica em "sou parceiro do escritório", ele ainda é CLIENTE aos olhos
+# do sistema. Se a rota exigisse papel de parceiro, ninguém jamais
+# conseguiria se tornar um.
+#
+# O que isso NÃO dá: acesso a caso nenhum. A declaração cria um cadastro
+# PENDENTE, e pendente não vê processo. Quem aprova é o escritório.
+DE_QUEM_ESTA_ENTRANDO = [
+    r"^/api/v1/parceiro/quero-ser$",
+    r"^/api/v1/meu-perfil$",
+]
+_ENTRANDO = [re.compile(p) for p in DE_QUEM_ESTA_ENTRANDO]
+
+
 # ── O QUE SÓ O ADMINISTRADOR FAZ ────────────────────────────────
 #
 # Conceder acesso, retirar acesso e passar a chave do escritório a
@@ -292,6 +312,10 @@ def checar(request: Request) -> dict | None:
         raise HTTPException(401, "Sessão expirada. Entre de novo.")
 
     papel = usuario.get("papel")
+
+    # Quem acabou de entrar, antes de o sistema saber o que ele é.
+    if any(p.match(caminho) for p in _ENTRANDO):
+        return usuario
 
     # O PARCEIRO ANTES DE TUDO
     #

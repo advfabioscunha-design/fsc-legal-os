@@ -140,11 +140,20 @@ export default function Entrada() {
          o acesso à operação é concedido de dentro da plataforma, por
          quem já é administrador, e não por quem chegou com um Gmail. */
       let daEquipe = false;
+      let ehParceiro = false;
       try {
         const { data: perfil } = await supabase
           .from("perfis").select("papel").eq("id", sessao.user.id).maybeSingle();
-        daEquipe = ["OPERADOR", "ADMIN"].includes((perfil as any)?.papel);
+        const papel = (perfil as any)?.papel;
+        daEquipe = ["OPERADOR", "ADMIN"].includes(papel);
+        ehParceiro = papel === "PARCEIRO";
       } catch { daEquipe = false; }
+
+      /* O PARCEIRO TEM CASA PRÓPRIA
+         Sem esta linha ele cairia na tela de conclusão de cadastro de
+         CLIENTE a cada login — pedindo nome e WhatsApp que ele já deu,
+         num formulário que não é o dele. */
+      if (ehParceiro) { router.replace("/parceiro"); return; }
 
       if (!vivo) return;
 
