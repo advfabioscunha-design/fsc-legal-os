@@ -95,6 +95,9 @@ export default function Intimacoes() {
   const [rodando, setRodando] = useState(false);
   const [aviso, setAviso] = useState("");
   const [aberta, setAberta] = useState<string | null>(null);
+  const [corrigindo, setCorrigindo] = useState("");   // id do prazo em correção
+  const [novaData, setNovaData] = useState("");
+  const [motivoPrazo, setMotivoPrazo] = useState("");
 
   function load() {
     setLoading(true);
@@ -167,6 +170,28 @@ export default function Intimacoes() {
 
   async function concluir(id: string) {
     await fetch(`${API}/api/v1/prazos/${id}?status=CONCLUIDO`, { method: "PATCH" });
+    load();
+  }
+
+  /* Corrige a data fatal de um prazo lido da publicação.
+     `novaData` começa vazia porque o campo abre já preenchido com a data
+     atual: não mexer no campo significa "manter", e aí não há o que
+     salvar — mandar a data antiga de volta geraria um registro de
+     alteração no histórico do caso para uma alteração que não houve. */
+  async function corrigirPrazo(p: any) {
+    const data = novaData || String(p.prazo_fatal || "").slice(0, 10);
+    if (!data) { setAviso("Informe a nova data fatal."); return; }
+    const r = await fetch(`${API}/api/v1/prazos/${p.id}/ajustar`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prazo_fatal: data, motivo: motivoPrazo, quem: "escritório" }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({} as any));
+      setAviso(d?.detail || "Não consegui alterar o prazo.");
+      return;
+    }
+    setCorrigindo(""); setNovaData(""); setMotivoPrazo("");
+    setAviso("Prazo corrigido. O dia de trabalho foi recalculado e a mudança entrou no histórico do caso.");
     load();
   }
 
@@ -272,11 +297,45 @@ export default function Intimacoes() {
                       abrir caso
                     </Link>
                   )}
+                  {/* A tela dizia "prazo estimado — conferir no processo" e não
+                      oferecia onde escrever a data conferida. Avisar do erro
+                      sem dar o conserto é o pior dos dois mundos: a pessoa lê,
+                      confere no processo, e precisa procurar outra tela para
+                      corrigir — ou desiste e deixa a data errada. */}
+                  <button onClick={() => setCorrigindo(corrigindo === p.id ? "" : p.id)}
+                    className="rounded-md border border-[#C9A84C]/40 px-3 py-1.5 text-xs font-semibold text-[#C9A84C] hover:bg-[#C9A84C]/10">
+                    {corrigindo === p.id ? "fechar" : "corrigir prazo"}
+                  </button>
                   <button onClick={() => concluir(p.id)}
                     className="rounded-md bg-[#1DB954] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#17a349]">
                     cumprido
                   </button>
                 </div>
+
+                {corrigindo === p.id && (
+                  <div className="w-full border-t border-white/10 pt-2">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="text-[11px] text-white/55">Nova data fatal
+                        <input type="date" defaultValue={String(p.prazo_fatal || "").slice(0, 10)}
+                          onChange={(e) => setNovaData(e.target.value)}
+                          className="mt-1 block rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm text-white" />
+                      </label>
+                      <label className="min-w-[200px] flex-1 text-[11px] text-white/55">Motivo
+                        <input onChange={(e) => setMotivoPrazo(e.target.value)}
+                          placeholder="feriado local, suspensão de expediente…"
+                          className="mt-1 block w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm text-white" />
+                      </label>
+                      <button onClick={() => corrigirPrazo(p)}
+                        className="rounded-lg bg-[#C9A84C] px-4 py-2 text-xs font-bold text-[#0A1628] hover:brightness-110">
+                        Salvar
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[11px] text-white/35">
+                      O dia de trabalho acompanha a nova data (dois dias úteis antes)
+                      e a alteração entra no histórico do caso.
+                    </p>
+                  </div>
+                )}
               </div>
             ))}
           </section>

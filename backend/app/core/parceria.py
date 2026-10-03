@@ -185,3 +185,113 @@ def calcular_parte(percentual: float, honorarios_contratuais: float,
         "percentual": round(float(percentual or 0), 2),
         "valor_devido": round((base_c + base_s) * pct, 2),
     }
+
+
+# ── DA PRESTAÇÃO DE CONTAS PARA A CONTA A PAGAR ─────────────────
+#
+# Fechar o caso com o cliente e lembrar de pagar o parceiro eram dois
+# atos separados, e o segundo dependia da memória de alguém. Dívida que
+# depende de memória é dívida que atrasa — e atraso com parceiro não
+# custa juros, custa o parceiro.
+#
+# TRÊS CUIDADOS QUE NÃO SÃO OPCIONAIS
+#
+# 1. FALHA FECHADA. Se não der para ler as parcerias, isto levanta erro
+#    e a prestação de contas não conclui. O contrário — seguir em frente
+#    com a lista vazia — fecharia o caso sem a dívida do parceiro, e
+#    ninguém descobriria: não há tela que mostre um repasse que nunca
+#    foi criado. `parceiros_do_caso` devolve [] quando falha, e é por
+#    isso que esta função não usa aquela.
+#
+# 2. UMA VEZ SÓ. Se já existe repasse desta prestação para esta
+#    parceria, não cria outro. Prestação de contas é refeita (valor
+#    corrigido, resultado reescrito), e cada refação viraria uma segunda
+#    conta a pagar do mesmo dinheiro.
+#
+# 3. NADA A PAGAR NÃO É CONTA. Parceria com percentual zero, ou caso sem
+#    honorário recebido, não gera lançamento — conta a pagar de R$ 0,00
+#    só suja a lista de quem confere.
+
+def provisionar_repasses(prestacao_id: str, caso_id: str,
+                         honorarios_contratuais: float,
+                         honorarios_sucumbenciais: float,
+                         criado_por: str = "") -> list[dict]:
+    """Cria a dívida com cada parceiro do caso: um `repasses_parceiro` e a
+    conta a pagar correspondente em `fin_lancamentos`.
+
+    Devolve a lista do que foi provisionado, para o escritório ver na
+    hora o que passou a deve a quem."""
+    from datetime import date
+
+    db = get_db()
+    # Sem try/except de propósito: ver cuidado 1 acima.
+    vivas = (db.table("parcerias").select("*")
+             .eq("caso_id", caso_id)
+             .is_("encerrada_em", "null").execute().data or [])
+    if not vivas:
+        return []
+
+    ja_feitos = {r.get("parceria_id") for r in (
+        db.table("repasses_parceiro").select("parceria_id")
+        .eq("prestacao_id", prestacao_id).execute().data or [])}
+
+    hoje = date.today().isoformat()
+    feitos: list[dict] = []
+
+    for p in vivas:
+        if p["id"] in ja_feitos:
+            continue
+        conta = calcular_parte(p.get("percentual"),
+                              honorarios_contratuais, honorarios_sucumbenciais,
+                              bool(p.get("inclui_sucumbencia", True)))
+        if conta["valor_devido"] <= 0:
+            continue
+
+        quem = (db.table("parceiros").select("id,nome,pix_tipo,pix_chave,"
+                                             "banco_nome,agencia,conta")
+                .eq("id", p["parceiro_id"]).maybe_single().execute().data or {})
+        nome = quem.get("nome") or "parceiro"
+        numero = (db.table("casos").select("numero_atendimento,numero_processo")
+                  .eq("id", caso_id).maybe_single().execute().data or {})
+        ref = numero.get("numero_processo") or numero.get("numero_atendimento") or ""
+
+        lanc = db.table("fin_lancamentos").insert({
+            "tipo": "SAIDA", "categoria": "REPASSE_PARCEIRO",
+            "descricao": f"Repasse a {nome} — {conta['percentual']:.2f}% "
+                         f"do caso {ref}".strip(),
+            "valor": conta["valor_devido"],
+            "data": hoje, "vencimento": hoje,
+            "caso_id": caso_id, "parceiro_id": p["parceiro_id"],
+            "pessoa": nome, "origem": "REPASSE",
+            "criado_por": criado_por or "sistema",
+        }).execute().data[0]
+
+        repasse = db.table("repasses_parceiro").insert({
+            "prestacao_id": prestacao_id, "caso_id": caso_id,
+            "parceiro_id": p["parceiro_id"], "parceria_id": p["id"],
+            "base_contratual": conta["base_contratual"],
+            "base_sucumbencia": conta["base_sucumbencia"],
+            "percentual": conta["percentual"],
+            "valor_devido": conta["valor_devido"],
+            "lancamento_id": lanc["id"],
+        }).execute().data[0]
+
+        # Os dados de pagamento vão junto na resposta porque é exatamente
+        # a hora em que alguém vai pagar: obrigar a abrir outra tela para
+        # descobrir o PIX do parceiro é o que faz o repasse esperar.
+        feitos.append({**repasse, "parceiro_nome": nome,
+                       "pix_tipo": quem.get("pix_tipo"),
+                       "pix_chave": quem.get("pix_chave"),
+                       "banco_nome": quem.get("banco_nome"),
+                       "agencia": quem.get("agencia"),
+                       "conta": quem.get("conta"),
+                       "falta_dados_de_pagamento": not (
+                           quem.get("pix_chave") or quem.get("conta"))})
+
+    if feitos:
+        from .db import registrar_evento
+        registrar_evento(caso_id, "REPASSES_PROVISIONADOS", {
+            "quantos": len(feitos),
+            "total": round(sum(float(f["valor_devido"]) for f in feitos), 2),
+        })
+    return feitos

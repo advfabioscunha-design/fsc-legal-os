@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import smtplib
 import ssl
-from datetime import datetime, timedelta, timezone as _tz
+from datetime import date as _date, datetime, timedelta, timezone as _tz
 from email.message import EmailMessage
 
 import httpx
 
+from ..core import parceria as _parceria
 from ..core.config import get_settings
 from ..core.db import get_db, registrar_evento
 
@@ -674,6 +675,51 @@ def prestacao_de_contas(caso_id: str, valores: dict) -> dict:
         "historico": historico,
     }).execute().data[0]
 
+    # ── O DINHEIRO ENTRA NO CAIXA, E A DÍVIDA COM O PARCEIRO NASCE ──
+    #
+    # Até aqui a prestação de contas era só um e-mail: o honorário
+    # recebido não aparecia no caixa do escritório e a parte do parceiro
+    # dependia de alguém lembrar de pagar. Os dois ficavam fora do
+    # sistema justamente no momento em que o sistema tem a informação
+    # completa — e um escritório que não sabe o que recebeu não sabe se
+    # está ganhando dinheiro.
+    #
+    # ORDEM DE PROPÓSITO: o repasse ao parceiro vem ANTES da entrada no
+    # caixa. Se as parcerias não puderem ser lidas, isto levanta erro e a
+    # prestação para — melhor o advogado ver a falha e repetir o
+    # fechamento do que encerrar o caso deixando a dívida com o parceiro
+    # sem nascer, invisível para sempre.
+    repasses = _parceria.provisionar_repasses(
+        registro["id"], caso_id, hc, hs,
+        criado_por=valores.get("quem") or "prestação de contas")
+
+    # A entrada no caixa é o que o ESCRITÓRIO ganhou: contratuais +
+    # sucumbenciais. O valor total recebido no processo não é receita do
+    # escritório — a maior parte dele é do cliente, e lançar o bruto como
+    # entrada mostraria um faturamento que nunca existiu.
+    bruto_do_escritorio = round(hc + hs, 2)
+    if bruto_do_escritorio > 0:
+        try:
+            db.table("fin_lancamentos").insert({
+                "tipo": "ENTRADA", "categoria": "HONORARIOS",
+                "descricao": f"Honorários do atendimento nº {num}"
+                             + (" (contratuais + sucumbenciais)" if hs else ""),
+                "valor": bruto_do_escritorio,
+                "data": _date.today().isoformat(),
+                "vencimento": _date.today().isoformat(),
+                "pago_em": datetime.now(_tz.utc).isoformat(),
+                "forma_pagamento": valores.get("forma_repasse"),
+                "caso_id": caso_id, "cliente_id": caso.get("cliente_id"),
+                "pessoa": cli.get("nome"), "origem": "PRESTACAO",
+                "criado_por": valores.get("quem") or "prestação de contas",
+            }).execute()
+        except Exception as e:
+            # A entrada no caixa não pode derrubar o e-mail que o cliente
+            # está esperando. Diferente do repasse: um lançamento de
+            # caixa que faltou se percebe conferindo o mês; uma dívida
+            # com parceiro que nunca nasceu, não.
+            print(f"[prestacao] caixa não registrado para {caso_id}: {e}")
+
     # ── corpo em texto (WhatsApp e fallback) ──
     linhas_hist = "\n".join(
         f"• {_br_data(h['quando'])} — {h['o_que']}" + (f": {h['detalhe']}" if h["detalhe"] else "")
@@ -805,6 +851,10 @@ def prestacao_de_contas(caso_id: str, valores: dict) -> dict:
     return {"ok": True, "prestacao_id": registro["id"], "repasse_cliente": repasse,
             "enviado_email": ok_mail, "enviado_whatsapp": ok_whats,
             "itens_historico": len(historico),
+            # A tela precisa disto na volta: quem fecha o caso é quem vai
+            # pagar o parceiro, e é agora que ele tem a informação na mão.
+            "repasses_parceiros": repasses,
+            "total_repasses": round(sum(float(r["valor_devido"]) for r in repasses), 2),
             **({"erro_email": erro} if erro else {})}
 
 

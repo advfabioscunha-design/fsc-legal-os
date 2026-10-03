@@ -1699,6 +1699,15 @@ export default function CasoDetalhe({ casoId, onFechar, onMudou }: { casoId: str
               </ul>
             </section>
 
+            {/* ── PRAZOS DO CASO ─────────────────────────────────────
+                O card da esteira mostra UM prazo: o mais próximo. Num
+                processo com audiência marcada e recurso correndo, isso
+                esconde metade do que há para fazer — e o que fica
+                escondido é justamente o que se perde. Aqui estão todos,
+                com o lugar para corrigir a data e para cadastrar o que
+                o sistema não leu. */}
+            <PrazosDoCaso casoId={casoId} />
+
             {/* Avisar o cliente — audiência, prazo, movimentação */}
             <section>
               <h3 className="mb-2 text-sm font-bold text-[#C9A84C]">Avisar o cliente (e-mail + WhatsApp)</h3>
@@ -2282,5 +2291,240 @@ function SalvarWhatsApp({ caso }: { caso: any }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   PRAZOS DO CASO — incluir, corrigir e dar por cumprido
+
+   O QUE FALTAVA
+
+   Dava para corrigir o prazo no card da esteira, e só. Faltavam duas
+   coisas que o advogado precisa todo dia:
+
+     · CADASTRAR um prazo que o sistema não leu. A leitura automática
+       sai das publicações, e publicação não é certidão: o prazo
+       combinado em audiência, o despacho que ninguém publicou, o prazo
+       de prescrição que só está na cabeça de quem leu o contrato — nada
+       disso chega sozinho. Sem lugar para escrever, esse prazo ficava
+       numa agenda de papel, fora do sistema que deveria cobrá-lo.
+
+     · VER TODOS. A esteira mostra o mais próximo; um processo com
+       audiência e recurso tem dois, e o segundo sumia.
+
+   O DIA FATAL E O DIA DE TRABALHO
+
+   São dois, e o sistema guarda os dois. O fatal é quando vence no
+   tribunal. O dia de trabalho é dois dias ÚTEIS antes — é o que entra
+   na agenda. Aqui se informa o fatal e o servidor calcula o outro:
+   pedir que alguém conte dois dias úteis de cabeça, no único campo
+   onde o erro custa o direito do cliente, seria um mau negócio.
+
+   TODA CORREÇÃO FICA REGISTRADA no histórico do caso, com quem mudou e
+   por quê. Mudar prazo é decisão de responsabilidade. */
+function PrazosDoCaso({ casoId }: { casoId: string }) {
+  const [lista, setLista] = useState<any[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [novo, setNovo] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [form, setForm] = useState({ titulo: "", prazo_fatal: "", tipo: "", descricao: "" });
+
+  const carregar = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/v1/casos/${casoId}/prazos`);
+      setLista(r.ok ? await r.json() : []);
+    } catch { setLista([]); }
+    setCarregando(false);
+  }, [casoId]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  async function incluir() {
+    if (!form.titulo.trim()) { alert("Diga do que é o prazo."); return; }
+    if (!form.prazo_fatal) { alert("Informe a data fatal do prazo."); return; }
+    setSalvando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/prazos`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, caso_id: casoId }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({} as any));
+        alert(d?.detail || "Não consegui cadastrar o prazo.");
+        return;
+      }
+      setForm({ titulo: "", prazo_fatal: "", tipo: "", descricao: "" });
+      setNovo(false); carregar();
+    } finally { setSalvando(false); }
+  }
+
+  return (
+    <section>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-bold text-[#C9A84C]">Prazos do caso</h3>
+        <span className="text-[10px] text-white/35">
+          {lista.length === 0 ? "nenhum em aberto"
+            : `${lista.length} em aberto`}
+        </span>
+        <button onClick={() => setNovo(!novo)}
+          className="ml-auto rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-white/80 hover:border-white/40">
+          {novo ? "Cancelar" : "+ Incluir prazo"}
+        </button>
+      </div>
+
+      <p className="mb-2 text-xs leading-relaxed text-white/55">
+        O que o sistema lê das publicações entra aqui sozinho, e é sempre{" "}
+        <b className="text-white/75">estimado</b> — a contagem usa feriados
+        nacionais e não conhece feriado local nem suspensão de expediente.
+        Confira, corrija a data e cadastre à mão o que não veio por publicação
+        (prazo combinado em audiência, prescrição, compromisso assumido).
+      </p>
+
+      {novo && (
+        <div className="mb-3 space-y-2 rounded-lg border border-[#C9A84C]/30 bg-[#0A1628]/60 p-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="text-xs text-white/60">Do que é o prazo
+              <input value={form.titulo} placeholder="Contestação, recurso, manifestação…"
+                onChange={(e) => setForm({ ...form, titulo: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+            </label>
+            <label className="text-xs text-white/60">Data fatal (vence no tribunal)
+              <input type="date" value={form.prazo_fatal}
+                onChange={(e) => setForm({ ...form, prazo_fatal: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+            </label>
+          </div>
+          <input value={form.descricao} placeholder="observação (opcional) — entra no histórico do caso"
+            onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+            className="w-full rounded-lg border border-white/15 bg-[#0A1628] px-3 py-2 text-sm" />
+          <p className="text-[11px] text-white/40">
+            O dia de trabalho entra na agenda sozinho: dois dias úteis antes da
+            data fatal.
+          </p>
+          <button onClick={incluir} disabled={salvando}
+            className="rounded-lg bg-[#C9A84C] px-4 py-2 text-sm font-bold text-[#0A1628] hover:brightness-110 disabled:opacity-40">
+            {salvando ? "Salvando…" : "Cadastrar prazo"}
+          </button>
+        </div>
+      )}
+
+      {carregando ? (
+        <p className="text-xs text-white/40">Carregando…</p>
+      ) : lista.length === 0 ? (
+        <p className="rounded-lg border border-white/10 bg-[#0A1628]/40 px-3 py-3 text-xs text-white/45">
+          Nenhum prazo em aberto neste caso. Se houver prazo correndo que não
+          apareceu, cadastre acima — o sistema só enxerga o que foi publicado.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {lista.map((p) => (
+            <PrazoDaPasta key={p.id} prazo={p} aoMudar={carregar} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+
+/* Uma linha de prazo, com a correção aberta ali mesmo. */
+function PrazoDaPasta({ prazo, aoMudar }: { prazo: any; aoMudar: () => void }) {
+  const [abrir, setAbrir] = useState(false);
+  const [data, setData] = useState(String(prazo.prazo_fatal || prazo.data || "").slice(0, 10));
+  const [motivo, setMotivo] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const d = prazo.dias_restantes;
+  const cor = d == null ? "#8899AA"
+    : d < 0 ? "#C0392B" : d <= 2 ? "#E5A44C" : d <= 7 ? "#C9A84C" : "#8899AA";
+  const quando = d == null ? "sem data fatal"
+    : d < 0 ? `venceu há ${Math.abs(d)} dia${Math.abs(d) > 1 ? "s" : ""}`
+    : d === 0 ? "vence hoje"
+    : d === 1 ? "vence amanhã"
+    : `faltam ${d} dias`;
+  const br = (x?: string | null) =>
+    x ? `${String(x).slice(8, 10)}/${String(x).slice(5, 7)}/${String(x).slice(0, 4)}` : "—";
+
+  async function salvar() {
+    if (!data) return;
+    setSalvando(true);
+    try {
+      const r = await fetch(`${API}/api/v1/prazos/${prazo.id}/ajustar`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prazo_fatal: data, motivo, quem: "escritório" }),
+      });
+      if (!r.ok) {
+        const x = await r.json().catch(() => ({} as any));
+        alert(x?.detail || "Não consegui alterar o prazo.");
+        return;
+      }
+      setAbrir(false); setMotivo(""); aoMudar();
+    } finally { setSalvando(false); }
+  }
+
+  async function cumprir() {
+    const feito = window.prompt("O que foi feito? (vai para o histórico do caso)");
+    if (feito === null) return;
+    setSalvando(true);
+    try {
+      await fetch(`${API}/api/v1/prazos/${prazo.id}/cumprir`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: feito, quem: "escritório" }),
+      });
+      aoMudar();
+    } finally { setSalvando(false); }
+  }
+
+  return (
+    <li className="rounded-lg border px-3 py-2"
+      style={{ borderColor: `${cor}55`, background: `${cor}12` }}>
+      <button onClick={() => setAbrir(!abrir)} className="flex w-full items-start gap-2 text-left">
+        <span className="mt-0.5 text-xs">⏳</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-white">
+            {prazo.titulo || prazo.tipo || "Prazo"}
+          </p>
+          <p className="text-[11px] text-white/55">
+            <span style={{ color: cor }} className="font-bold">{quando}</span>
+            {" · "}fatal {br(prazo.prazo_fatal)}
+            {prazo.data && <> · trabalhar em {br(prazo.data)}</>}
+            {prazo.origem === "MANUAL" && <span className="text-white/35"> · cadastrado à mão</span>}
+            {prazo.depende_do_cliente && <span className="text-white/35"> · depende do cliente</span>}
+          </p>
+        </div>
+        <span className="text-[10px] text-white/35">{abrir ? "fechar" : "alterar"}</span>
+      </button>
+
+      {abrir && (
+        <div className="mt-2 space-y-2 border-t border-white/10 pt-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="text-[11px] text-white/55">Nova data fatal
+              <input type="date" value={data} onChange={(e) => setData(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-[11px] text-white/55">Motivo da correção
+              <input value={motivo} onChange={(e) => setMotivo(e.target.value)}
+                placeholder="feriado local, suspensão de expediente…"
+                className="mt-1 w-full rounded-lg border border-white/15 bg-[#0A1628] px-2 py-1.5 text-sm" />
+            </label>
+          </div>
+          <p className="text-[11px] text-white/35">
+            O dia de trabalho acompanha a nova data fatal. A alteração entra no
+            histórico do caso.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={salvar} disabled={salvando}
+              className="rounded-lg bg-[#C9A84C] px-4 py-1.5 text-xs font-bold text-[#0A1628] disabled:opacity-40">
+              {salvando ? "…" : "Corrigir prazo"}
+            </button>
+            <button onClick={cumprir} disabled={salvando}
+              className="rounded-lg bg-[#1DB954] px-4 py-1.5 text-xs font-bold text-white disabled:opacity-40">
+              Dar por cumprido
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }

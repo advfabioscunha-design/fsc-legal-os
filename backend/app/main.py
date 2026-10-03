@@ -2910,9 +2910,17 @@ class Membro(BaseModel):
 
 
 class Prazo(BaseModel):
+    """O prazo como o escritório o enxerga: tem o DIA FATAL (quando vence
+    no tribunal) e o DIA DE TRABALHO (quando a equipe faz). Até aqui o
+    cadastro manual só aceitava o dia de trabalho, e o campo que importa
+    — o fatal — ficava nulo: o prazo nascia sem o dado que o torna
+    cobrável, invisível para a régua de urgência e para o card."""
     titulo: str
     descricao: str | None = None
-    data: str
+    data: str | None = None           # dia de trabalho; calculado se faltar
+    prazo_fatal: str | None = None    # o vencimento no tribunal
+    tipo: str | None = None
+    depende_do_cliente: bool = False
     responsavel_id: str | None = None
     especialidade: str | None = None
     caso_id: str | None = None
@@ -3077,12 +3085,58 @@ def listar_prazos(responsavel_id: str | None = None, inicio: str | None = None, 
 
 @app.post("/api/v1/prazos")
 def criar_prazo(body: Prazo):
-    get_db().table("prazos").insert({
-        "titulo": body.titulo, "descricao": body.descricao, "data": body.data,
+    """Cadastra um prazo à mão.
+
+    O DIA DE TRABALHO SE CALCULA SOZINHO. Informado só o dia fatal, a
+    data de trabalho vira dois dias ÚTEIS antes — a mesma regra que a
+    controladoria usa nos prazos lidos das publicações. Obrigar quem
+    cadastra a contar dois dias úteis de cabeça é convidar o erro no
+    único campo em que ele custa caro.
+    """
+    from .core.db import registrar_evento
+    fatal = (body.prazo_fatal or "").strip()[:10] or None
+    dia = (body.data or "").strip()[:10] or None
+    if not fatal and not dia:
+        raise HTTPException(400, "Informe o prazo fatal ou o dia de trabalho.")
+    if fatal and not dia:
+        try:
+            from .core.datas import antecipar_uteis
+            from datetime import date as _d
+            dia = antecipar_uteis(_d.fromisoformat(fatal), 2).isoformat()
+        except Exception:
+            dia = fatal          # `data` é NOT NULL: melhor o fatal que nada
+    novo = get_db().table("prazos").insert({
+        "titulo": body.titulo, "descricao": body.descricao, "data": dia,
+        "prazo_fatal": fatal, "tipo": body.tipo,
+        "depende_do_cliente": bool(body.depende_do_cliente),
         "responsavel_id": body.responsavel_id, "especialidade": body.especialidade,
         "caso_id": body.caso_id, "origem": "MANUAL",
-    }).execute()
-    return {"ok": True}
+    }).execute().data[0]
+    if body.caso_id:
+        registrar_evento(body.caso_id, "PRAZO_CADASTRADO", {
+            "titulo": body.titulo, "prazo_fatal": fatal, "data": dia,
+        })
+    return {"ok": True, "prazo": novo}
+
+
+@app.get("/api/v1/casos/{caso_id}/prazos")
+def prazos_do_caso(caso_id: str, incluir_concluidos: bool = False):
+    """Todos os prazos do caso, para a pasta do caso.
+
+    A tela da esteira mostrava UM prazo — o mais próximo. Num processo
+    com audiência marcada e recurso correndo, isso esconde metade do que
+    há para fazer, e o que está escondido é o que se perde."""
+    from .core.datas import dias_ate
+    qy = get_db().table("prazos").select("*").eq("caso_id", caso_id)
+    if not incluir_concluidos:
+        qy = qy.eq("status", "ABERTO")
+    linhas = qy.order("prazo_fatal").limit(200).execute().data or []
+    for p in linhas:
+        p["dias_restantes"] = dias_ate(p.get("prazo_fatal") or p.get("data"))
+    # Sem prazo fatal vai para o fim: é prazo que ainda não tem data
+    # certa, e não pode empurrar para baixo o que vence amanhã.
+    linhas.sort(key=lambda p: (p.get("prazo_fatal") or p.get("data") or "9999-12-31"))
+    return linhas
 
 
 @app.patch("/api/v1/prazos/{prazo_id}")
