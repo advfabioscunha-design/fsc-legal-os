@@ -66,7 +66,19 @@ PUBLICO = [
     r"^/api/v1/contratos/tipos$",
     r"^/api/v1/contratos/tipos/[^/]+$",
     r"^/api/v1/contratos/pix$",
-    r"^/api/v1/contratos/pedidos$",
+    # ATENÇÃO AO MÉTODO AQUI
+    #
+    # Esta rota era pública para qualquer método, e o par POST/GET divide
+    # o mesmo caminho. O POST é o que precisa ser aberto: quem está no
+    # balcão cria o pedido antes de ter conta.
+    #
+    # O GET devolvia ATÉ 300 PEDIDOS com nome e e-mail dos clientes, para
+    # quem chamasse — sem login, da internet aberta. O endereço está no
+    # JavaScript do site, que todo visitante baixa.
+    #
+    # Agora só o POST é público. A listagem voltou para trás do porteiro,
+    # que é onde ela sempre devia ter estado.
+    ("POST", r"^/api/v1/contratos/pedidos$"),
     r"^/api/v1/contratos/pedidos/[^/]+$",
     r"^/api/v1/contratos/pedidos/[^/]+/(negociar|negociar/abrir|conversa|"
     r"termo-contratacao|dados|escolhas|documentos|coleta-concluida|"
@@ -135,8 +147,19 @@ DO_CLIENTE = [
     r"^/api/v1/contratos/meus-pedidos$",
 ]
 
-_PUBLICO = [re.compile(p) for p in PUBLICO]
+# Cada entrada de PUBLICO é um padrão (vale para qualquer método) ou um
+# par (método, padrão). O par existe porque POST e GET compartilham
+# caminho em algumas rotas, e abrir o caminho abre os dois — foi assim
+# que a listagem de pedidos do balcão ficou exposta.
+_PUBLICO = [(None, re.compile(p)) if isinstance(p, str)
+            else (p[0].upper(), re.compile(p[1]))
+            for p in PUBLICO]
 _CLIENTE = [re.compile(p) for p in DO_CLIENTE]
+
+
+def _e_publico(metodo: str, caminho: str) -> bool:
+    return any(rx.match(caminho) and (m is None or m == metodo)
+               for m, rx in _PUBLICO)
 
 # Validar o token significa uma chamada ao Supabase. Sem cache, cada
 # tela da plataforma faria dezenas por minuto. Cinco minutos é curto o
@@ -170,13 +193,66 @@ def _usuario(token: str) -> dict | None:
     return dados
 
 
+# ── O QUE O ADVOGADO PARCEIRO ALCANÇA ───────────────────────────
+#
+# O parceiro é advogado de fora: atua em causa específica, divide o
+# honorário dela e não tem nada que ver com o resto da carteira. Não é
+# associado do escritório — associado é OPERADOR ou ADMIN e vê tudo.
+#
+# A LISTA É EXPLÍCITA, E NÃO UMA REGRA ESPERTA
+#
+# Seria mais curto escrever "parceiro pode tudo que a equipe pode, menos
+# X". Seria também o jeito de abrir a carteira inteira no dia em que
+# alguém criasse uma rota nova sem lembrar do X.
+#
+# Aqui é ao contrário: o parceiro não alcança NADA, salvo o que está
+# escrito abaixo. Rota nova nasce fechada para ele. Quando faltar
+# alguma, ele recebe "este caso não é da sua parceria" — chato, e
+# seguro. O contrário seria silencioso e grave.
+#
+# Alcançar a rota é só a primeira porta. A segunda é o caso: cada uma
+# destas rotas confere, por dentro, se AQUELE caso é de uma parceria
+# viva dele. É `_casos_do_parceiro`, em main.py.
+DO_PARCEIRO = [
+    # A identidade e o cadastro dele
+    r"^/api/v1/parceiro/(eu|cadastro)$",
+    # Os casos da parceria, e o que se faz dentro deles
+    r"^/api/v1/parceiro/casos$",
+    r"^/api/v1/parceiro/caso/[^/]+$",
+    r"^/api/v1/parceiro/caso/[^/]+/(documentos|mensagens|tarefas|comentarios)$",
+    r"^/api/v1/parceiro/caso/[^/]+/documentos/[^/]+/baixar$",
+    # Cadastrar causa nova: ela entra na esteira do escritório como
+    # qualquer outra, e nasce com a parceria proposta por ele.
+    r"^/api/v1/parceiro/casos/novo$",
+    # O dinheiro dele — e só o dele
+    r"^/api/v1/parceiro/valores$",
+    r"^/api/v1/parceiro/repasses$",
+    r"^/api/v1/parceiro/repasses/[^/]+/recibo$",
+    # Serventia geral que não revela nada de ninguém
+    r"^/api/v1/cep/[^/]+$",
+    r"^/api/v1/ia/estado$",
+]
+_PARCEIRO = [re.compile(p) for p in DO_PARCEIRO]
+
+# ── O QUE SÓ O ADMINISTRADOR FAZ ────────────────────────────────
+#
+# Conceder acesso, retirar acesso e passar a chave do escritório a
+# outra pessoa. O operador trabalha; quem decide quem trabalha é o dono.
+SO_DO_ADMIN = [
+    r"^/api/v1/admin/acessos",
+    r"^/api/v1/admin/parceiros/[^/]+/(suspender|reativar)$",
+    r"^/api/v1/equipe/[^/]+/(promover|rebaixar|remover)$",
+]
+_SO_ADMIN = [re.compile(p) for p in SO_DO_ADMIN]
+
+
 def checar(request: Request) -> dict | None:
     """Devolve o usuário, ou levanta 401/403. None em rota pública."""
     caminho = request.url.path
 
     if request.method == "OPTIONS":        # o navegador perguntando as regras
         return None
-    if any(p.match(caminho) for p in _PUBLICO):
+    if _e_publico(request.method.upper(), caminho):
         return None
 
     cabecalho = request.headers.get("authorization") or ""
@@ -187,9 +263,31 @@ def checar(request: Request) -> dict | None:
     if not usuario:
         raise HTTPException(401, "Sessão expirada. Entre de novo.")
 
+    papel = usuario.get("papel")
+
     if any(p.match(caminho) for p in _CLIENTE):
         return usuario
 
-    if usuario.get("papel") not in ("OPERADOR", "ADMIN"):
+    # O PARCEIRO ANTES DA EQUIPE
+    #
+    # Esta conferência vem primeiro de propósito. Se viesse depois da
+    # trava de equipe, o parceiro levaria "esta área é da equipe" nas
+    # próprias rotas dele — e, pior, bastaria alguém marcar o papel
+    # errado uma vez para ele cair no mundo da equipe sem ninguém notar.
+    if papel == "PARCEIRO":
+        if any(p.match(caminho) for p in _PARCEIRO):
+            return usuario
+        raise HTTPException(
+            403, "Esta área é do escritório. Como parceiro, o senhor "
+                 "acessa os casos em que consta a sua parceria.")
+
+    if papel not in ("OPERADOR", "ADMIN"):
         raise HTTPException(403, "Esta área é da equipe do escritório.")
+
+    # Conceder e retirar acesso é ato de quem responde pelo escritório.
+    # Operador trabalha; quem decide quem trabalha é o dono.
+    if papel != "ADMIN" and any(p.match(caminho) for p in _SO_ADMIN):
+        raise HTTPException(
+            403, "Só o administrador concede ou retira acesso.")
+
     return usuario

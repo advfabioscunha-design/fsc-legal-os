@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from .core.config import get_settings
 from .core.db import get_db
-from .core import esquema, ia
+from .core import esquema, ia, parceria
 from .agentes import triagem, especialista, jurisprudencial, radar
 from .agentes.orquestrador import mudar_estado, escalar_para_humano, TransicaoInvalida
 from .integracoes import asaas, zapsign, whatsapp, avisos, email_entrada
@@ -3606,6 +3606,371 @@ def _caso_do_cliente(caso_id: str, cliente_ids: list[str] | str) -> dict:
     if caso.get("cliente_id") not in cliente_ids:
         raise HTTPException(403, "Este caso não pertence ao seu cadastro.")
     return caso
+
+
+# ══════════════════════════════════════════════════════════════════
+# ADVOGADO PARCEIRO — só os casos em que consta a parceria dele
+# ══════════════════════════════════════════════════════════════════
+#
+# O porteiro já decidiu que ele pode chamar estas rotas. Aqui decide-se
+# se ele pode ver AQUELE caso — a conferência que impede o parceiro de
+# pedir o caso de outro passando o id na URL.
+#
+# Toda rota abaixo começa por `_parceiro_do_token`. Não é repetição por
+# descuido: é a trava, e trava que se escreve uma vez no meio do caminho
+# é trava que alguém esquece de chamar na rota seguinte.
+
+
+def _parceiro_do_token(authorization: str | None) -> dict:
+    """O cadastro de parceiro de quem está chamando. 403 se não for."""
+    user = _usuario_do_token(authorization)
+    p = parceria.parceiro_do_login(user["id"])
+    if not p:
+        raise HTTPException(403, "Este acesso é de advogado parceiro.")
+    if (p.get("status") or "ATIVO") != "ATIVO":
+        raise HTTPException(
+            403, "Sua parceria está suspensa. Fale com o escritório.")
+    return p
+
+
+def _caso_do_parceiro(parceiro_id: str, caso_id: str) -> dict:
+    """O caso, se for dele. Mensagem igual para caso inexistente e caso
+    de outro: dizer 'este caso existe, mas não é seu' já entrega que o
+    escritório tem aquele processo."""
+    if not parceria.pode_ver(parceiro_id, caso_id):
+        raise HTTPException(404, "Caso não encontrado na sua parceria.")
+    c = get_db().table("casos").select("*").eq("id", caso_id) \
+          .maybe_single().execute().data
+    if not c:
+        raise HTTPException(404, "Caso não encontrado na sua parceria.")
+    return c
+
+
+@app.get("/api/v1/parceiro/eu")
+def parceiro_eu(authorization: str | None = Header(default=None)):
+    """Quem sou eu, e o meu cadastro está completo?
+
+    O cadastro incompleto não bloqueia o acesso: bloqueia o repasse. O
+    parceiro trabalha enquanto providencia a chave PIX; o que não pode é
+    o escritório descobrir que falta dado bancário no dia do pagamento."""
+    p = _parceiro_do_token(authorization)
+    falta = [c for c in ("nome", "oab_numero", "oab_uf", "cpf_cnpj")
+             if not (p.get(c) or "").strip()]
+    sem_banco = not ((p.get("pix_chave") or "").strip()
+                     or (p.get("conta") or "").strip())
+    return {
+        "id": p["id"], "nome": p.get("nome"),
+        "oab": f"{p.get('oab_numero') or ''}/{p.get('oab_uf') or ''}".strip("/"),
+        "email": p.get("email"), "status": p.get("status"),
+        "falta_cadastro": falta,
+        "falta_dados_bancarios": sem_banco,
+        "pode_receber": not falta and not sem_banco,
+    }
+
+
+class CadastroParceiro(BaseModel):
+    nome: str | None = None
+    cpf_cnpj: str | None = None
+    oab_numero: str | None = None
+    oab_uf: str | None = None
+    whatsapp: str | None = None
+    banco_nome: str | None = None
+    banco_codigo: str | None = None
+    agencia: str | None = None
+    conta: str | None = None
+    conta_tipo: str | None = None
+    pix_tipo: str | None = None
+    pix_chave: str | None = None
+    titular_confirmado: bool | None = None
+
+
+@app.post("/api/v1/parceiro/cadastro")
+def parceiro_salvar_cadastro(body: CadastroParceiro,
+                             authorization: str | None = Header(default=None)):
+    """O parceiro completa ou corrige o próprio cadastro."""
+    p = _parceiro_do_token(authorization)
+    campos = {k: v for k, v in body.model_dump().items() if v not in (None, "")}
+    if body.titular_confirmado is not None:
+        campos["titular_confirmado"] = bool(body.titular_confirmado)
+    if campos.get("whatsapp"):
+        campos["whatsapp"] = "".join(c for c in campos["whatsapp"] if c.isdigit())
+    if campos.get("oab_uf"):
+        campos["oab_uf"] = campos["oab_uf"].strip().upper()[:2]
+    if campos:
+        campos["atualizado_em"] = _dt_agora()
+        completo = all((campos.get(c) or p.get(c)) for c in
+                       ("nome", "oab_numero", "oab_uf", "cpf_cnpj"))
+        if completo and not p.get("cadastro_completo_em"):
+            campos["cadastro_completo_em"] = _dt_agora()
+        get_db().table("parceiros").update(campos).eq("id", p["id"]).execute()
+    return {"ok": True}
+
+
+@app.get("/api/v1/parceiro/casos")
+def parceiro_casos(authorization: str | None = Header(default=None)):
+    """Os casos da parceria. Arquivado não aparece — causa encerrada é
+    acervo do escritório, não trabalho em curso."""
+    p = _parceiro_do_token(authorization)
+    ids = parceria.casos_do_parceiro(p["id"])
+    if not ids:
+        return []
+    db = get_db()
+    casos = db.table("casos").select(
+        "id,numero_atendimento,titulo,area,fase,situacao,numero_processo,"
+        "tribunal,cliente_id,atualizado_em,criado_em"
+    ).in_("id", ids).order("atualizado_em", desc=True).execute().data or []
+
+    # O percentual combinado vai junto: é a primeira coisa que o parceiro
+    # procura ao abrir a lista.
+    acordos = {}
+    try:
+        for a in (db.table("parcerias").select("caso_id,percentual,aprovada_em")
+                  .eq("parceiro_id", p["id"]).is_("encerrada_em", "null")
+                  .execute().data or []):
+            acordos[a["caso_id"]] = a
+    except Exception:
+        pass
+    for c in casos:
+        a = acordos.get(c["id"]) or {}
+        c["meu_percentual"] = a.get("percentual")
+        c["percentual_aprovado"] = bool(a.get("aprovada_em"))
+    return casos
+
+
+@app.get("/api/v1/parceiro/caso/{caso_id}")
+def parceiro_caso(caso_id: str, authorization: str | None = Header(default=None)):
+    p = _parceiro_do_token(authorization)
+    c = _caso_do_parceiro(p["id"], caso_id)
+    acordo = parceria.parceria_no_caso(p["id"], caso_id) or {}
+    db = get_db()
+
+    # O cliente aparece com nome e contato: o parceiro atua na causa e
+    # precisa falar com ele. Dado bancário do cliente, não — repasse ao
+    # cliente é assunto do escritório.
+    cli = {}
+    if c.get("cliente_id"):
+        cli = (db.table("clientes").select("nome,email,whatsapp,cpf_cnpj")
+               .eq("id", c["cliente_id"]).maybe_single().execute().data or {})
+
+    docs = (db.table("documentos").select("id,tipo,storage_path,status,criado_em,observacao")
+            .eq("caso_id", caso_id).order("criado_em", desc=True)
+            .execute().data or [])
+    tarefas = (db.table("tarefas").select("*").eq("caso_id", caso_id)
+               .order("criado_em", desc=True).limit(50).execute().data or [])
+    return {"caso": c, "cliente": cli, "documentos": docs, "tarefas": tarefas,
+            "parceria": {"percentual": acordo.get("percentual"),
+                         "aprovada_em": acordo.get("aprovada_em"),
+                         "papel": acordo.get("papel")}}
+
+
+@app.get("/api/v1/parceiro/caso/{caso_id}/mensagens")
+def parceiro_mensagens(caso_id: str,
+                       authorization: str | None = Header(default=None)):
+    """A conversa interna do caso. O parceiro lê e escreve com a equipe.
+
+    O que ele NÃO alcança por aqui é o canal do cliente: mensagem que
+    sai em nome do escritório tem de passar por quem responde por ele."""
+    p = _parceiro_do_token(authorization)
+    _caso_do_parceiro(p["id"], caso_id)
+    return (get_db().table("mensagens").select("*").eq("caso_id", caso_id)
+            .eq("canal", "CRM").order("criado_em").limit(300)
+            .execute().data or [])
+
+
+class RecadoDoParceiro(BaseModel):
+    conteudo: str
+
+
+@app.post("/api/v1/parceiro/caso/{caso_id}/mensagens")
+def parceiro_escrever(caso_id: str, body: RecadoDoParceiro,
+                      authorization: str | None = Header(default=None)):
+    p = _parceiro_do_token(authorization)
+    _caso_do_parceiro(p["id"], caso_id)
+    texto = (body.conteudo or "").strip()
+    if not texto:
+        raise HTTPException(400, "Escreva alguma coisa.")
+    get_db().table("mensagens").insert({
+        "caso_id": caso_id, "canal": "CRM", "autor": "PARCEIRO",
+        # O nome vai no texto porque quem lê precisa saber de quem é o
+        # recado sem abrir o cadastro de ninguém.
+        "conteudo": f"[parceiro · {p.get('nome')}] {texto}",
+    }).execute()
+    registrar_evento(caso_id, "PARCEIRO_ESCREVEU",
+                     {"parceiro_id": p["id"], "nome": p.get("nome")})
+    return {"ok": True}
+
+
+@app.post("/api/v1/parceiro/caso/{caso_id}/documentos")
+async def parceiro_anexar(caso_id: str, arquivo: UploadFile = File(...),
+                          observacao: str = Form(""),
+                          authorization: str | None = Header(default=None)):
+    """O parceiro anexa o que colheu. Vai para a pasta do caso como
+    qualquer outro documento, marcado com a origem."""
+    p = _parceiro_do_token(authorization)
+    _caso_do_parceiro(p["id"], caso_id)
+    s = get_settings()
+    db = get_db()
+    conteudo = await arquivo.read()
+    if len(conteudo) > 25 * 1024 * 1024:
+        raise HTTPException(400, "Arquivo acima de 25 MB.")
+    nome = (arquivo.filename or "documento").replace("/", "-")[:120]
+    caminho = f"{caso_id}/parceiros/{uuid.uuid4().hex}-{nome}"
+    db.storage.from_(s.bucket_documentos).upload(
+        caminho, conteudo,
+        {"content-type": arquivo.content_type or "application/octet-stream",
+         "upsert": "true"})
+    db.table("documentos").insert({
+        "caso_id": caso_id, "tipo": "ANEXO_PARCEIRO",
+        "storage_path": caminho, "status": "RECEBIDO",
+        "observacao": (observacao or "").strip()
+                      or f"Enviado pelo parceiro {p.get('nome')}",
+    }).execute()
+    registrar_evento(caso_id, "PARCEIRO_ANEXOU",
+                     {"parceiro_id": p["id"], "arquivo": nome})
+    return {"ok": True}
+
+
+class TarefaDoParceiro(BaseModel):
+    titulo: str
+    descricao: str = ""
+    prazo: str | None = None
+
+
+@app.post("/api/v1/parceiro/caso/{caso_id}/tarefas")
+def parceiro_criar_tarefa(caso_id: str, body: TarefaDoParceiro,
+                          authorization: str | None = Header(default=None)):
+    p = _parceiro_do_token(authorization)
+    _caso_do_parceiro(p["id"], caso_id)
+    if not (body.titulo or "").strip():
+        raise HTTPException(400, "A tarefa precisa de um título.")
+    get_db().table("tarefas").insert({
+        "caso_id": caso_id, "titulo": body.titulo.strip()[:200],
+        "descricao": (body.descricao or "").strip(),
+        "prazo": body.prazo or None, "status": "ABERTA",
+        "origem": f"PARCEIRO:{p.get('nome')}",
+    }).execute()
+    return {"ok": True}
+
+
+class CasoNovoDoParceiro(BaseModel):
+    titulo: str
+    area: str | None = None
+    descricao: str = ""
+    cliente_nome: str
+    cliente_whatsapp: str | None = None
+    cliente_email: str | None = None
+    cliente_cpf: str | None = None
+    numero_processo: str | None = None
+    percentual_proposto: float | None = None
+
+
+@app.post("/api/v1/parceiro/casos/novo")
+def parceiro_novo_caso(body: CasoNovoDoParceiro,
+                       authorization: str | None = Header(default=None)):
+    """O parceiro traz uma causa para o escritório.
+
+    Ela entra na esteira como qualquer outra — TRIAGEM —, e não numa
+    fila à parte: causa que chega por parceiro precisa passar pela mesma
+    conferência das demais, senão a parceria vira porta dos fundos.
+
+    O percentual que ele propõe nasce SEM aprovação. Vale a partir do
+    momento em que o escritório confirma, e é isso que a tela mostra aos
+    dois lados — ninguém combina percentual sozinho."""
+    p = _parceiro_do_token(authorization)
+    if not (body.titulo or "").strip() or not (body.cliente_nome or "").strip():
+        raise HTTPException(400, "Informe o título da causa e o nome do cliente.")
+    db = get_db()
+
+    # O cliente: aproveita o cadastro que já existir, pelo CPF ou e-mail.
+    cli = None
+    if body.cliente_cpf:
+        so_digitos = "".join(c for c in body.cliente_cpf if c.isdigit())
+        if so_digitos:
+            cli = (db.table("clientes").select("id")
+                   .eq("cpf_cnpj", so_digitos).limit(1).execute().data or [None])[0]
+    if not cli and body.cliente_email:
+        cli = (db.table("clientes").select("id")
+               .ilike("email", body.cliente_email.strip().lower())
+               .limit(1).execute().data or [None])[0]
+    if not cli:
+        cli = db.table("clientes").insert({
+            "nome": body.cliente_nome.strip()[:160],
+            "email": (body.cliente_email or "").strip().lower() or None,
+            "whatsapp": "".join(c for c in (body.cliente_whatsapp or "")
+                                if c.isdigit()) or None,
+            "cpf_cnpj": "".join(c for c in (body.cliente_cpf or "")
+                                if c.isdigit()) or None,
+            "origem": "PARCEIRO",
+        }).execute().data[0]
+
+    caso = db.table("casos").insert({
+        "titulo": body.titulo.strip()[:200],
+        "area": (body.area or "OUTROS").upper(),
+        "descricao": (body.descricao or "").strip(),
+        "cliente_id": cli["id"],
+        "numero_processo": (body.numero_processo or "").strip() or None,
+        "fase": "TRIAGEM", "situacao": "ATIVO",
+        "origem": f"PARCEIRO:{p.get('nome')}",
+    }).execute().data[0]
+
+    db.table("parcerias").insert({
+        "caso_id": caso["id"], "parceiro_id": p["id"],
+        "percentual": float(body.percentual_proposto or 0),
+        "base_calculo": "BRUTO", "inclui_sucumbencia": True,
+        "proposto_por": "PARCEIRO",
+    }).execute()
+
+    registrar_evento(caso["id"], "CASO_TRAZIDO_POR_PARCEIRO",
+                     {"parceiro_id": p["id"], "nome": p.get("nome"),
+                      "percentual_proposto": body.percentual_proposto})
+    try:
+        db.table("mensagens").insert({
+            "caso_id": caso["id"], "canal": "CRM", "autor": "HUMANO",
+            "conteudo": f"🤝 Causa trazida pelo parceiro {p.get('nome')}"
+                        + (f" (OAB {p.get('oab_numero')}/{p.get('oab_uf')})"
+                           if p.get("oab_numero") else "")
+                        + (f". Percentual proposto: {body.percentual_proposto}%."
+                           if body.percentual_proposto else ".")
+                        + " O percentual só vale depois de aprovado aqui.",
+        }).execute()
+    except Exception:
+        pass
+    return {"ok": True, "caso_id": caso["id"],
+            "numero": caso.get("numero_atendimento")}
+
+
+@app.get("/api/v1/parceiro/valores")
+def parceiro_valores(authorization: str | None = Header(default=None)):
+    """O dinheiro dele — e só o dele.
+
+    O parceiro vê a base de cálculo, o percentual e o valor que lhe cabe.
+    Não vê o repasse ao cliente nem a composição completa do caso: isso é
+    margem do escritório, e quem é parceiro hoje pode ser concorrente
+    amanhã."""
+    p = _parceiro_do_token(authorization)
+    db = get_db()
+    repasses = (db.table("repasses_parceiro").select("*")
+                .eq("parceiro_id", p["id"])
+                .order("criado_em", desc=True).execute().data or [])
+    ids = {r["caso_id"] for r in repasses if r.get("caso_id")}
+    titulos = {}
+    if ids:
+        for c in (db.table("casos").select("id,titulo,numero_atendimento")
+                  .in_("id", list(ids)).execute().data or []):
+            titulos[c["id"]] = c
+    recebido = sum(float(r["valor_devido"]) for r in repasses if r.get("pago_em"))
+    a_receber = sum(float(r["valor_devido"]) for r in repasses if not r.get("pago_em"))
+    return {
+        "recebido": round(recebido, 2),
+        "a_receber": round(a_receber, 2),
+        "repasses": [{
+            "id": r["id"], "caso": titulos.get(r["caso_id"], {}),
+            "base_contratual": r["base_contratual"],
+            "base_sucumbencia": r["base_sucumbencia"],
+            "percentual": r["percentual"], "valor": r["valor_devido"],
+            "pago_em": r.get("pago_em"), "forma": r.get("forma_pagamento"),
+        } for r in repasses],
+    }
 
 
 @app.get("/api/v1/cliente/meus-casos")
