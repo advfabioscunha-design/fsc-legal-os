@@ -292,18 +292,29 @@ def dossie(caso_id: str, peticao_id: str | None = None) -> str:
                    f"fatal {p.get('prazo_fatal')} | {p.get('status')}"
                    for p in prazos]
 
+    # UMA COLUNA QUE NÃO EXISTE, ENGOLIDA POR UM `except`
+    #
+    # A consulta pedia `documentos.transcricao`. Essa coluna é de
+    # `pedidos_documentos` (o balcão), não de `documentos` (a pasta do
+    # caso). O PostgREST recusava a consulta inteira, o `except` devolvia
+    # lista vazia, e o dossiê da peça judicial saía SEM a relação de
+    # documentos da pasta — sem erro em lugar nenhum.
+    #
+    # Falha silenciosa é a pior: a peça era escrita sem saber o que havia
+    # no processo, e nada na tela dizia isso. Encontrada por um conferidor
+    # de colunas que escrevi para outra coisa.
     try:
-        docs = db.table("documentos").select("tipo,status,observacao,transcricao") \
+        docs = db.table("documentos").select("tipo,status,observacao") \
             .eq("caso_id", caso_id).limit(40).execute().data or []
-    except Exception:
+    except Exception as e:
+        print(f"[mesa_do_processo] documentos do caso: {e}")
         docs = []
     if docs:
         partes += ["", "=== DOCUMENTOS NA PASTA ==="]
         for d in docs:
             partes.append(f"- {d.get('tipo')} ({d.get('status')})"
                           + (f" — {d.get('observacao')}" if d.get("observacao") else ""))
-            if (d.get("transcricao") or "").strip():
-                partes.append(f"  transcrição: {d['transcricao'][:600]}")
+
 
     try:
         val = db.table("validacoes_peticionamento") \

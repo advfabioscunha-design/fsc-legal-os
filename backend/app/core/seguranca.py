@@ -52,7 +52,18 @@ PUBLICO = [
     # é identificado por um id sorteado que fica no navegador de quem
     # abriu a conversa.
     r"^/api/v1/leads$",
-    r"^/api/v1/casos/[^/]+/mensagens$",
+    # SÓ O POST, DE NOVO PELO MESMO MOTIVO
+    #
+    # Esta entrada abria o caminho para qualquer método. O POST precisa
+    # ser público: quem conversa pelo site ainda não tem conta, e o id
+    # sorteado do caso, guardado no navegador, é a credencial.
+    #
+    # O GET devolvia 200 MENSAGENS DE QUALQUER CASO — inclusive as do
+    # canal CRM, que é a conversa interna da equipe — para quem soubesse
+    # um id, sem login. É o mesmo erro do /contratos/pedidos, na mesma
+    # lista, e foi uma revisão cética que o encontrou: eu já tinha
+    # passado por aqui e não vi.
+    ("POST", r"^/api/v1/casos/[^/]+/mensagens$"),
     r"^/api/v1/cep/[^/]+$",
     # Conferência de CPF: usada no balcão, antes de a pessoa ter conta,
     # e nos dados da outra parte do contrato, que nunca terá conta.
@@ -282,21 +293,29 @@ def checar(request: Request) -> dict | None:
 
     papel = usuario.get("papel")
 
-    if any(p.match(caminho) for p in _CLIENTE):
-        return usuario
-
-    # O PARCEIRO ANTES DA EQUIPE
+    # O PARCEIRO ANTES DE TUDO
     #
-    # Esta conferência vem primeiro de propósito. Se viesse depois da
-    # trava de equipe, o parceiro levaria "esta área é da equipe" nas
-    # próprias rotas dele — e, pior, bastaria alguém marcar o papel
-    # errado uma vez para ele cair no mundo da equipe sem ninguém notar.
+    # Este bloco estava depois do ramo do cliente, e o ramo do cliente
+    # devolvia sem olhar o papel. Na prática, o parceiro alcançava toda
+    # rota /api/v1/cliente/ — fora da lista que supostamente o limita.
+    #
+    # Não vazava dado hoje, porque aquelas rotas escopam pelo cadastro de
+    # cliente do próprio token. Mas a trava que o comentário prometia não
+    # existia, e trava que só existe no comentário é a que falha no dia
+    # em que alguém mexer na rota de baixo confiando nela.
     if papel == "PARCEIRO":
         if any(p.match(caminho) for p in _PARCEIRO):
             return usuario
         raise HTTPException(
             403, "Esta área é do escritório. Como parceiro, o senhor "
                  "acessa os casos em que consta a sua parceria.")
+
+    # A área do cliente é de quem é cliente. Antes bastava estar
+    # autenticado, de qualquer papel.
+    if any(p.match(caminho) for p in _CLIENTE):
+        if papel in ("CLIENTE", "OPERADOR", "ADMIN"):
+            return usuario
+        raise HTTPException(403, "Esta é a área do cliente.")
 
     if papel not in ("OPERADOR", "ADMIN"):
         raise HTTPException(403, "Esta área é da equipe do escritório.")

@@ -3720,8 +3720,14 @@ def parceiro_casos(authorization: str | None = Header(default=None)):
     if not ids:
         return []
     db = get_db()
+    # OS NOMES SÃO OS DO BANCO, NÃO OS QUE EU SUPUS
+    #
+    # Eu havia pedido `area` e `fase`, que não existem na tabela: a área
+    # é `grupo` e a fase é `estado`. Corrigi o INSERT quando a varredura
+    # apontou, e deixei este SELECT para trás — ele estouraria na
+    # primeira vez que um parceiro abrisse a lista de casos.
     casos = db.table("casos").select(
-        "id,numero_atendimento,titulo,area,fase,situacao,numero_processo,"
+        "id,numero_atendimento,titulo,grupo,estado,situacao,numero_processo,"
         "tribunal,cliente_id,atualizado_em,criado_em"
     ).in_("id", ids).order("atualizado_em", desc=True).execute().data or []
 
@@ -3933,9 +3939,12 @@ def parceiro_novo_caso(body: CasoNovoDoParceiro,
         "titulo": body.titulo.strip()[:200],
         "estado": "TRIAGEM",
         "situacao": "ATIVO",
-        "origem": "PARCEIRO",
-        "relato_inicial": (body.descricao or "").strip()
-                          or f"Causa trazida pelo parceiro {p.get('nome')}",
+        # `casos` não tem coluna `origem` — a que existe com esse nome é
+        # de `intimacoes`. De onde a causa veio fica no relato e no
+        # evento, que é onde alguém procura essa informação.
+        "relato_inicial": ((body.descricao or "").strip()
+                           + f"\n\n[Causa trazida pelo parceiro "
+                             f"{p.get('nome')}]").strip(),
     }
     area = (body.area or "").strip().upper()
     if area in _GRUPOS_VALIDOS:
@@ -4047,7 +4056,12 @@ def parceiro_usa_ia(caso_id: str, body: PerguntaDoParceiro,
     try:
         resposta = especialista.consultar(caso_id, pergunta, p.get("nome") or "parceiro")
     except Exception as e:
-        raise HTTPException(500, f"Não foi possível consultar agora: {e}")
+        # A mensagem crua do erro pode trazer nome de tabela, de coluna
+        # ou trecho de consulta. Vai para o log, não para a tela de quem
+        # está de fora do escritório.
+        print(f"[parceiro] consulta IA falhou: {e}")
+        raise HTTPException(500, "Não foi possível consultar agora. "
+                                 "Tente de novo em instantes.")
     registrar_evento(caso_id, "PARCEIRO_CONSULTOU_IA",
                      {"parceiro_id": p["id"], "nome": p.get("nome"),
                       "pergunta": pergunta[:200]})
@@ -4076,7 +4090,8 @@ def parceiro_baixar_documento(caso_id: str, doc_id: str,
     try:
         conteudo = db.storage.from_(s.bucket_documentos).download(d["storage_path"])
     except Exception as e:
-        raise HTTPException(500, f"Não foi possível abrir o arquivo: {e}")
+        print(f"[parceiro] download falhou: {e}")
+        raise HTTPException(500, "Não foi possível abrir o arquivo agora.")
     nome = (d.get("storage_path") or "documento").split("/")[-1]
     tipo = mimetypes.guess_type(nome)[0] or "application/octet-stream"
     registrar_evento(caso_id, "PARCEIRO_ABRIU_DOCUMENTO",

@@ -32,7 +32,7 @@ from .db import get_db
 # Causa encerrada some da vista do parceiro. ARQUIVADO é a situação que
 # o escritório grava ao encerrar; CONCLUIDO aparece como fase em alguns
 # fluxos antigos e entra junto para não deixar brecha.
-SITUACOES_FORA_DA_VISTA = ("ARQUIVADO",)
+SITUACOES_FORA_DA_VISTA = ("ARQUIVADO", "CONCLUIDO", "ENCERRADO")
 
 
 def parceiro_do_login(auth_user_id: str) -> dict | None:
@@ -54,12 +54,12 @@ def casos_do_parceiro(parceiro_id: str) -> list[str]:
     parcerias terminaram, não vê caso nenhum. Isso é o correto — e é
     diferente de erro, que levantaria exceção."""
     db = get_db()
-    try:
-        vivas = (db.table("parcerias").select("caso_id")
-                 .eq("parceiro_id", parceiro_id)
-                 .is_("encerrada_em", "null").execute().data or [])
-    except Exception:
-        return []
+    # Falha de leitura aqui também sobe: lista vazia por erro é
+    # indistinguível de "ele não tem caso nenhum", e as duas levam a
+    # telas iguais — só que uma esconde um defeito.
+    vivas = (db.table("parcerias").select("caso_id")
+             .eq("parceiro_id", parceiro_id)
+             .is_("encerrada_em", "null").execute().data or [])
     ids = {p["caso_id"] for p in vivas if p.get("caso_id")}
 
     # O que o administrador liberou à mão (caso fora de parceria que ele
@@ -73,11 +73,8 @@ def casos_do_parceiro(parceiro_id: str) -> list[str]:
     # Arquivado some. A consulta pede a situação em vez de confiar no
     # que estava gravado na parceria: quem arquiva o caso é o escritório,
     # e a parceria não fica sabendo.
-    try:
-        linhas = (db.table("casos").select("id,situacao")
-                  .in_("id", list(ids)).execute().data or [])
-    except Exception:
-        return []
+    linhas = (db.table("casos").select("id,situacao")
+              .in_("id", list(ids)).execute().data or [])
     return [c["id"] for c in linhas
             if (c.get("situacao") or "ATIVO") not in SITUACOES_FORA_DA_VISTA]
 
@@ -141,11 +138,23 @@ def _regras_do_admin(perfil_id: str | None = None,
         else:
             return set(), set()
         linhas = consulta.execute().data or []
-    except Exception:
-        # Tabela ausente (migração não aplicada) não pode travar o
-        # sistema inteiro: sem regras, ninguém tem liberação nem
-        # bloqueio extra, que é o estado anterior a esta migração.
-        return set(), set()
+    except Exception as e:
+        # AQUI NÃO SE PODE ENGOLIR ERRO
+        #
+        # Esta função devolvia (vazio, vazio) em qualquer falha. Parece
+        # inofensivo — "sem regras extras" —, mas descartava justamente
+        # os BLOQUEAR: timeout, tabela fora do ar ou erro de rede faziam
+        # um caso expressamente escondido pelo administrador voltar a
+        # aparecer. Falhar aberto na única regra que existe para esconder
+        # causa sensível é o avesso do que ela serve.
+        #
+        # Agora a falha sobe. A rota responde 503, o parceiro vê "tente
+        # de novo", e ninguém vê o que não devia. Não ver um caso por um
+        # minuto é incômodo; ver o caso errado uma vez é quebra de
+        # sigilo.
+        raise RuntimeError(
+            "Não foi possível conferir as regras de acesso aos casos. "
+            f"Tente de novo em instantes. ({str(e)[:120]})")
     liberados = {l["caso_id"] for l in linhas if l.get("efeito") == "LIBERAR"}
     bloqueados = {l["caso_id"] for l in linhas if l.get("efeito") == "BLOQUEAR"}
     return liberados, bloqueados
