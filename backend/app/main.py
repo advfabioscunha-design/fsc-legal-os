@@ -3651,6 +3651,480 @@ def _caso_do_parceiro(parceiro_id: str, caso_id: str) -> dict:
     return c
 
 
+# ══════════════════════════════════════════════════════════════════
+# ADMINISTRAÇÃO DOS PARCEIROS — só o dono do escritório
+# ══════════════════════════════════════════════════════════════════
+#
+# O porteiro já garante que só ADMIN chega aqui. Estas funções cuidam do
+# resto: registrar quem fez o quê, e não deixar meio ato gravado quando
+# a segunda metade falhar.
+#
+# Por que tudo isto é do administrador, e não do operador: conceder
+# acesso é decidir quem vê processo de cliente. Operador trabalha nos
+# casos; quem decide quem trabalha é quem responde pelo escritório.
+
+
+def _anotar_acesso(quem: str, acao: str, alvo_tipo: str = "",
+                   alvo_id: str = "", alvo_nome: str = "",
+                   detalhe: dict | None = None) -> None:
+    """O registro de quem mexeu no acesso.
+
+    Falha de gravação aqui não derruba o ato — seria pior ficar sem
+    conceder o acesso do que ficar sem a linha de histórico —, mas vai
+    para o log para alguém notar que o registro parou de funcionar."""
+    try:
+        get_db().table("registro_de_acessos").insert({
+            "quem_fez": quem or "?", "acao": acao,
+            "alvo_tipo": alvo_tipo or None, "alvo_id": alvo_id or None,
+            "alvo_nome": alvo_nome or None, "detalhe": detalhe or {},
+        }).execute()
+    except Exception as e:
+        print(f"[acessos] registro nao gravado ({acao}): {e}")
+
+
+def _quem_e(perfil: dict) -> str:
+    return perfil.get("nome") or perfil.get("email") or perfil.get("id") or "admin"
+
+
+@app.get("/api/v1/admin/parceiros")
+def admin_listar_parceiros(status: str | None = None,
+                           authorization: str | None = Header(default=None)):
+    """Os parceiros, com quantos casos cada um tem agora.
+
+    A contagem vai junto porque é a primeira pergunta de quem abre esta
+    tela: suspender alguém que está com oito causas em andamento é
+    decisão diferente de suspender quem não tem nenhuma."""
+    _perfil_do_token(authorization)
+    db = get_db()
+    q = db.table("parceiros").select("*").order("criado_em", desc=True)
+    if status:
+        q = q.eq("status", status.upper())
+    lista = q.execute().data or []
+
+    vivas: dict[str, int] = {}
+    try:
+        for pa in (db.table("parcerias").select("parceiro_id")
+                   .is_("encerrada_em", "null").execute().data or []):
+            vivas[pa["parceiro_id"]] = vivas.get(pa["parceiro_id"], 0) + 1
+    except Exception:
+        pass
+
+    for p in lista:
+        p["casos_ativos"] = vivas.get(p["id"], 0)
+        p["falta_dados_bancarios"] = not ((p.get("pix_chave") or "").strip()
+                                          or (p.get("conta") or "").strip())
+    return lista
+
+
+class SituacaoDoParceiro(BaseModel):
+    motivo: str = ""
+
+
+@app.post("/api/v1/admin/parceiros/{parceiro_id}/aprovar")
+def admin_aprovar_parceiro(parceiro_id: str, body: SituacaoDoParceiro,
+                           authorization: str | None = Header(default=None)):
+    """Tira o parceiro da análise. A partir daqui ele vê os casos dele.
+
+    Aprovar não dá acesso a nada sozinho — dá acesso ao que a PARCERIA
+    disser. Um parceiro aprovado sem parceria continua vendo uma lista
+    vazia, e isso está certo: aprovação diz 'este advogado existe e é
+    quem diz ser'; parceria diz 'ele atua nesta causa'."""
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    p = (db.table("parceiros").select("*").eq("id", parceiro_id)
+         .maybe_single().execute().data)
+    if not p:
+        raise HTTPException(404, "Parceiro não encontrado.")
+    db.table("parceiros").update({
+        "status": "ATIVO", "atualizado_em": _dt_agora(),
+        "observacao": (body.motivo or "").strip() or p.get("observacao"),
+    }).eq("id", parceiro_id).execute()
+    _anotar_acesso(_quem_e(perfil), "APROVOU_PARCEIRO", "PARCEIRO",
+                   parceiro_id, p.get("nome"),
+                   {"oab": f"{p.get('oab_numero')}/{p.get('oab_uf')}"})
+    return {"ok": True, "status": "ATIVO"}
+
+
+@app.post("/api/v1/admin/parceiros/{parceiro_id}/suspender")
+def admin_suspender_parceiro(parceiro_id: str, body: SituacaoDoParceiro,
+                             authorization: str | None = Header(default=None)):
+    """Fecha o acesso na hora, sem apagar nada.
+
+    As parcerias continuam vivas de propósito: o percentual dele sobre o
+    que já foi recebido não deixa de existir porque o acesso fechou. Se
+    a intenção for encerrar a parceria, isso é outro ato."""
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    p = (db.table("parceiros").select("nome").eq("id", parceiro_id)
+         .maybe_single().execute().data)
+    if not p:
+        raise HTTPException(404, "Parceiro não encontrado.")
+    db.table("parceiros").update({
+        "status": "SUSPENSO", "atualizado_em": _dt_agora(),
+        "observacao": (body.motivo or "").strip() or None,
+    }).eq("id", parceiro_id).execute()
+    _anotar_acesso(_quem_e(perfil), "SUSPENDEU_PARCEIRO", "PARCEIRO",
+                   parceiro_id, p.get("nome"), {"motivo": body.motivo})
+    return {"ok": True, "status": "SUSPENSO"}
+
+
+@app.post("/api/v1/admin/parceiros/{parceiro_id}/reativar")
+def admin_reativar_parceiro(parceiro_id: str,
+                            authorization: str | None = Header(default=None)):
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    p = (db.table("parceiros").select("nome").eq("id", parceiro_id)
+         .maybe_single().execute().data)
+    if not p:
+        raise HTTPException(404, "Parceiro não encontrado.")
+    db.table("parceiros").update({
+        "status": "ATIVO", "atualizado_em": _dt_agora(),
+    }).eq("id", parceiro_id).execute()
+    _anotar_acesso(_quem_e(perfil), "REATIVOU_PARCEIRO", "PARCEIRO",
+                   parceiro_id, p.get("nome"))
+    return {"ok": True, "status": "ATIVO"}
+
+
+class PermissoesDoParceiro(BaseModel):
+    pode_usar_ia: bool | None = None
+    pode_falar_com_cliente: bool | None = None
+
+
+@app.post("/api/v1/admin/parceiros/{parceiro_id}/permissoes")
+def admin_permissoes_parceiro(parceiro_id: str, body: PermissoesDoParceiro,
+                              authorization: str | None = Header(default=None)):
+    """As duas chaves que nascem desligadas.
+
+    Ligar o uso da IA gasta a conta do escritório e põe o timbre dele na
+    peça. Ligar a fala com o cliente faz a mensagem do parceiro chegar
+    como se viesse da casa. Nenhuma das duas é decisão de operador."""
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    p = (db.table("parceiros").select("nome,pode_usar_ia,pode_falar_com_cliente")
+         .eq("id", parceiro_id).maybe_single().execute().data)
+    if not p:
+        raise HTTPException(404, "Parceiro não encontrado.")
+    campos: dict = {"permissoes_em": _dt_agora(),
+                    "permissoes_por": _quem_e(perfil),
+                    "atualizado_em": _dt_agora()}
+    if body.pode_usar_ia is not None:
+        campos["pode_usar_ia"] = bool(body.pode_usar_ia)
+    if body.pode_falar_com_cliente is not None:
+        campos["pode_falar_com_cliente"] = bool(body.pode_falar_com_cliente)
+    db.table("parceiros").update(campos).eq("id", parceiro_id).execute()
+    _anotar_acesso(_quem_e(perfil), "MUDOU_PERMISSOES_PARCEIRO", "PARCEIRO",
+                   parceiro_id, p.get("nome"),
+                   {"antes": {"ia": p.get("pode_usar_ia"),
+                              "cliente": p.get("pode_falar_com_cliente")},
+                    "depois": {k: v for k, v in campos.items()
+                               if k.startswith("pode_")}})
+    return {"ok": True}
+
+
+# ── AS PARCERIAS: QUE CASO, QUE PERCENTUAL ──────────────────────
+
+class NovaParceria(BaseModel):
+    caso_id: str
+    parceiro_id: str
+    percentual: float
+    papel: str | None = None
+    inclui_sucumbencia: bool = True
+    observacao: str = ""
+
+
+@app.post("/api/v1/admin/parcerias")
+def admin_criar_parceria(body: NovaParceria,
+                         authorization: str | None = Header(default=None)):
+    """Vincula o parceiro ao caso — e já nasce aprovada.
+
+    Quando é o ESCRITÓRIO que cria, não há o que aprovar depois: quem
+    decide o percentual acabou de decidi-lo. A aprovação em separado
+    existe para o caminho inverso, quando o parceiro propõe ao trazer
+    uma causa."""
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    if not (0 < float(body.percentual) <= 100):
+        raise HTTPException(400, "O percentual precisa ficar entre 0 e 100.")
+
+    caso = (db.table("casos").select("id,titulo").eq("id", body.caso_id)
+            .maybe_single().execute().data)
+    if not caso:
+        raise HTTPException(404, "Caso não encontrado.")
+    p = (db.table("parceiros").select("id,nome,status").eq("id", body.parceiro_id)
+         .maybe_single().execute().data)
+    if not p:
+        raise HTTPException(404, "Parceiro não encontrado.")
+
+    # Parceria viva já existente: o índice único do banco recusaria, mas
+    # com uma mensagem que ninguém entende. Melhor dizer o que é.
+    viva = (db.table("parcerias").select("id,percentual")
+            .eq("caso_id", body.caso_id).eq("parceiro_id", body.parceiro_id)
+            .is_("encerrada_em", "null").limit(1).execute().data or [None])[0]
+    if viva:
+        raise HTTPException(
+            409, f"{p.get('nome')} já é parceiro neste caso, com "
+                 f"{viva.get('percentual')}%. Encerre a parceria atual antes "
+                 f"de criar outra com percentual diferente.")
+
+    nova = db.table("parcerias").insert({
+        "caso_id": body.caso_id, "parceiro_id": body.parceiro_id,
+        "percentual": float(body.percentual),
+        "base_calculo": "BRUTO",
+        "inclui_sucumbencia": bool(body.inclui_sucumbencia),
+        "papel": (body.papel or "").strip() or None,
+        "proposto_por": "ESCRITORIO",
+        "aprovada_em": _dt_agora(), "aprovada_por": _quem_e(perfil),
+        "observacao": (body.observacao or "").strip() or None,
+    }).execute().data[0]
+
+    _anotar_acesso(_quem_e(perfil), "CRIOU_PARCERIA", "CASO",
+                   body.caso_id, caso.get("titulo"),
+                   {"parceiro": p.get("nome"), "percentual": body.percentual})
+    registrar_evento(body.caso_id, "PARCERIA_CRIADA",
+                     {"parceiro": p.get("nome"), "percentual": body.percentual,
+                      "por": _quem_e(perfil)})
+    return {"ok": True, "parceria_id": nova["id"]}
+
+
+@app.post("/api/v1/admin/parcerias/{parceria_id}/aprovar")
+def admin_aprovar_parceria(parceria_id: str, percentual: float | None = None,
+                           authorization: str | None = Header(default=None)):
+    """Confirma — ou corrige — o percentual que o parceiro propôs.
+
+    O percentual proposto por ele não vale até passar por aqui. Poder
+    corrigir no mesmo ato evita o vaivém de recusar para ele propor de
+    novo: o escritório fecha o número que combinou."""
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    pa = (db.table("parcerias").select("*").eq("id", parceria_id)
+          .maybe_single().execute().data)
+    if not pa:
+        raise HTTPException(404, "Parceria não encontrada.")
+    campos = {"aprovada_em": _dt_agora(), "aprovada_por": _quem_e(perfil)}
+    if percentual is not None:
+        if not (0 < float(percentual) <= 100):
+            raise HTTPException(400, "O percentual precisa ficar entre 0 e 100.")
+        campos["percentual"] = float(percentual)
+    db.table("parcerias").update(campos).eq("id", parceria_id).execute()
+    _anotar_acesso(_quem_e(perfil), "APROVOU_PARCERIA", "CASO",
+                   pa["caso_id"], None,
+                   {"parceiro_id": pa["parceiro_id"],
+                    "percentual": campos.get("percentual", pa.get("percentual"))})
+    registrar_evento(pa["caso_id"], "PARCERIA_APROVADA",
+                     {"percentual": campos.get("percentual", pa.get("percentual")),
+                      "por": _quem_e(perfil)})
+    return {"ok": True}
+
+
+@app.post("/api/v1/admin/parcerias/{parceria_id}/encerrar")
+def admin_encerrar_parceria(parceria_id: str, body: SituacaoDoParceiro,
+                            authorization: str | None = Header(default=None)):
+    """Fecha o acesso àquele caso, e preserva o que já foi devido.
+
+    A linha não é apagada: o percentual continua valendo para o que foi
+    recebido enquanto a parceria existia. Apagar seria perder a base do
+    acerto que ainda não foi pago."""
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    pa = (db.table("parcerias").select("*").eq("id", parceria_id)
+          .maybe_single().execute().data)
+    if not pa:
+        raise HTTPException(404, "Parceria não encontrada.")
+    db.table("parcerias").update({
+        "encerrada_em": _dt_agora(),
+        "observacao": (body.motivo or "").strip() or pa.get("observacao"),
+    }).eq("id", parceria_id).execute()
+    _anotar_acesso(_quem_e(perfil), "ENCERROU_PARCERIA", "CASO",
+                   pa["caso_id"], None,
+                   {"parceiro_id": pa["parceiro_id"], "motivo": body.motivo})
+    registrar_evento(pa["caso_id"], "PARCERIA_ENCERRADA",
+                     {"por": _quem_e(perfil), "motivo": body.motivo})
+    return {"ok": True}
+
+
+@app.get("/api/v1/admin/parcerias")
+def admin_listar_parcerias(caso_id: str | None = None,
+                           parceiro_id: str | None = None,
+                           authorization: str | None = Header(default=None)):
+    _perfil_do_token(authorization)
+    db = get_db()
+    q = db.table("parcerias").select("*").is_("encerrada_em", "null")
+    if caso_id:
+        q = q.eq("caso_id", caso_id)
+    if parceiro_id:
+        q = q.eq("parceiro_id", parceiro_id)
+    linhas = q.order("criado_em", desc=True).execute().data or []
+
+    nomes, titulos = {}, {}
+    if linhas:
+        for x in (db.table("parceiros").select("id,nome,oab_numero,oab_uf")
+                  .in_("id", list({l["parceiro_id"] for l in linhas}))
+                  .execute().data or []):
+            nomes[x["id"]] = x
+        for c in (db.table("casos").select("id,titulo,numero_atendimento")
+                  .in_("id", list({l["caso_id"] for l in linhas}))
+                  .execute().data or []):
+            titulos[c["id"]] = c
+    for l in linhas:
+        l["parceiro"] = nomes.get(l["parceiro_id"], {})
+        l["caso"] = titulos.get(l["caso_id"], {})
+    return linhas
+
+
+# ── LIBERAR OU BLOQUEAR UM CASO PARA ALGUÉM ─────────────────────
+
+class RegraDeAcesso(BaseModel):
+    caso_id: str
+    perfil_id: str | None = None
+    parceiro_id: str | None = None
+    efeito: str                      # LIBERAR | BLOQUEAR
+    motivo: str = ""
+
+
+@app.post("/api/v1/admin/acessos")
+def admin_regra_de_acesso(body: RegraDeAcesso,
+                          authorization: str | None = Header(default=None)):
+    """Libera um caso a quem não o veria, ou esconde de quem o veria.
+
+    O bloqueio é o que não existia antes: membro da equipe vê tudo por
+    natureza do trabalho, e até aqui a única forma de impedir alguém de
+    ver uma causa era tirar a pessoa da equipe. Serve ao processo do
+    próprio sócio, à causa de um familiar, ao cliente que pediu reserva.
+    """
+    perfil = _perfil_do_token(authorization)
+    efeito = (body.efeito or "").upper()
+    if efeito not in ("LIBERAR", "BLOQUEAR"):
+        raise HTTPException(400, "O efeito é LIBERAR ou BLOQUEAR.")
+    if bool(body.perfil_id) == bool(body.parceiro_id):
+        raise HTTPException(
+            400, "Informe o membro da equipe OU o parceiro — um dos dois.")
+    db = get_db()
+    caso = (db.table("casos").select("id,titulo").eq("id", body.caso_id)
+            .maybe_single().execute().data)
+    if not caso:
+        raise HTTPException(404, "Caso não encontrado.")
+
+    # Regra igual já vigente não vira linha nova: duas iguais confundem
+    # quem lê o histórico e não mudam nada no resultado.
+    q = (db.table("acessos_por_caso").select("id")
+         .eq("caso_id", body.caso_id).eq("efeito", efeito)
+         .is_("revogado_em", "null"))
+    q = q.eq("perfil_id", body.perfil_id) if body.perfil_id \
+        else q.eq("parceiro_id", body.parceiro_id)
+    if (q.limit(1).execute().data or []):
+        return {"ok": True, "info": "Esta regra já estava valendo."}
+
+    db.table("acessos_por_caso").insert({
+        "caso_id": body.caso_id,
+        "perfil_id": body.perfil_id, "parceiro_id": body.parceiro_id,
+        "efeito": efeito, "motivo": (body.motivo or "").strip() or None,
+        "concedido_por": _quem_e(perfil),
+    }).execute()
+    _anotar_acesso(_quem_e(perfil),
+                   "LIBEROU_CASO" if efeito == "LIBERAR" else "BLOQUEOU_CASO",
+                   "CASO", body.caso_id, caso.get("titulo"),
+                   {"perfil_id": body.perfil_id,
+                    "parceiro_id": body.parceiro_id,
+                    "motivo": body.motivo})
+    return {"ok": True}
+
+
+@app.get("/api/v1/admin/acessos")
+def admin_listar_acessos(caso_id: str | None = None,
+                         authorization: str | None = Header(default=None)):
+    _perfil_do_token(authorization)
+    q = get_db().table("acessos_por_caso").select("*").is_("revogado_em", "null")
+    if caso_id:
+        q = q.eq("caso_id", caso_id)
+    return q.order("criado_em", desc=True).limit(200).execute().data or []
+
+
+@app.post("/api/v1/admin/acessos/{acesso_id}/revogar")
+def admin_revogar_acesso(acesso_id: str,
+                         authorization: str | None = Header(default=None)):
+    perfil = _perfil_do_token(authorization)
+    db = get_db()
+    a = (db.table("acessos_por_caso").select("*").eq("id", acesso_id)
+         .maybe_single().execute().data)
+    if not a:
+        raise HTTPException(404, "Regra não encontrada.")
+    db.table("acessos_por_caso").update({
+        "revogado_em": _dt_agora(), "revogado_por": _quem_e(perfil),
+    }).eq("id", acesso_id).execute()
+    _anotar_acesso(_quem_e(perfil), "REVOGOU_REGRA_DE_ACESSO", "CASO",
+                   a["caso_id"], None, {"efeito": a.get("efeito")})
+    return {"ok": True}
+
+
+@app.get("/api/v1/admin/registro")
+def admin_registro_de_acessos(limite: int = 100,
+                              authorization: str | None = Header(default=None)):
+    """Quem concedeu o quê, e quando. É o que uma auditoria pergunta."""
+    _perfil_do_token(authorization)
+    return (get_db().table("registro_de_acessos").select("*")
+            .order("quando", desc=True).limit(min(limite, 300))
+            .execute().data or [])
+
+
+# ── PASSAR A CHAVE DO ESCRITÓRIO ────────────────────────────────
+
+class MudancaDePapel(BaseModel):
+    papel: str                      # OPERADOR | ADMIN
+    confirmo: bool = False
+
+
+@app.post("/api/v1/equipe/perfis/{perfil_id}/papel")
+def mudar_papel_da_equipe(perfil_id: str, body: MudancaDePapel,
+                          authorization: str | None = Header(default=None)):
+    """Promove alguém a administrador, ou devolve a operador.
+
+    DUAS TRAVAS, E AS DUAS SÃO NECESSÁRIAS
+
+    A primeira: ninguém se rebaixa sozinho. Quem é o único administrador
+    e se rebaixa deixa o escritório sem dono — e sem ninguém que possa
+    desfazer o engano, porque desfazer exige ser administrador.
+
+    A segunda: não se remove o último. Mesmo sendo outro a fazê-lo, o
+    sistema não pode ficar sem quem conceda acesso.
+
+    `confirmo` existe porque promover a administrador dá a alguém o poder
+    de conceder acesso a qualquer caso — inclusive de tirar o seu. Um
+    clique distraído não deve bastar."""
+    perfil = _perfil_do_token(authorization)
+    papel = (body.papel or "").upper()
+    if papel not in ("OPERADOR", "ADMIN"):
+        raise HTTPException(400, "O papel é OPERADOR ou ADMIN.")
+    if papel == "ADMIN" and not body.confirmo:
+        raise HTTPException(
+            400, "Promover a administrador dá a esta pessoa o poder de "
+                 "conceder e retirar acesso de todos — inclusive o seu. "
+                 "Confirme para seguir.")
+    db = get_db()
+    alvo = (db.table("perfis").select("id,papel,nome,email").eq("id", perfil_id)
+            .maybe_single().execute().data)
+    if not alvo:
+        raise HTTPException(404, "Pessoa não encontrada.")
+
+    if papel == "OPERADOR" and (alvo.get("papel") == "ADMIN"):
+        if perfil_id == perfil.get("id"):
+            raise HTTPException(
+                400, "O senhor não pode retirar o próprio acesso de "
+                     "administrador. Peça a outro administrador.")
+        quantos = len((db.table("perfis").select("id").eq("papel", "ADMIN")
+                       .execute().data or []))
+        if quantos <= 1:
+            raise HTTPException(
+                400, "Este é o único administrador do escritório. Promova "
+                     "outra pessoa antes de rebaixar esta.")
+
+    db.table("perfis").update({"papel": papel}).eq("id", perfil_id).execute()
+    _anotar_acesso(_quem_e(perfil),
+                   "PROMOVEU_ADMIN" if papel == "ADMIN" else "REBAIXOU_PARA_OPERADOR",
+                   "PERFIL", perfil_id, alvo.get("nome") or alvo.get("email"),
+                   {"de": alvo.get("papel"), "para": papel})
+    return {"ok": True, "papel": papel}
+
+
 class QueroSerParceiro(BaseModel):
     nome: str
     cpf_cnpj: str

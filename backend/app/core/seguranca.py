@@ -287,9 +287,28 @@ _ENTRANDO = [re.compile(p) for p in DE_QUEM_ESTA_ENTRANDO]
 # Conceder acesso, retirar acesso e passar a chave do escritório a
 # outra pessoa. O operador trabalha; quem decide quem trabalha é o dono.
 SO_DO_ADMIN = [
-    r"^/api/v1/admin/acessos",
-    r"^/api/v1/admin/parceiros/[^/]+/(suspender|reativar|permissoes)$",
+    # Tudo que concede, retira ou mede acesso. Prefixo em vez de lista
+    # de verbos de propósito: rota nova sob /admin/parceiros ou
+    # /admin/parcerias nasce restrita ao administrador, e não aberta ao
+    # operador porque alguém esqueceu de acrescentá-la aqui.
+    r"^/api/v1/admin/(acessos|parceiros|parcerias|registro)",
+    # Vincular parceiro a caso É conceder acesso — por isso entra aqui,
+    # e não na lista do que o operador faz no dia a dia.
+    r"^/api/v1/equipe/perfis/[^/]+/(papel|nivel)$",
     r"^/api/v1/equipe/[^/]+/(promover|rebaixar|remover)$",
+
+    # CONVIDAR E DESLIGAR TAMBÉM SÃO ATOS DE ACESSO
+    #
+    # Estas estavam abertas ao operador, e a auditoria das rotas mostrou
+    # isso. Convidar alguém para a equipe é dar a essa pessoa a carteira
+    # inteira do escritório; desligar é tirá-la. Operador podia fazer as
+    # duas — inclusive desligar o próprio administrador.
+    #
+    # `niveis` (só lista os níveis que existem) e `registrar` (o próprio
+    # convidado concluindo o cadastro) continuam fora: um não concede
+    # nada, o outro é o fim de um convite que o administrador já deu.
+    r"^/api/v1/equipe/convites",
+    r"^/api/v1/equipe/membros/[^/]+/(desligar|reativar)$",
 ]
 _SO_ADMIN = [re.compile(p) for p in SO_DO_ADMIN]
 
